@@ -1,3 +1,4 @@
+# Create zip package of initial Pilomar installation.
 cd /home/pi
 rm pilomar.zip 
 zip pilomar.zip pilomar
@@ -10,8 +11,7 @@ zip pilomar.zip pilomar/data/messierobjects.json
 zip pilomar.zip pilomar/data/meteors.json
 zip pilomar.zip pilomar/scripts
 zip pilomar.zip pilomar/scripts/buildpilomar
-# zip pilomar.zip pilomar/scripts/isdirectory
-zip pilomar.zip pilomar/scripts/pilomar-zip
+zip pilomar.zip pilomar/scripts/zip-pilomar
 zip pilomar.zip pilomar/fonts
 zip pilomar.zip pilomar/fonts/Asap
 zip pilomar.zip pilomar/fonts/Asap/Asap-Regular.ttf
@@ -26,8 +26,6 @@ zip pilomar.zip pilomar/fonts/Asap/Asap-BoldItalic.ttf
 zip pilomar.zip pilomar/circuitpython
 zip pilomar.zip pilomar/circuitpython/code.py
 zip pilomar.zip pilomar/src
-# zip pilomar.zip pilomar/src/pilomar2.py
 zip pilomar.zip pilomar/src/pilomar.py
 zip pilomar.zip pilomar/src/textcolor.py
 zip pilomar.zip pilomar/src/pilomar
-# zip pilomar.zip pilomar/src/pilomar2
