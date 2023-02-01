@@ -1210,26 +1210,33 @@ class colordisplay():
             self.bgcolor.append([self.DefaultBGs[self.BGColorIndex] for c in range(self.DisplayColumns)])
         if immediate: self.Display(immediate=immediate)
 
-    def Print(self,*args,immediate=False):
+    def Print(self,*args,fg=None,bg=None,immediate=False):
         """ Simple scrolling print function. 
             Appends text to bottom of window display and scrolls up as required.
             This allows the retirement of the messagewindow class. 
             immediate=True: Display is immediately refreshed. 
-            immediate=False: Display needs to be refreshed elsewhere. """
+            immediate=False: Display needs to be refreshed elsewhere.
+            if fg or bg colors are specified, they override the default color scheme of the display. """
         text = '' # Constructed line of text to display.
         for i in args: # Concatenate all the elements into a single text line.
             if len(text) > 0: text += ' ' # Default to space between each element.
             text += str(i) # All elements must be str type.
         while len(text) > 0: # Display text, allowing wraparound onto multiple lines.
-            if len(text) > self.DisplayColumns: 
-                print_text = text[:self.DisplayColumns]
-                text = text[self.DisplayColumns:]
-            else:
-                print_text = text
-                text = ''
+            if len(text) > self.DisplayColumns: # Too much text to fit on one line.
+                print_text = text[:self.DisplayColumns] # Print 1 line's worth of text.
+                text = text[self.DisplayColumns:] # Save the rest for the following line(s).
+            else: # Remaining text fits on a single line.
+                print_text = text # Print what's left.
+                text = '' # Nothing else to print after this.
             self.ScrollUp() # No need to pass 'immediate' parameter, it's handled below.
             for i in range(len(print_text)):
                 self.character[self.DisplayRows - 1][i] = print_text[i]
+            if fg != None: # fg color specified.
+                for i in range(self.DisplayColumns):
+                    self.fgcolor[self.DisplayRows - 1][i] = fg
+            if bg != None: # bg color specified.
+                for i in range(self.DisplayColumns):
+                    self.bgcolor[self.DisplayRows - 1][i] = bg
         if immediate: self.Display(immediate=immediate) # Update the display immediately.
         self.FGColorIndex = (self.FGColorIndex + 1) % self.FGColorCount # If multiple colors supported, then move on to next available color.
         self.BGColorIndex = (self.BGColorIndex + 1) % self.BGColorCount
