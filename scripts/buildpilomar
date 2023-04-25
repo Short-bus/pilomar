@@ -195,7 +195,13 @@ sudo apt-get -y install libatlas-base-dev
 
 echo -e "==========================================================="
 echo $(date) PiDNG raw extraction - YES >>$pilomarhome/log/buildpilomar
-python3 -mpip install PiDNG 
+# python3 -mpip install PiDNG 
+# Versions from 4.0 onwards are not backwards compatible for handling theoriginal JPG+RAW file format. Stick with earlier version from PyPi
+python3 -mpip install PiDNG==3.4.6
+# The above warns that it's a yanked version, but it's the only one available that is backwards compatible with older RPi builds.
+# The above updates numpy to 1.21.66, replacing 1.16.2 already in place?
+# The above installs ExifRead 3.2.3
+# Successfully installed PiDNG-3.4.6 exifread-2.3.2 numpy-1.21.6
 
 echo
 echo -e "==========================================================="
@@ -204,11 +210,12 @@ echo $(date) OPENCV for python 3.x - YES >>$pilomarhome/log/buildpilomar
 echo $(date) apt-get install python3-opencv>>$pilomarhome/log/buildpilomar
 sudo apt-get -y install python3-opencv
 
-echo -e "==========================================================="
-echo -e "\E[36;40mSupport for Astropy (Python3 - pip)...\E[0m"
-echo pip3 install Astropy
-echo $(date) pip3 install astropy>>$pilomarhome/log/buildpilomar
-sudo pip3 install astropy 
+# For FITS file support use Astropy.
+# echo -e "==========================================================="
+# echo -e "\E[36;40mSupport for Astropy (Python3 - pip)...\E[0m"
+# echo pip3 install Astropy
+# echo $(date) pip3 install astropy>>$pilomarhome/log/buildpilomar
+# sudo pip3 install astropy 
 
 
 echo
