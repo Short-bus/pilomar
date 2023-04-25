@@ -1,4 +1,3 @@
-# Create zip package of initial Pilomar installation.
 cd /home/pi
 rm pilomar.zip 
 zip pilomar.zip pilomar
