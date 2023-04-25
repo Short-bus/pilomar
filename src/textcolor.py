@@ -17,6 +17,7 @@ import subprocess
 import curses # For non-blocking keyboard scan.
 from datetime import datetime
 import traceback # For exception handling in menu.
+import json # To dump dictionaries for export.
 
 class keyboardscanner():
     """ Use curses library to scan the keyboard (non-blocking).
@@ -44,7 +45,20 @@ class keyboardscanner():
 # ------------------------------------------------------------------------------------------------
 
 class textcolor:
+    """ Class with lots of static methods to help with writing to terminals with position and formatting. 
+        This is primarily designed to work under puTTY remote terminal connections.
+        Behaviour is different under a command line window opened from the desktop.
+        
+        You don't need to create an instance, it's OK to use textcolor.method() calls directly in your
+        code.
+                from textcolor import textcolor
+                textcolor.clearscreen() 
+                print(textcolor.red('Hello'))
+                
+        It includes various constants such as names of colors.
+        It also makes some unicode symbols available via a dictionary so you can refer to them by name. """
 
+    __version__ = '0.0.3'
     TermType = None
     Mode = 'putty' # 'putty' = full colour remote terminal, 'simple' = No colour, 'local' = Direct connection colour.
     # Some standard color names (XTERM names & a couple of common aliases).
@@ -208,7 +222,7 @@ class textcolor:
     DARKSEAGREEN2 = 157
     DARKSEAGREEN1 = 158
     PALETURQUOISE1 = 159
-    RED3 = 160
+    RED3A = 160
     DEEPPINK3 = 161
     DEEPPINK3A = 162
     MAGENTA3 = 163
@@ -304,36 +318,121 @@ class textcolor:
     GREY85 = 253
     GREY89 = 254
     GREY93 = 255
-    __version__ = '0.0.1'
-    
+    SYMBOLS = {'left' : '\u2190', 'right' : '\u2192', 'up' : '\u2191', 'down' : '\u2193', 
+               'degree' : '\u00B0', 'delta' : '\u0394', 
+               'horizontal' : '\u2500', 'vertical' : '\u2502', 'corner_tl' : '\u250c', 'corner_tr' : '\u2510', 'corner_bl' : '\u2514', 'corner_br' : '\u2518', 'crossover' : '\u253c',
+               'left_junction' : '\u2524', 'right_junction' : '\u251c', 'top_junction' : '\u2534', 'bottom_junction' : '\u252c',
+               'sun' : '\u2609', 'moon' : '\u263D', 'mercury' : '\u263F', 'venus' : '\u2640', 'earth' : '\u2641', 'mars' : '\u2642', 'jupiter' : '\u2643', 'saturn' : '\u2644', 'uranus' : '\u2645', 'neptune' : '\u2646', 'pluto' : '\u2647', 'comet' : '\u2604', 'star' : '\u2736'
+              }
 
     @staticmethod
-    def neatprint(*args):
-        """ Own 'print' function. Formats neatly in early Python versions and allows
-            general suppression / redirection of output when this runs headlessly. """
-        if True: # Output to terminal/stdout.
-            line = ''
-            for a in args:
-                if type(a) != type(str):
-                    a = str(a)
-                if len(line) > 0: line += ' '
-                line += a
-            print (line)
-        else: # Suppress output.
-            pass
+    def TextBox(linelist,row=None,col=None,fg=None,bg=None,textfg=None,textbg=None,borderfg=None,borderbg=None):
+        """ Receive a single string or list of strings.
+            Embedded newline characters will also split the text into separate lines within the bounding box.
+            Make all lines the same length, surrounded with a box using line drawing characters.
+            Print the resulting text box. 
+            - row/col specify the location of the top-left corner of the box.
+            Colors are applied if specified. 
+            - fg/bg applies to text and border. 
+            - textfg/textbg applies to text only. 
+            - borderfg/borderbg applies to border only. """
+        if type(linelist) != type([]): linelist = [linelist] # Convert single values to list for simpler processing.
+        # Convert embedded newline characters into separate list elements.
+        templinelist = []
+        for line in linelist: # Read all the input lines.
+            for newline in line.split('\n'): # Break on newline character.
+                templinelist.append(newline)
+        linelist = templinelist
+        if textfg == None: textfg = fg # Use same color scheme for text and border.
+        if textbg == None: textbg = bg # Use same color scheme for text and border.
+        if borderfg == None: borderfg = fg # Use same color scheme for text and border.
+        if borderbg == None: borderbg = bg # Use same color scheme for text and border.
+        maxlen = 0
+        for line in linelist: maxlen = max(maxlen,len(line)) # What's the longest line?
+        lines = [line.ljust(maxlen) for line in linelist] # Make all lines the same length.
+        printlines = [] # List of color constructed lines to print.
+        # 1: Construct top of box.
+        if borderfg != None and borderbg != None: # Border color is specified.
+            temp = textcolor.fgbgcolor(borderfg,borderbg,textcolor.SYMBOLS['corner_tl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_tr'])
+            printlines.append(temp)
+        else: # No colors specified.
+            temp = textcolor.SYMBOLS['corner_tl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_tr']
+            printlines.append(temp)
+        # 2: Construct text lines and box edges.
+        for line in lines:
+            temp = ''
+            # Vertical edge on left. Color if needed.
+            if borderfg != None and borderbg != None: # Border color is specified.
+                temp += textcolor.fgbgcolor(borderfg,borderbg,textcolor.SYMBOLS['vertical'])
+            else: temp += textcolor.SYMBOLS['vertical']
+            # Text inside box. Color if needed.
+            if textfg != None and textbg != None: # Text color is specified.
+                temp += textcolor.fgbgcolor(textfg,textbg,line)
+            else: temp += line
+            # Vertical edge on right. Color if needed.
+            if borderfg != None and borderbg != None: # Border color is specified.
+                temp += textcolor.fgbgcolor(borderfg,borderbg,textcolor.SYMBOLS['vertical'])
+            else: temp += textcolor.SYMBOLS['vertical']
+            printlines.append(temp)
+        # 3: Construct bottom of box.
+        if borderfg != None and borderbg != None: # Border color is specified.
+            temp = textcolor.fgbgcolor(borderfg,borderbg,textcolor.SYMBOLS['corner_bl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_br'])
+            printlines.append(temp)
+        else: # No colors specified.
+            temp = textcolor.SYMBOLS['corner_bl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_br']
+            printlines.append(temp)
+        for i,line in enumerate(printlines): # Now display the whole box.
+            if row != None and col != None: line = textcolor.cursor(col=col,row=row + i) + line # Add screen location (row and column).
+            elif col != None: line = textcolor.cursorright(cols=col) + line # Add screen location (column only).
+            print(line)
+
+    @staticmethod
+    def ListSymbols():
+        for key,value in textcolor.SYMBOLS.items():
+            print (key, value)
         
     @staticmethod
     def safetype(raw):
-        return str(raw)
+        if type(raw) != type(str): raw = str(raw)
+        return raw     
+
+    @staticmethod
+    def listtotext(arglist,sep=' '):
+        """ Given a list of arguments, append all of them into a single string.
+            This behaves like the 'print' command for stringing together a list of items
+            into a single string. All arguments are converted to 'str' type before adding
+            to the output string. 
+            sep parameter says what separator is inserted between each element. (default ' ') """
+        result = ''
+        for a in arglist:
+            if a != '':
+                if result != '': result += sep
+                result += str(a)
+        return result
+
+    @staticmethod
+    def neatprint(*args,**kwargs):
+        """ Own 'print' function. 
+            Formats neatly in early Python versions. """
+        if True: # Output to terminal/stdout.
+            line = ''
+            for a in args:
+                a = textcolor.safetype(a)
+                if len(line) > 0: line += ' '
+                line += a
+            print(line)
+        else: # Suppress output.
+            pass
 
     @staticmethod
     def getterminalsize(): # Common
         """ Return tuple of the current screen dimensions. 
               (cols,rows) """
+        print('textcolor.getterminalsize() is deprecated in favour of textcolor.terminalsize()')
         cols = 80
         rows = 24
-        cols = int(osCmd('tput cols')[0])
-        rows = int(osCmd('tput lines')[0])
+        cols = int(textcolor.oscommand('tput cols')[0])
+        rows = int(textcolor.oscommand('tput lines')[0])
         return (cols,rows)
 
     @staticmethod
@@ -445,20 +544,20 @@ class textcolor:
         return "\033[0m" + text
 
     @staticmethod
-    def color(value=7,text=""):
+    def color(value=7,text=''):
         """ 256 colour mode supported. """
         if textcolor.Mode == 'simple':
             return text
         else:
-            return "\033[38;5;" + str(value) + "m" + textcolor.safetype(text) + textcolor.reset()
+            return "\033[38;5;" + str(value) + "m" + text + textcolor.reset()
 
     @staticmethod
-    def bgcolor(value=0,text=""):
+    def bgcolor(value=0,text=''):
         """ 256 colour mode supported."""
         if textcolor.Mode == 'simple':
             return text
         else:
-            return "\033[48;5;" + str(value) + "m" + textcolor.safetype(text) + textcolor.reset()
+            return "\033[48;5;" + str(value) + "m" + text + textcolor.reset()
 
     @staticmethod
     def rgbdecimal(r,g,b):
@@ -474,15 +573,36 @@ class textcolor:
         return v
 
     @staticmethod
-    def fgbgcolor(fg=7,bg=0,text="",reset=True):
-        """ 256 colour mode supported. """
+    def fgbgcolorxxx(fg=7,bg=0,text='',reset=True):
+        """ 256 colour mode supported. 
+            if reset=True, the color is stopped at the end of the text. 
+            if reset=False, the color setting remains active after the text. """
+        print ('fgbgcolorxxx is a depricated version of fgbgcolor()')
         if textcolor.Mode == 'simple':
             return text
         else:
             if reset: 
-                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + textcolor.safetype(text) + textcolor.reset() # Stop using this color after the text.
+                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text + textcolor.reset() # Stop using this color after the text.
             else:
-                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + textcolor.safetype(text) # Leave the color active.
+                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text # Leave the color active.
+
+    @staticmethod
+    def fgbgcolor(fg=7,bg=0,*args,sep=' ',reset=True):
+        """ 256 colour mode supported. 
+            fg = foreground color (0-255)
+            bg = background color (0-255)
+            args = unlimited comma separated list of items to print.
+            sep = ' ' separator placed between each argument when printed.
+            if reset=True, the color is stopped at the end of the text. 
+            if reset=False, the color setting remains active after the text. """
+        text = textcolor.listtotext(args,sep=sep)
+        if textcolor.Mode == 'simple':
+            return text
+        else:
+            if reset: 
+                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text + textcolor.reset() # Stop using this color after the text.
+            else:
+                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text # Leave the color active.
 
     @staticmethod
     def listcolors():
@@ -510,117 +630,144 @@ class textcolor:
         print (textcolor.aqua('AQUA'))
         print (textcolor.white('WHITE'))
         print (textcolor.magenta('MAGENTA'))
+        print ("termtype",textcolor.TermType())
 
     @staticmethod
-    def black(text="", invert=False):
+    def black(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.WHITE,textcolor.BLACK,text)
         else:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.WHITE,text)
 
     @staticmethod
-    def red(text="",invert=False):
+    def red(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.RED,text)
         else:
             return textcolor.fgbgcolor(textcolor.RED,textcolor.BLACK,text)
 
     @staticmethod
-    def green(text="",invert=False):
+    def green(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.GREEN,text)
         else:
             return textcolor.fgbgcolor(textcolor.GREEN,textcolor.BLACK,text)
 
     @staticmethod
-    def yellow(text="",invert=False):
+    def yellowxxx(text="",invert=False):
+        print('yellowxxx is a depricated version of yellow()')
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.YELLOW,text)
         else:
             return textcolor.fgbgcolor(textcolor.YELLOW,textcolor.BLACK,text)
 
     @staticmethod
-    def yellow4(text="",invert=False):
+    def yellow(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
+        if invert:
+            return textcolor.fgbgcolor(textcolor.BLACK,textcolor.YELLOW,text)
+        else:
+            return textcolor.fgbgcolor(textcolor.YELLOW,textcolor.BLACK,text)
+
+    @staticmethod
+    def yellow4(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.YELLOW4,text)
         else:
             return textcolor.fgbgcolor(textcolor.YELLOW4,textcolor.BLACK,text)
 
     @staticmethod
-    def orange(text="",invert=False):
+    def orange(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.ORANGE1,text)
         else:
             return textcolor.fgbgcolor(textcolor.ORANGE1,textcolor.BLACK,text)
 
     @staticmethod
-    def blue(text="",invert=False):
+    def blue(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.BLUE,text)
         else:
             return textcolor.fgbgcolor(textcolor.BLUE,textcolor.BLACK,text)
 
     @staticmethod
-    def magenta(text="",invert=False):
+    def magenta(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.MAGENTA,text)
         else:
             return textcolor.fgbgcolor(textcolor.MAGENTA,textcolor.BLACK,text)
 
     @staticmethod
-    def cyan(text="",invert=False):
+    def cyan(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.CYAN,text)
         else:
             return textcolor.fgbgcolor(textcolor.CYAN,textcolor.BLACK,text)
 
     @staticmethod
-    def aqua(text="",invert=False):
+    def aqua(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.AQUA,text)
         else:
             return textcolor.fgbgcolor(textcolor.AQUA,textcolor.BLACK,text)
 
     @staticmethod
-    def navy(text="",invert=False):
+    def navy(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.NAVY,text)
         else:
             return textcolor.fgbgcolor(textcolor.NAVY,textcolor.BLACK,text)
 
     @staticmethod
-    def teal(text="",invert=False):
+    def teal(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.TEAL,text)
         else:
             return textcolor.fgbgcolor(textcolor.TEAL,textcolor.BLACK,text)
 
     @staticmethod
-    def white(text="",invert=False):
+    def white(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
         if invert:
             return textcolor.fgbgcolor(textcolor.BLACK,textcolor.WHITE,text)
         else:
             return textcolor.fgbgcolor(textcolor.WHITE,textcolor.BLACK,text)
 
     @staticmethod
-    def bold(text=""):
-        return "\033[1m" + textcolor.safetype(text) + textcolor.reset()
+    def bold(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
+        return "\033[1m" + text + textcolor.reset()
 
     @staticmethod
-    def underline(text=""):
-        return "\033[4m" + textcolor.safetype(text) + textcolor.reset()
+    def underline(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
+        return "\033[4m" + text + textcolor.reset()
 
     @staticmethod
-    def blink(text=""):
-        return "\033[5m" + textcolor.safetype(text) + textcolor.reset()
+    def blink(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
+        return "\033[5m" + text + textcolor.reset()
 
     @staticmethod
-    def framed(text=""):
-        return "\033[51m" + textcolor.safetype(text) + textcolor.reset()
+    def framed(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args,sep=sep)
+        return "\033[51m" + text + textcolor.reset()
 
     @staticmethod
-    def reversed(text=""):
-        return "\033[7m" + textcolor.safetype(text) + textcolor.reset()
+    def reversed(*args,sep=' ',invert=False):
+        text = textcolor.listtotext(args)
+        return "\033[7m" + text + textcolor.reset()
 
 # ------------------------------------------------------------------------------------------------
 
@@ -643,17 +790,19 @@ class cdsprite():
 
     def ColoredSymbol(self):
         """ Return symbol with embedded terminal colour codes set. """
-        result = result = textcolor.fgbgcolor(fg=self.fg,bg=self.bg,text=self.symbol)
+        result = result = textcolor.fgbgcolor(self.fg,self.bg,self.symbol)
         return result
         
     def Label(self,color=False):
         """ Return colour coded label for the sprite. 
             Used in the key to a display.
             color=False means color is not set, plaintext is returned instead. """
-        if color: result = textcolor.fgbgcolor(fg=self.fg,bg=self.bg,text=self.symbol)
+        if color: result = textcolor.fgbgcolor(self.fg,self.bg,self.symbol)
         else: result = self.symbol
         result += ' = ' + self.name
         return result
+
+# -------------------------------------------------------------------------------------------------------------------------------- 
 
 class messagewindow():
     """ Class to create a simple scrolling text window and to display on the terminal as needed. 
@@ -753,14 +902,20 @@ class messagewindow():
                 else:
                     line = '' # Nothing left to display.
         while len(self.Lines) > self.DisplayRows:
-            temp = self.Lines.pop(0)
+            # temp = self.Lines.pop(0)
+            self.Lines.pop(0)
+
+# -------------------------------------------------------------------------------------------------------------------------------- 
 
 class field():
-    """ A data field in a colordisplay window. """
+    """ A data field in a colordisplay window.
+
+        Field can be regular data fields or progress bars. """
     
     __version__ = '0.0.1'
     
     def __init__(self,name,row,col,length=10,justify='l'):
+        """ justify = 'l' left, 'r' right. """
         # Common attributes
         self.Name = name
         self.Row = row
@@ -792,6 +947,8 @@ class field():
         else: sval = sval + jval
         return sval
 
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
 class colordisplay():
     """ Class to create a coloured character display buffer, and to display on the terminal as needed.
         Can operate as addressible screen space, or
@@ -799,13 +956,13 @@ class colordisplay():
         Supports sprites.
         Supports labelled data fields. """
     
-    __version__ = '0.0.2'
+    __version__ = '0.0.3'
     DefinedWindows = [] # Handles of all defined windows. Useful for scanning/updating all available windows.
                         # The defining class contains some methods which can perform general updates via this list.
     # TODO: Add support for 'resizing' a window. Esp for simple scrolling displays, allow size to change and remap existing text to fit.
     #       - Direct resizing, or maybe just cloning the stored information to a replacement window of new dimensions.
     
-    def __init__(self,rows,columns,row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None):
+    def __init__(self,rows,columns,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None):
         """ fg and bg parameters can be single integer value (0-255) or a list of values [(0-255),(0-255),..] 
             The Print() method will cycle through the colors if lists are given. 
             Other modes operate with just the first given fg and bg values, the rest of any lists are ignored. 
@@ -823,6 +980,9 @@ class colordisplay():
             After instantiation, you can also set self.ClipWindow = True to allow the window to truncate display if insufficient realestate available.
                Otherwise the entire window will be suppressed until the display is big enough to accomodate the entire window. """
         colordisplay.DefinedWindows.append(self) # Add this window to the global list of all windows.
+        self.DisplayName = name
+        if self.DisplayName == '':
+            self.DisplayName = "win_" + str(len(colordisplay.DefinedWindows)) # Generate a default name.
         self.DisplayRows = rows # How many rows deep is the display?
         self.DisplayColumns = columns # How many columns wide is the display?
         self.DisplayRow = row # What's the location of the 1st cell in the display on the actual terminal?
@@ -855,6 +1015,10 @@ class colordisplay():
         if self.TitleFG == None: self.TitleFG = self.DefaultBG # Default to inverse.
         self.TitleBG = titlebg
         if self.TitleBG == None: self.TitleBG = self.DefaultFG # Default to inverse.
+        self.BorderFG = borderfg
+        if self.BorderFG == None: self.BorderFG = self.DefaultFG
+        self.BorderBG = borderbg
+        if self.BorderBG == None: self.BorderBG = self.DefaultBG
         self.WindowTitle = title # Does the window have a title row?
         # Try more sophisticated display model that handles characters and colours more flexibly.
         self.fgcolor = [[self.DefaultFG for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Foreground colour of each character.
@@ -867,6 +1031,7 @@ class colordisplay():
         self.PrevLineStrings = [None for r in range(self.DisplayRows)] # List of the display commands last issued to paint the display. Used to check for changes.
         self.ReduceIO = False # If set to true, then the Display() method will only update lines of the display that it thinks have changed.
         self.sprites = []
+        self.PrintHistory = [] # Cache of recently printed lines, used for repainting and exporting.
         self.FirstScrollRow = FirstScrollRow # 0 means data starts at the first row of the window, 1 means there's a title or something in row 0, etc. Scrolling takes this into account.
         self.Log = None # Can store handle to a 'Log' method for logging messages. Needs to be defined and assigned by the calling program.
         self.RefreshRate = None # Can specify how quickly the display refreshes (in seconds).
@@ -877,6 +1042,9 @@ class colordisplay():
         self.MarkDisplay = False # If TRUE the corners are highlighted in RED, and the FIELDS are highlighted in YELLOW(for layout checking)
         self.SetTitle(self.WindowTitle)
         self.ClipWindow = False # If TRUE, the window can be clipped to fit available terminal display. This will simply truncate.
+        self.DrawBorder = False # If TRUE, an additional single line border is drawn on the RIGHT and BOTTOM of the window. Takes 1 extra character in each dimension.
+        self.BorderFG = self.DefaultFG
+        self.BorderBG = self.DefaultBG
 
     def __del__(self):
         """ Remove this window from the list of defined windows.
@@ -887,6 +1055,9 @@ class colordisplay():
                 break
 
     def SetTitle(self,title):
+        """ Turn first row of a window into a title row.
+            Color appropriately and change the scroll behaviour of the window.
+            1st line nolonger scrolls. """
         self.WindowTitle = title
         if self.WindowTitle != None: 
             temp = self.WindowTitle
@@ -906,9 +1077,7 @@ class colordisplay():
 
     def AddField(self,name,row,column,length=10,justify='l'):
         """ Add a field to the list of fields recognised in this window. 
-            Duplicates are allowed. If duplicates exist, they will all be maintained
-            by any actions. eg UOM or TIMEZONE fields could all have common fieldname
-            and be updated by a single update. """
+            Duplicates are allowed. """
         self.Fields.append(field(name=name,row=row,col=column,length=length,justify=justify))
         return True
 
@@ -916,14 +1085,13 @@ class colordisplay():
         """ Prime a field as a progress bar. """
         FoundIt = False
         for f in self.Fields:
-            if f.Name == name:
+            if f.Name == name: # Will initialize multiple fields with same name.
                 FoundIt = True
                 f.PBMin = minval
                 f.PBMax = maxval
                 f.Type = 'ProgressBar'
                 if fg != None: f.PBFG = fg # Set the 'DONE' color
                 if bg != None: f.PBBG = bg # Set the 'TODO' color
-                break
         return FoundIt
     
     def ScanForFields(self,startchar='[',endchar=']'):
@@ -966,14 +1134,27 @@ class colordisplay():
             if s in allowedchars: cinp += s
         finp = float(cinp)
         return finp
+
+    def ExportFields(self,filename,initialdictionary={}):
+        """ Export field values to json file.
+            Data is appended to any values already existing in initialdictionary. """
+        tempdict = initialdictionary
+        for field in self.Fields:
+            tempdict[self.DisplayName + "." + field.Name] = field.Value
+        tempdict[self.DisplayName + '.PrintHistory'] = self.PrintHistory
+        with open(filename,'w') as f:
+            json.dump(tempdict,f)
+        return True
         
     def FieldValue(self,name,value,fg=None,bg=None):
         """ Update the value of a field and display it. """
         FoundIt = False
         for f in self.Fields:
-            if f.Name == name:
+            if f.Name == name: # Will update multiple fields with the same name.
                 FoundIt = True
                 f.Value = value
+                if fg != None: f.FGColor = fg # Tell the field what color it is.
+                if bg != None: f.BGColor = bg # Tell the field what color it is.
                 sValue = f.Justified() # Make sure the value is a character string and correctly formatted.
                 if f.Type == "ProgressBar":
                     pval = float(max(min(self.GetFloatValue(value),f.PBMax),f.PBMin)) # Limit value to progress bar limits.
@@ -1037,8 +1218,10 @@ class colordisplay():
         if bg == None: bg = self.DefaultBG
         for f in self.Fields: # Find the field(s) by name.
             if f.Type in ['ProgressBar']: continue # ProgressBars select their color differently.
-            if f.Name == name: # This is it.
+            if f.Name == name: # Will update multiple fields with the same name.
                 FoundIt = True
+                if fg != None: f.FGColor = fg # Tell the field what color it is.
+                if bg != None: f.BGColor = bg # Tell the field what color it is.
                 for i in range(f.Length): # Color every character in the field.
                     self.fgcolor[f.Row][f.Column + i] = fg
                     self.bgcolor[f.Row][f.Column + i] = bg
@@ -1050,7 +1233,7 @@ class colordisplay():
         """ Set colour range for a field. """
         FoundIt = False # Not found the field yet.
         for f in self.Fields: # Search the field list.
-            if f.Name == name: # Found it.
+            if f.Name == name: # Will update multiple fields with the same name.
                 FoundIt = True # Found the field.
                 f.BadFG = badfg # Set the color values for each range.
                 f.BadBG = badbg
@@ -1063,7 +1246,7 @@ class colordisplay():
         FoundIt = False # Not found the field yet.
         for f in self.Fields: # Find the field in the field list.
             if f.Type in ['ProgressBar']: continue # ProgressBars select their color differently.
-            if f.Name == name:
+            if f.Name == name: # Will update multiple fields with the same name.
                 FoundIt = True # Found the field.
                 if f.Value <= lowlow or f.Value >= highhigh: # We have a LOW LOW or HIGH HIGH value, this is BAD.
                     fg = f.BadFG
@@ -1167,6 +1350,12 @@ class colordisplay():
             if s.name == name:
                 s.symbol = symbol
 
+    def SetBorderColors(self,borderfg,borderbg):
+        if borderfg == None: self.BorderFG = self.DefaultFG
+        else: self.BorderFG = borderfg
+        if borderbg == None: self.BorderBG = self.DefaultBG
+        else: self.BorderBG = borderbg
+
     def Clear(self,fg=None,bg=None,immediate=False):
         """ Clear the display buffer, setting all characters to back to their defaults.
             Default image can be updated using the SetDefault() method if needed.
@@ -1199,12 +1388,18 @@ class colordisplay():
         return fg, bg
 
     def ScrollUp(self,lines=1,immediate=False):
+        """ Scroll the display up by a number of lines. 
+            Drops lines at the top,
+            adds new blank lines at the bottom. """
         if lines < 1: lines = 1
         if lines > self.DisplayRows: lines = self.DisplayRows
         for i in range(lines):
-            temprow = self.character.pop(self.FirstScrollRow) # Remove entire 1st data row.
-            tempfg = self.fgcolor.pop(self.FirstScrollRow)
-            tempbg = self.bgcolor.pop(self.FirstScrollRow)
+            # temprow = self.character.pop(self.FirstScrollRow) # Remove entire 1st data row.
+            self.character.pop(self.FirstScrollRow) # Remove entire 1st data row.
+            #tempfg = self.fgcolor.pop(self.FirstScrollRow)
+            self.fgcolor.pop(self.FirstScrollRow)
+            #tempbg = self.bgcolor.pop(self.FirstScrollRow)
+            self.bgcolor.pop(self.FirstScrollRow)
             self.character.append([' ' for c in range(self.DisplayColumns)]) # Add empty row at end of window.
             self.fgcolor.append([self.DefaultFGs[self.FGColorIndex] for c in range(self.DisplayColumns)])
             self.bgcolor.append([self.DefaultBGs[self.BGColorIndex] for c in range(self.DisplayColumns)])
@@ -1221,6 +1416,9 @@ class colordisplay():
         for i in args: # Concatenate all the elements into a single text line.
             if len(text) > 0: text += ' ' # Default to space between each element.
             text += str(i) # All elements must be str type.
+        self.PrintHistory.append(text) # Retain recent lines printed. Can be exported, or used to repaint the display if resized.
+        while len(self.PrintHistory) > self.DisplayRows: # Drop unwanted lines.
+            self.PrintHistory.pop(0) # Drop the first line.
         while len(text) > 0: # Display text, allowing wraparound onto multiple lines.
             if len(text) > self.DisplayColumns: # Too much text to fit on one line.
                 print_text = text[:self.DisplayColumns] # Print 1 line's worth of text.
@@ -1229,21 +1427,26 @@ class colordisplay():
                 print_text = text # Print what's left.
                 text = '' # Nothing else to print after this.
             self.ScrollUp() # No need to pass 'immediate' parameter, it's handled below.
+            r = self.DisplayRows - 1
             for i in range(len(print_text)):
-                self.character[self.DisplayRows - 1][i] = print_text[i]
+                self.character[r][i] = print_text[i]
             if fg != None: # fg color specified.
                 for i in range(self.DisplayColumns):
-                    self.fgcolor[self.DisplayRows - 1][i] = fg
+                    self.fgcolor[r][i] = fg
             if bg != None: # bg color specified.
                 for i in range(self.DisplayColumns):
-                    self.bgcolor[self.DisplayRows - 1][i] = bg
+                    self.bgcolor[r][i] = bg
         if immediate: self.Display(immediate=immediate) # Update the display immediately.
         self.FGColorIndex = (self.FGColorIndex + 1) % self.FGColorCount # If multiple colors supported, then move on to next available color.
         self.BGColorIndex = (self.BGColorIndex + 1) % self.BGColorCount
         return True
 
     def PlaceString(self,text,row=None,col=None,fg=None,bg=None):
-        """ Place a string at any given location in the display buffer. """
+        """ Place a string at any given location in the display buffer. 
+            +ve co-ordinates are top-to-bottom, left-to-right
+            -ve co-ordinates are bottom-to-top, right-to-left """
+        if row < 0: row = self.DisplayRows + row # Allow -ve values to work up from the bottom of the window.
+        if col < 0: col = self.DisplayColumns + col # Allow -ve values to work left from the right of the window.
         if len(text) > 0 and row >= 0 and row < self.DisplayRows:
             for i in range(len(text)):
                 c = col + i # Place in the correct column.
@@ -1256,14 +1459,16 @@ class colordisplay():
 
     def Draw(self,screenheight=None,screenwidth=None,immediate=False):
         """ Alias for Display() method. For backwards compatibility. """
+        print ("***** colordisplay.Draw() method called. Depricated. Use colordisplay.Display() method instead.")
         self.Display(screenheight=screenheight,screenwidth=screenwidth,immediate=immediate)
 
     def _MarkDisplay(self):
         """ Quickly highlights window dimensions and fields.
-            Helps when defining displays in new applications. """
+            Helps when defining displays in new applications.
+            Debug/Dev only. """
         # Mark all the fields clearly.
         for key,value in self.ListFields.items():
-            self.FieldColor(key,fg=textcolor.BLACK,bg=fields)
+            self.FieldColor(key,fg=textcolor.BLACK,bg=textcolor.CYAN)
         # Mark all the corners clearly.
         for c in range(self.DisplayColumns):
             self.fgcolor[0][c] = textcolor.BLACK
@@ -1296,6 +1501,59 @@ class colordisplay():
                 targetbuffer.fgcolor[rt][ct] = self.fgcolor[r][c] # Current foreground color of the chosen character.
                 targetbuffer.bgcolor[rt][ct] = self.bgcolor[r][c] # Current background color of the chosen character.
         return True
+
+    def ForceRedraw(self):
+        """ Flushes old values from self.PrevLineStrings[] forcing a full refresh.
+            Normally when calling the Display() method, only changes are sent to the terminal window.
+            If you ForceRedraw() then the whole window is sent fresh. """
+        self.PrevLineStrings = [' ' for i in self.PrevLineStrings]
+    
+    @staticmethod
+    def GlobalForceRedraw(): # Common
+        """ Flushes old values from self.PrevLineStrings[] forcing a full refresh in all registered windows. """
+        for w in colordisplay.DefinedWindows:
+            try:
+                w.ForceRedraw()
+            except:
+                pass # Window nonlonger exists.
+
+    def GetTextLines(self):
+        """ Returns the display layout as a list of strings.
+            No color or cursor codes are included, just the basic monotone display text.
+            Sprites are shown in their latest position too. """
+        linelist = []
+        for r in range(self.DisplayRows): # Go through all the rows in turn.
+            line = ''
+            for c in range(self.DisplayColumns): # Go through each column in turn. 
+                line += self.character[r][c][0:1] # Select the character for current position. Max 1 char too!
+            linelist.append(line)
+        # Overlay sprites if they exist.
+        for s in self.sprites: # Check all sprites in turn.
+            if s.row != None and s.column != None and s.row >= 0 and s.row < self.DisplayRows and s.column >= 0 and s.column < self.DisplayColumns: # In range.
+                linelist[s.row] = linelist[s.row][:s.column] + s.symbol[0:1] + linelist[s.row][s.column + 1:]
+        return linelist
+    
+    def DisplayTextLines(self):
+        """ Display current contents of the window in a text box. """
+        textcolor.TextBox(self.GetTextLines())
+        
+    @staticmethod
+    def GlobalViewWindows(titlefg=None,titlebg=None):
+        """ Construct a menu of all available windows
+            then choose which window to display. """
+        # Dynamically construct menu entries.
+        dictionary = {}
+        for w in colordisplay.DefinedWindows:
+            itemdict = {}
+            if w.WindowTitle != None: itemdict['label'] = w.WindowTitle
+            else: itemdict['label'] = w.DisplayName
+            itemdict['bold'] = False
+            itemdict['call'] = w.DisplayTextLines
+            itemdict['docurl'] = None
+            itemdict['helpdoc'] = 'help.txt'
+            dictionary[w.DisplayName] = itemdict
+        WindowMenu = proceduremenu(dictionary,'Window contents menu',titlefg=None,titlebg=None,labelwidth=30)
+        WindowMenu.Prompt()
         
     def Display(self,screenheight=None,screenwidth=None,immediate=False):
         """ Take the display buffer and output it to the terminal. 
@@ -1303,6 +1561,7 @@ class colordisplay():
             screenwidth: Tells the number of columns available in the terminal display. 
             immediate: (True) Forces immediate update of the terminal display.
                        (False) Only updates the display if the refresh timer is due. """
+
         if immediate == False and self.RefreshDue() == False: return # Don't perform a refresh yet.
         # Define the maximum ROW and COLUMN number that can be addressed with the current window size.
         if screenheight == None: maxscreenrow = None
@@ -1319,6 +1578,9 @@ class colordisplay():
                 return # Don't try to display.
             if maxscreencol < self.DisplayCol: # None of the window fits on the terminal at all even if clipping allowed.
                 return # Don't try to display.
+        HorizontalChar = textcolor.SYMBOLS['horizontal'] # '\u2500'
+        VerticalChar = textcolor.SYMBOLS['vertical'] # '\u2502'
+        CornerChar = textcolor.SYMBOLS['corner_br'] # '\u2518'
         if self.MarkDisplay: # We need to mark up the corners and fields.
             self._MarkDisplay()
         for r in range(self.DisplayRows): # Go through all the rows in turn. *Q* Should respect 'ClipWindow' too.
@@ -1368,11 +1630,39 @@ class colordisplay():
                 dr = self.DisplayRow + r
                 dc = self.DisplayCol
                 line = textcolor.cursor(dc,dr) + line # Locate the line on the terminal layout.
-            line += textcolor.reset() 
+            line += textcolor.reset()
+            if self.DrawBorder and self.LastDisplayCol + 1 < maxscreencol: line += textcolor.fgbgcolor(self.BorderFG,self.BorderBG,VerticalChar)
             if self.ReduceIO == False or self.PrevLineStrings[r] != line: # The line has changed. So display the new string. Otherwise save display time and leave it unchanged.
-                print (line,end='') # Do not add newline character at end of the printed text.
+                print (line,end='',flush=True) # Do not add newline character at end of the printed text. Always flush the print buffer.
             self.PrevLineStrings[r] = line # Store the print command so we can compare next time if anything changed.
+        if self.DrawBorder and self.LastDisplayRow + 1 < maxscreenrow: 
+            visiblecolumns = maxscreencol - self.DisplayCol + 1
+            if visiblecolumns < self.DisplayColumns + 1: # We cannot fit the entire bottom border line and corner in the display, just show what's possible.
+                line = textcolor.fgbgcolor(self.BorderFG,self.BorderBG,(HorizontalChar * visiblecolumns)) # Truncate the line.
+            else:#  The whole border line and corner should fit in the display.
+                line = textcolor.fgbgcolor(self.BorderFG,self.BorderBG,(HorizontalChar * self.DisplayColumns) + CornerChar) # Full line including corner character.
+            print(textcolor.cursor(self.DisplayCol,self.DisplayRow + self.DisplayRows) + line)
         self.LastRefresh = datetime.now()
+
+    @staticmethod
+    def GlobalExportFields(filename,initialdictionary={}):
+        """ Export field values from all windows to json file.
+            Data is appended to any values already existing in initialdictionary. """
+        tempdict = colordisplay.GlobalSaveToDictionary(initialdictionary=initialdictionary)
+        with open(filename,'w') as f:
+            json.dump(tempdict,f,default=str)
+        return True
+        
+    @staticmethod
+    def GlobalSaveToDictionary(initialdictionary={}):
+        """ Export field values from all windows to dictionary.
+            Data is appended to any values already existing in initialdictionary. """
+        tempdict = initialdictionary
+        for w in colordisplay.DefinedWindows:
+            for field in w.Fields:
+                tempdict[w.DisplayName + "." + field.Name] = field.Value
+            tempdict[w.DisplayName + '.PrintHistory'] = w.PrintHistory
+        return tempdict
         
     @staticmethod
     def GlobalFieldFormat(name, justify=None, pattern=None, bwz=None): # Common
@@ -1432,6 +1722,22 @@ class colordisplay():
             except:
                 pass # Window nolonger exists.
         return
+        
+    @staticmethod
+    def GlobalWindowLimits():
+        """ Return maximum ROW and COLUMN that any of the current windows extend into. """
+        maxrow = 0
+        maxcol = 0
+        for w in colordisplay.DefinedWindows:
+            try:
+                maxrow = max(maxrow,w.LastDisplayRow)
+                maxcol = max(maxcol,w.LastDisplayCol)
+            except:
+                pass # Window nolonger exists.
+        return (maxcol, maxrow)
+    
+
+# -------------------------------------------------------------------------------------------------------------------------------- 
 
 class menu():
     """ Simple menu driver.
@@ -1441,21 +1747,36 @@ class menu():
         Menu quits when user selects 'x' option. 
         
         dictionary format 
-                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call},
+                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call, 'break': False},
                  'menuitem2key':{'label':'menu item 2 label', 'bold':True/False, 'call': ProcedureName to call}
                 }
                 
-        ProcedureName to call can be any function/procedure/method in the program, it cannot receive any parameters.
+                'docurl' = URL for help documentation about the menu option.
+                'helpdoc' = Local text file location for help documentation about the menu option.
+                'break' = Insert a blank line separator in the menu after the option.
+                'call' = Procedure to call if option is selected. (No parameters supported)
+                'bold' = Print the menu option in bold text.
+                'label' = The label to appear in the menu.
+                
+        You can trigger user input via the Prompt() method.
+        You can directly run a menu option without user input via the Run() method.
         """
 
-    def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None):
+    def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
         """ Create the menu, load the dictionary.
-            Initialize and validate the data. """
+            Initialize and validate the data.
+            title = Title of menu.
+            titlebg/fg colors of menu title.
+            helpdir = directory where help text files exist. 
+            helpurl = url to help file. """
+        print ('textcolor.menu: NOTE: This is replaced by the proceduremenu() class now!')
         self.Dictionary = dictionary
         self.Title = title
         self.IdWidth = 2
-        self.LabelWidth = 26
+        self.LabelWidth = 20
         self.TitleFG = titlefg
+        self.Columns = 2 # How many columns to draw?
+        self.Log = logger # Can define a logging function to use.
         if titlefg == None: self.TitleFG = textcolor.BLACK
         self.TitleBG = titlebg
         if titlebg == None: self.TitleBG = textcolor.YELLOW
@@ -1463,6 +1784,7 @@ class menu():
         for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
             Counter += 1
             value['id'] = Counter
+            self.LabelWidth = max(self.LabelWidth,len(value['label'])) # Make sure column labels are large enough.
             try: # Check that the procedure name to be called looks valid.
                 if type(value['call']) != None: # This will fail if the procedure name is wrong.
                     pass
@@ -1471,26 +1793,68 @@ class menu():
                 print (textcolor.red(self.Title,'Cannot execute procedure',value['label']))
                 print (textcolor.red(str(e)))
                 traceback.print_exc()
+        self.HelpDir = helpdir
+        self.HelpUrl = helpurl
+
+    def GetHelpFile(self,menuid):
+        """ Given an ID number, retrieve and display the help text if it exists. """
+        filename = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                filename = value.get('helpdoc',None) # Get the helpdoc filename.
+                break # Look no further.
+        if filename != None and self.HelpDir != None:
+            filename = self.HelpDir + filename # Construct path to file.
+        return filename
+        
+    def ShowHelpText(self,menuid):
+        filename = self.GetHelpFile(menuid)
+        if filename != None:
+            try:
+                with open(filename,'r') as f:
+                    for line in f.readlines():
+                        print (textcolor.cyan(line))
+            except Exception as e:
+                print(textcolor.red('Sorry, unable to show the help file.'))
+                print(str(e))
+        else:
+            print (textcolor.red('Sorry, no help file is defined for menu item',menuid))
+        
+    def GetHelpUrl(self,menuid):
+        """ Given an ID number, return URL associated with the help documentation. """
+        helpurl = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                helpurl = value.get('helpurl',None) # Get the helpdoc helpurl.
+                break # Look no further.
+        if helpurl != None and self.HelpDir != None:
+            helpurl = self.HelpDir + helpurl # Construct path to file.
+        return helpurl
         
     def Draw(self,menuprefix=''):
         """ Draw the menu on the terminal.
             The menu list from the dictionary will automatically gain '?' and 'x' options too. """
         # In Python 3.7 onwards, dictionaries should retain the sequence in which items are added. No sorting required.
         count = 0
-        print ('') # Blank line before menu.
+        print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
         print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
         for key,value in self.Dictionary.items(): # Go through each menu item in turn.
             entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
-            if value['bold'] == True: # If the menu item is in bold, make it so.
+            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
                 entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
             else: # Menu item is not in bold.
                 entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
             entry += ' ' # Space between columns of menu entries. 
             print (entry,end='') # Print the menu entry column, don't include 'newline' yet.
             count += 1 # Count how many entries.
-            if count % 2 == 0: # Print 'newline' after 2nd column entry.
+            if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
                 print ('')
-        if count % 2 == 1: # Print 'newline' if we didn't complete the 2nd column when the menu list ran out.
+            if 'break' in value and value['break']: 
+                if count % self.Columns != 0: # We're terminating the line early.
+                    print ('')
+                    count = 0
+                print ('') # Insert a blank line break in the menu.
+        if count % self.Columns != 0: # Print 'newline' if we didn't complete the 2nd column when the menu list ran out.
             print ('') # Terminate line if not already done.
         # Always include 'x' and '?' menu options automatically.
         print (textcolor.yellow('x'.rjust(self.IdWidth,' ')) + ' ' + 'Exit'.ljust(self.LabelWidth,' ')[:self.LabelWidth] + ' ',end='')
@@ -1508,20 +1872,44 @@ class menu():
                 Procedure() # Call it.
             except Exception as e:
                 # Procedure didn't execute. Report the error and return to the menu.
-                print(textcolor.red('** Menu could not call ' + str(key) + " ; " + str(Procedure)))
+                print(textcolor.red('** Menu failed to call ' + str(key) + " ; " + str(Procedure)))
                 print(textcolor.red(str(e)))
                 traceback.print_exc()
+
+    def ProcessHelpRequest(self,answer):
+        """ Receive a text type menu id. 
+            if it converts to an integer successfully, 
+            show the help text associated with that menu item. """
+        answer = answer.replace('?','') # Remove any question mark.
+        try:
+            menuid = int(answer)
+        except:
+            menuid = None
+        if menuid != None:
+            self.ShowHelpText(menuid)
         
     def Prompt(self,menuprefix=''):
         """ Execute the menu. 
             This paints the menu on the terminal and deals with user selections. 
-            The method closes when the user selects the 'x' option. """
+            Menu items are numbered dynamically, the user selects an item by selecting the number.
+            If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
+            The method closes when the user selects the 'x' option. 
+            
+            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
+        # Now paint the menu and ask the user what to do.
         self.Draw(menuprefix=menuprefix) # Paint the menu.
         while True: # Loop until explicitly told to terminate.
+            if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
+            if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
+            if '?' in answer: # User wants help about an option.
+                self.ProcessHelpRequest(answer)
+                continue # Prompt again.
+            # Process menu choice.
             try: # Convert text into integer if possible.
                 menuid = int(answer)
-            except Exception as e:
+            #except Exception as e:
+            except Exception:
                 # Text would not convert into integer. 
                 menuid = None
             if menuid != None: # 
@@ -1541,5 +1929,437 @@ class menu():
                 break # Go UP a level, quit if at root.
             # User input was not recognised. Try again.
             print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
-        
 
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
+class proceduremenu():
+    """ Simple menu driver.
+        Create a menu object.
+        Give it a dictionary of menu items, including labels and functions/methods to call.
+        Call the Prompt() method to execute the menu. 
+        Menu quits when user selects 'x' option. 
+        
+        dictionary format 
+                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call, 'break': False},
+                 'menuitem2key':{'label':'menu item 2 label', 'bold':True/False, 'call': ProcedureName to call}
+                }
+                
+                'docurl' = URL for help documentation about the menu option.
+                'helpdoc' = Local text file location for help documentation about the menu option.
+                'break' = Insert a blank line separator in the menu after the option.
+                'call' = Procedure to call if option is selected. (No parameters supported)
+                'bold' = Print the menu option in bold text.
+                'label' = The label to appear in the menu.
+                
+        You can trigger user input via the Prompt() method.
+        You can directly run a menu option without user input via the Run() method.
+        """
+
+    def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None,labelwidth=23):
+        """ Create the menu, load the dictionary.
+            Initialize and validate the data.
+            title = Title of menu.
+            titlebg/fg colors of menu title.
+            helpdir = directory where help text files exist. 
+            helpurl = url to help file. """
+        self.Dictionary = dictionary
+        self.Title = title
+        self.IdWidth = 2
+        self.LabelWidth = labelwidth
+        self.TitleFG = titlefg
+        self.Columns = 2 # How many columns to draw?
+        self.Log = logger # Can define a logging function to use.
+        if titlefg == None: self.TitleFG = textcolor.BLACK
+        self.TitleBG = titlebg
+        if titlebg == None: self.TitleBG = textcolor.YELLOW
+        Counter = 0
+        for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
+            Counter += 1
+            value['id'] = Counter
+            self.LabelWidth = max(self.LabelWidth,len(value['label']))
+            try: # Check that the procedure name to be called looks valid.
+                if type(value['call']) != None: # This will fail if the procedure name is wrong.
+                    pass
+            except Exception as e:
+                # The procedure call will not succeed if called.
+                print (textcolor.red(self.Title,'Cannot execute procedure',value['label']))
+                print (textcolor.red(str(e)))
+                traceback.print_exc()
+        self.HelpDir = helpdir
+        self.HelpUrl = helpurl
+
+    def GetHelpFile(self,menuid):
+        """ Given an ID number, retrieve and display the help text if it exists. """
+        filename = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                filename = value.get('helpdoc',None) # Get the helpdoc filename.
+                break # Look no further.
+        if filename != None and self.HelpDir != None:
+            filename = self.HelpDir + filename # Construct path to file.
+        return filename
+        
+    def ShowHelpText(self,menuid):
+        filename = self.GetHelpFile(menuid)
+        if filename != None:
+            try:
+                with open(filename,'r') as f:
+                    for line in f.readlines():
+                        print (textcolor.cyan(line))
+            except Exception as e:
+                print(textcolor.red('Sorry, unable to show the help file.'))
+                print(str(e))
+        else:
+            print (textcolor.red('Sorry, no help file is defined for menu item',menuid))
+        
+    def GetHelpUrl(self,menuid):
+        """ Given an ID number, return URL associated with the help documentation. """
+        helpurl = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                helpurl = value.get('helpurl',None) # Get the helpdoc helpurl.
+                break # Look no further.
+        if helpurl != None and self.HelpDir != None:
+            helpurl = self.HelpDir + helpurl # Construct path to file.
+        return helpurl
+        
+    def Draw(self,menuprefix=''):
+        """ Draw the menu on the terminal.
+            The menu list from the dictionary will automatically gain '?' and 'x' options too. """
+        # In Python 3.7 onwards, dictionaries should retain the sequence in which items are added. No sorting required.
+        count = 0
+        print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
+        print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
+        for key,value in self.Dictionary.items(): # Go through each menu item in turn.
+            entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
+            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
+                entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
+            else: # Menu item is not in bold.
+                entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
+            entry += ' ' # Space between columns of menu entries. 
+            print (entry,end='') # Print the menu entry column, don't include 'newline' yet.
+            count += 1 # Count how many entries.
+            if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
+                print ('')
+            if 'break' in value and value['break']: 
+                if count % self.Columns != 0: # We're terminating the line early.
+                    print ('')
+                    count = 0
+                print ('') # Insert a blank line break in the menu.
+        if count % self.Columns != 0: # Print 'newline' if we didn't complete the 2nd column when the menu list ran out.
+            print ('') # Terminate line if not already done.
+        # Always include 'x' and '?' menu options automatically.
+        print (textcolor.yellow('x'.rjust(self.IdWidth,' ')) + ' ' + 'Exit'.ljust(self.LabelWidth,' ')[:self.LabelWidth] + ' ',end='')
+        print (textcolor.yellow('?'.rjust(self.IdWidth,' ')) + ' ' + 'Refresh'.ljust(self.LabelWidth,' ')[:self.LabelWidth])
+        
+    def Run(self,key):
+        """ Given a menu option key, execute the procedure or sub-menu associated with it. """
+        Procedure = self.Dictionary[key]['call'] # What procedure is to be called?
+        if Procedure == None: # No option to run.
+            print(textcolor.yellow(str(key) + " does not have a related procedure to call."))
+        elif type(Procedure) == type(self): # A submenu, so we trigger the nested submenu instead. 
+            Procedure.Prompt() # Execute the submenu.
+        else: # See if it's a callable function.
+            try: # See if the procedure will execute. 
+                Procedure() # Call it.
+            except Exception as e:
+                # Procedure didn't execute. Report the error and return to the menu.
+                print(textcolor.red('** Menu failed to call ' + str(key) + " ; " + str(Procedure)))
+                print(textcolor.red(str(e)))
+                traceback.print_exc()
+
+    def ProcessHelpRequest(self,answer):
+        """ Receive a text type menu id. 
+            if it converts to an integer successfully, 
+            show the help text associated with that menu item. """
+        answer = answer.replace('?','') # Remove any question mark.
+        try:
+            menuid = int(answer)
+        except:
+            menuid = None
+        if menuid != None:
+            self.ShowHelpText(menuid)
+        
+    def Prompt(self,menuprefix=''):
+        """ Execute the menu. 
+            This paints the menu on the terminal and deals with user selections. 
+            Menu items are numbered dynamically, the user selects an item by selecting the number.
+            If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
+            The method closes when the user selects the 'x' option. 
+            
+            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
+        # Now paint the menu and ask the user what to do.
+        self.Draw(menuprefix=menuprefix) # Paint the menu.
+        while True: # Loop until explicitly told to terminate.
+            if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
+            answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
+            if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
+            if '?' in answer: # User wants help about an option.
+                self.ProcessHelpRequest(answer)
+                continue # Prompt again.
+            # Process menu choice.
+            try: # Convert text into integer if possible.
+                menuid = int(answer)
+            # except Exception as e:
+            except Exception:
+                # Text would not convert into integer. 
+                menuid = None
+            if menuid != None: # 
+                found = False # Have we found and executed the menu option?
+                for key,value in self.Dictionary.items():
+                    if value['id'] == menuid:
+                        self.Run(key) # Execute the option.
+                        self.Draw() # Refresh the menu.
+                        found = True # We have found and executed the option. OK to return to ask user for new input.
+                        break # Next
+                if found: # Option was found and executed. Return to user input.
+                    continue # Next user input.
+            if answer.lower() == '?': # Refresh option chosen.
+                self.Draw() # Refresh the menu.
+                continue # Next user input.
+            if answer.lower() == 'x': # User chose to quit the menu. Terminate the loop.
+                break # Go UP a level, quit if at root.
+            # User input was not recognised. Try again.
+            print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
+
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
+class optionmenu():
+    """ Simple menu driver.
+        Create a menu object.
+        Give it a dictionary of menu items. Labels and the value to be returned for each item.
+        Call the Prompt() method to execute the menu. 
+        Menu quits when user selects 'x' option. 
+        It returns the user's choice from the menu.
+        It returns None if the user didn't select anything.
+        
+        dictionary format 
+                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'value': 'value1' to return, 'break': False},
+                 'menuitem2key':{'label':'menu item 2 label', 'bold':True/False, 'value': 'value2' to return}
+                }
+                
+                'docurl' = URL for help documentation about the menu option.
+                'helpdoc' = Local text file location for help documentation about the menu option.
+                'break' = Insert a blank line separator in the menu after the option.
+                'value' = The value to return from the menu if option is selected.
+                'bold' = Print the menu option in bold text.
+                'label' = The label to appear in the menu.
+                
+        You can trigger user input via the Prompt() method.
+        You can directly run a menu option without user input via the Run() method.
+        """
+
+    def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
+        """ Create the menu, load the dictionary.
+            Initialize and validate the data.
+            title = Title of menu.
+            titlebg/fg colors of menu title.
+            helpdir = directory where help text files exist. 
+            helpurl = url to help file. """
+        self.Dictionary = dictionary
+        self.Title = title
+        self.IdWidth = 2
+        self.LabelWidth = 26
+        self.TitleFG = titlefg
+        self.Columns = 2 # How many columns to draw?
+        self.Log = logger # Can define a logging function to use.
+        if titlefg == None: self.TitleFG = textcolor.BLACK
+        self.TitleBG = titlebg
+        if titlebg == None: self.TitleBG = textcolor.YELLOW
+        Counter = 0
+        for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
+            Counter += 1
+            value['id'] = Counter
+            self.LabelWidth = max(self.LabelWidth,len(value['label']))
+        self.HelpDir = helpdir
+        self.HelpUrl = helpurl
+
+    def GetHelpFile(self,menuid):
+        """ Given an ID number, retrieve and display the help text if it exists. """
+        filename = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                filename = value.get('helpdoc',None) # Get the helpdoc filename.
+                break # Look no further.
+        if filename != None and self.HelpDir != None:
+            filename = self.HelpDir + filename # Construct path to file.
+        return filename
+        
+    def ShowHelpText(self,menuid):
+        filename = self.GetHelpFile(menuid)
+        if filename != None:
+            try:
+                with open(filename,'r') as f:
+                    for line in f.readlines():
+                        print (textcolor.cyan(line))
+            except Exception as e:
+                print(textcolor.red('Sorry, unable to show the help file.'))
+                print(str(e))
+        else:
+            print (textcolor.red('Sorry, no help file is defined for menu item',menuid))
+        
+    def GetHelpUrl(self,menuid):
+        """ Given an ID number, return URL associated with the help documentation. """
+        helpurl = None
+        for key,value in self.Dictionary.items(): # Find entry with matching ID.
+            if value['id'] == menuid: # Found a match.
+                helpurl = value.get('helpurl',None) # Get the helpdoc helpurl.
+                break # Look no further.
+        if helpurl != None and self.HelpDir != None:
+            helpurl = self.HelpDir + helpurl # Construct path to file.
+        return helpurl
+        
+    def Draw(self,menuprefix=''):
+        """ Draw the menu on the terminal.
+            The menu list from the dictionary will automatically gain '?' and 'x' options too. """
+        # In Python 3.7 onwards, dictionaries should retain the sequence in which items are added. No sorting required.
+        count = 0
+        print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
+        print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
+        for key,value in self.Dictionary.items(): # Go through each menu item in turn.
+            entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
+            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
+                entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
+            else: # Menu item is not in bold.
+                entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
+            entry += ' ' # Space between columns of menu entries. 
+            print (entry,end='') # Print the menu entry column, don't include 'newline' yet.
+            count += 1 # Count how many entries.
+            if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
+                print ('')
+            if 'break' in value and value['break']: 
+                if count % self.Columns != 0: # We're terminating the line early.
+                    print ('')
+                    count = 0
+                print ('') # Insert a blank line break in the menu.
+        if count % self.Columns != 0: # Print 'newline' if we didn't complete the 2nd column when the menu list ran out.
+            print ('') # Terminate line if not already done.
+        # Always include 'x' and '?' menu options automatically.
+        print (textcolor.yellow('x'.rjust(self.IdWidth,' ')) + ' ' + 'Exit'.ljust(self.LabelWidth,' ')[:self.LabelWidth] + ' ',end='')
+        print (textcolor.yellow('?'.rjust(self.IdWidth,' ')) + ' ' + 'Refresh'.ljust(self.LabelWidth,' ')[:self.LabelWidth])
+        
+    def Select(self,key):
+        """ Given a menu option key, extract the selected value. """
+        result = self.Dictionary[key]['value'] # What procedure is to be called?
+        return result
+
+    def ProcessHelpRequest(self,answer):
+        """ Receive a text type menu id. 
+            if it converts to an integer successfully, 
+            show the help text associated with that menu item. """
+        answer = answer.replace('?','') # Remove any question mark.
+        try:
+            menuid = int(answer)
+        except:
+            menuid = None
+        if menuid != None:
+            self.ShowHelpText(menuid)
+        
+    def Prompt(self,menuprefix=''):
+        """ Execute the menu. 
+            This paints the menu on the terminal and deals with user selections. 
+            Menu items are numbered dynamically, the user selects an item by selecting the number.
+            If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
+            The method closes when the user selects the 'x' option. 
+            
+            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
+        # Now paint the menu and ask the user what to do.
+        self.Draw(menuprefix=menuprefix) # Paint the menu.
+        result = None
+        while True: # Loop until explicitly told to terminate.
+            if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
+            answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
+            if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
+            if '?' in answer: # User wants help about an option.
+                self.ProcessHelpRequest(answer)
+                continue # Prompt again.
+            # Process menu choice.
+            try: # Convert text into integer if possible.
+                menuid = int(answer)
+            # except Exception as e:
+            except Exception:
+                # Text would not convert into integer. 
+                menuid = None
+            if menuid != None: # 
+                found = False # Have we found and executed the menu option?
+                for key,value in self.Dictionary.items():
+                    if value['id'] == menuid:
+                        result = self.Select(key) # Execute the option.
+                        found = True # We have found and executed the option. OK to return to ask user for new input.
+                        break # Next
+                if found: break
+            if answer.lower() == '?': # Refresh option chosen.
+                self.Draw() # Refresh the menu.
+                continue # Next user input.
+            if answer.lower() == 'x': # User chose to quit the menu. Terminate the loop.
+                break # Go UP a level, quit if at root.
+            # User input was not recognised. Try again.
+            print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
+        return result
+
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
+class listchooser():
+    """ Create a list of values and allow the user to select within that list.
+        The search is recursive. 
+        List entries are matched on anything containing the user's string. 
+        If multiple entries remain, they are presented as a new list to choose from. 
+        '?' to show list. 
+        'x' to return to previous selection. """
+        
+    def __init__(self,inputlist,title=None,default=None,compress=True):
+        self.FullList = inputlist
+        self.Title = title
+        self.Default = default
+        self.Compress = compress # Long lists get compressed.
+    
+    def Print(self,inputlist):
+        """ Supports self.Filter method. 
+            Lists the choices to select from. 
+            Abbreviates the list if > 10 entries, otherwise shows them all. """
+        printlist = ''
+        if self.Compress and len(inputlist) > 10: # Big list and we're allowed to compress it.
+            for i in range(5):
+                printlist += inputlist[i] + ', '
+            printlist += ' ... to ... '
+            for i in range(-5,0):
+                printlist += ', ' + inputlist[i]
+        else: # Short list or we're not allowed to compress it, so show everything.
+            for i,n in enumerate(inputlist):
+                if i > 0: printlist += ', '
+                printlist += n
+        print(printlist)
+        
+    def Filter(self,inputlist):
+        """ Recursive!!! 
+            Receive a list of text items.
+            User must select one of them.
+            This lists the choices and lets the user narrow down the list if it's big.
+            Returns when the user has selected a single item or decided to select nothing. """
+        choice = []
+        while True:
+            choice = []
+            self.Print(inputlist)
+            inputtext = input("Choice ('x' to return) : ")
+            inputtext = inputtext.lower()
+            if inputtext == 'x': break # Quit.
+            if len(inputtext) < 1: continue # Nothing to check, ask again.
+            for i in inputlist:
+                if inputtext in i.lower(): choice.append(i)
+                if inputtext == i.lower(): 
+                    choice = [i] # Exact match.
+                    break # Look no further.
+            if len(choice) < 1: continue # Nothing matched, ask again.
+            if len(choice) > 1 and choice != inputlist: choice = self.Filter(choice) # Refine the list further.
+            if len(choice) == 1: break # Choice made, return.
+        return choice
+
+    def Prompt(self):
+        """ Receive a list and return the user's selection or None value. """
+        result = self.Filter(self.FullList)
+        if len(result) == 0: result = None # Return None value, nothing chosen. 
+        elif len(result) == 1: result = result[0] # Strip the list structure off.
+        # In all other cases return the selected list.
+        return result
+    
+# -------------------------------------------------------------------------------------------------------------------------------- 
