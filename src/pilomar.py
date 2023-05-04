@@ -1,5 +1,4 @@
 #!/usr/bin/python
-#!/usr/bin/python
 
 # This software is published under the GNU General Public License v3.0.
 # Also respect any pre-existing terms of any components that this incorporates.
@@ -10,6 +9,7 @@
 # - NGC (New General Catalog) data is based upon the Saguaro Astronomy Club Database version 8.1
 # - The MESSIER catalog is gathered from multiple sources.
 # - The MeteorShower list is based upon the wikipedia list (2021).
+# - Space station data comes from the celestrak.org website (using NORAD public data)
 
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 # OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
@@ -88,7 +88,7 @@ import sys # For version verification.
 import serial # UART communication with a microcontroller.
 import time # sleep functionality for pauses in execution. 
 import RPi.GPIO as GPIO # Handling IO signals
-from gpiozero import CPUTemperature
+#from gpiozero import CPUTemperature
 import glob # file system 
 import os # OS Command execution
 import subprocess # Threadsafe os command execution with access to command output.
@@ -99,6 +99,12 @@ import cv2 # openCV for image file handling.
 import astroalign # Image alignment routines.
 from datetime import datetime, timedelta, timezone
 from datetime import time as datetime_time # rename this class to avoid ambiguity in the code.
+from pilomartimer import timer # Pilomar's timer class.
+from pilomarlogfile import logfile # Pilomar's logging class.
+from pilomaroscommand import oscommand # Pilomar's OS command executor.
+from pilomarcpu import cpumonitor # Pilomar's CPU monitor.
+from pilomardisc import discmonitor # Pilomar's CPU monitor.
+from pilomarmemory import memorymonitor # Pilomar's CPU monitor.
 #from skyfield.api import Star, Topos, position_of_radec, EarthSatellite
 from skyfield.api import Star, Topos, EarthSatellite
 from skyfield.api import Loader # Create own 'load' functionality by specifying the download directory this way.
@@ -173,7 +179,7 @@ def SourceCode() -> str: # 4 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-ProgramTitle = 'pilomar2' # Used in display titles and also filenaming to separate different generations of the program.
+# ProgramTitle = 'pilomar' # Used in display titles and also filenaming to separate different generations of the program.
 ProgramTitle = SourceCode().split('/')[-1].split('.')[0].lower() # Used in display titles and also filenaming to separate different generations of the program.
 
 # ------------------------------------------------------------------------------------------------------
@@ -235,18 +241,6 @@ def MctlStringToDatetime(line: str) -> datetime: # 3 references.
     except Exception as e:
         print(e) # Trap all the exception information in the main log file.
         raise Exception("MctlStringToDatetime() failed.") from e # Continue with regular exception stack.
-    return result
-
-# ------------------------------------------------------------------------------------------------------
-
-def FileAge(filename): # 2 references.
-    """ How many seconds old is a file? """
-    if os.path.exists(filename):
-        mtime = os.path.getmtime(filename)
-        td = datetime.now() - datetime.fromtimestamp(mtime)
-        result = int(td.total_seconds())
-    else:
-        result = None
     return result
 
 # ------------------------------------------------------------------------------------------------------
@@ -383,353 +377,43 @@ Keyboard = keyboardscanner() # Non-Blocking reader of the keyboard (via curses l
 # Identify the program and version to the user.
 print(textcolor.yellow(SourceCode() + " " + str(SourceDate())))
 
-# ------------------------------------------------------------------------------------------------------
-
-class timer(): # 14 references.
-    """ Clock driven timer class. 
-        This can be polled periodically to see if a timer is due. 
-            mytimer = timer(20) # Create a timer for 20 seconds. 
-            ...
-            if mytimer.due(): # 20 seconds has elapsed.
-                ...
-                
-        parameters:
-            - period = Number of seconds that the timer should run for. (It will repeat!)
-            - offset = An initial additional delay before the timer starts. 
-            - skip = True : If the timer expires multiple times before being checked the extra events are ignored.
-            - skip = False: If the timer expires multiple times before being checked, the extra events are queued up and will still trigger separately.
-                    """
-
-    def __init__(self, period: int, offset : int = 0, skip : bool = True):
-        """ Create the object, set the timer parameters. 
-            period = number of seconds between events.
-            offset = number of seconds earlier/later than first due time. 
-            skip = If timer is late, just trigger once then reset for next future due time. """
-        if period < 1:
-            self.Period = 1
-        else:
-            self.Period = period
-        if offset == 0:
-            self.NextTrigger = NowUTC() + timedelta(seconds=self.Period)
-        else:
-            self.NextTrigger = NowUTC() + timedelta(seconds=offset)
-        self.SkipEvents = skip # If the timer falls behind, do we skip missed events?
-
-    def _SetNextTrigger(self):
-        """ Update the trigger due time to the next occurrence. 
-            The next due time depends upon the skip parameter too! """
-        if self.SkipEvents: # Skip any missed events. 
-            while self.NextTrigger <= NowUTC():
-                self.NextTrigger = self.NextTrigger + timedelta(seconds=self.Period)
-        else: # Don't skip missed events, process every one!
-            self.NextTrigger = self.NextTrigger + timedelta(seconds=self.Period)
-
-    def Elapsed(self) -> bool:
-        """ Return number of seconds that have elapsed since the timer was set. """
-        starttime = self.NextTrigger - timedelta(seconds=self.Period)
-        elapsed = (NowUTC() - starttime).total_seconds()
-        return elapsed
-
-    def ElapsedPc(self) -> float:
-        """ Return % of time elapsed. """
-        result = round(100 * self.Elapsed() / self.Period,0)
-        return result
-        
-    def Remaining(self) -> float:
-        """ Return number of seconds remaining on a timer. """
-        result = (self.NextTrigger - NowUTC()).total_seconds()
-        if result < 0.0: result = 0.0 # Timer expired.
-        return result
-
-    def Due(self) -> bool:
-        """ If timed event is due, this returns TRUE. Otherwise returns FALSE.
-            It automatically sets the next due timestamp. """
-        if self.NextTrigger < NowUTC():
-            result = True
-            self._SetNextTrigger()
-        else:
-            result = False
-        return result
-        
-# ///////////////////////////////////////////////////////////////////////////////////
 # Initialize Logging.
-# ///////////////////////////////////////////////////////////////////////////////////
-
-class logfile(): # 2 references.
-    """ An object to maintain a log file recording the activities and events in the program.
-        This writes to a disc file and flushes the write buffers as quickly as it can.
-        It can also copy ERROR messages to any nominated error window object (which must support a 'Print()' method. )        """
-    def __init__(self,filename : str):
-        self.FileName = filename
-        self.PrevLogTime = NowUTC()
-        self.ErrorWindow = None # Reference to window object for displaying errors.
-        self.ErrorList = [] # Maintain list of any errors raised. These can then be summarised and reported if needed.
-        # The following filters specify which types of messages are logged.
-        # - If you change these lists, some messages may be ignored from file and displays.
-        self.DetailFilter = ['u','f','d'] # Specify the detail levels that are recorded (user choices, flow, detail).
-        self.LevelFilter = ['i','w','e'] # Specify which message types are recorded (info, warning, error).
-
-    def Log(self,*args, **kwargs) -> bool:
-        """ Record a log message. 
-            All unnamed arguments are converted to str type and appended to the line logged.
-            Some named arguments are supported. 
-            terminal=True ... displays the message to the terminal too.
-            level='info'/'warning'/'error' specifies level of information.
-                  (warning and error are repeated to the terminal automatically) 
-            detail='user'/'flow'/'detail' specifies the depth of logging that is recorded.
-                  (user means user choices)
-                  (flow means high level flow of the program, main logic events)
-                  (detail means detailed flow of the program, decisions, calculations etc)
-            errorprompt=The user is required to acknowledge the error message.
-            sep=Separator string inserted between each argument appended to the log message. Default is ' '. """
-        # Establish defaults for other arguments.
-        terminal = True # Display to the user.
-        errorprompt = False # Ask user to acknowledge.
-        level = 'info' # Establish log level.
-        detail = 'detail' # Establish the level of detail this entry represents.
-        separator = ' '
-        copytowindow = False
-        for key,value in kwargs.items():
-            if key == 'level': level = value.lower() # info, warning or error?
-            elif key == 'detail': detail = value.lower() # user, flow, detail message types recorded.
-            elif key == 'terminal': terminal = value # Display to the user or not?
-            elif key == 'errorprompt': errorprompt = value
-            elif key == 'window': copytowindow = value # Copy the message to the error window if possible.
-            elif key == 'sep': separator = value # Separator string can be overridden.
-        # Now generate the log message by appending all the unnamed arguments into a single string.
-        line = ''
-        for x in args: # Convert and append extra arguments.
-            if not isinstance(x,str): x = str(x)
-            line = (line + separator + x).strip()
-        if errorprompt: terminal = True # User must see message if they are supposed to acknowledge it.
-        # Write the message to the log file.
-        dtNow = NowUTC()
-        Elapsed = (dtNow - self.PrevLogTime).total_seconds() # The log message includes the elapsed time since the previous message.
-        ES = "{:.6f}".format(Elapsed) # 6dp and make sure it is not in scientific notation.
-        saveline = str(dtNow) + "\t" + ES + "\t" + line # Add current system timestamp and elapsed time to message. 
-        printline = str(dtNow).split(".")[0] + " " + line # Add current system timestamp to message. 
-        # Check if any LEVEL OR DETAIL filters are specified in the received parameters.
-        if level[0] in self.LevelFilter and detail[0] in self.DetailFilter: # The filters pass the criteria for writing to disc.
-            with open(self.FileName,'a') as f:
-                f.write(saveline + '\n')
-                f.flush() # Immediately flush to disc.
-                os.fsync(f) # Flush in the OS too!
-        # Handle the display and user response.
-        if level[0] == 'e': # Error
-            if terminal: # We're allowed to display on the terminal.
-                self.ErrorList.append(printline) # Record the error for later summary or reporting.
-                print(textcolor.red('** ERROR ** reported in LogFile: ') + printline)
-                if errorprompt: # User has to acknowledge the error. 
-                    #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
-                    input(textcolor.cyan("Press [ENTER] to continue: "))
-            if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.BLACK,bg=textcolor.RED) # Error color.
-        elif level[0] == 'w':
-            if terminal: # We're allowed to display on the terminal.
-                print(textcolor.yellow('WARNING: reported in LogFile: ') + printline)
-                if errorprompt: # User has to acknowledge the warning. 
-                    #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
-                    input(textcolor.cyan("Press [ENTER] to continue: "))
-            if self.ErrorWindow != None and copytowindow: self.ErrorWindow.Print(printline,fg=textcolor.YELLOW,bg=textcolor.BLACK) # Warning color.
-        elif terminal: # Display to the terminal. 
-            print(printline)
-            if self.ErrorWindow != None and copytowindow: self.ErrorWindow.Print(printline) # Info lines just keep default color scheme.
-        self.PrevLogTime = NowUTC() # Note the last time a message was logged. This is used to report the elapsed time between messages in the log file. 
-        return True
-
-    def ReportSlowEvents(self,limit=4.0): ### DEVELOPMENT ###
-        """ Analyses the log file and reports any events which have taken too long. """
-        print('Analysing log file for slow events')
-        with open(self.FileName,'r') as f:
-            prevline = ''
-            for line in f:
-                thisline = line.strip()
-                lineitems = thisline.split('\t')
-                if len(lineitems) > 2 and IsFloat(lineitems[1]):
-                    delay = float(lineitems[1])
-                    if delay >= limit: # Delay found.
-                        print('Delay',delay,':-')
-                        print(prevline)
-                        print(thisline)
-                prevline = thisline
-        print('Analysis complete')
-
-    def ReportException(self,e,level='error',comment=None):
-        """ Record any exception class in the log file.
-            This does not terminate, it just reports/logs the
-            exception then allows the program to continue. """
-        self.Log("logfile.ReportException(): Error",str(e),level='error')
-        self.RecordTraceback(e)
-        if hasattr(e,'__dict__'): # The exception object has a dictionary that can be reported.
-            for key, value in e.__dict__.items():
-                self.Log("logfile.ReportException():",key,":",value,level=level)
-        else:
-            self.Log("logfile.ReportException(): No __dict__ object to report. (",type(e),")",level='error')
-        if comment != None:
-            self.Log("logfile.ReportException(): Comment:",str(comment),level=level)
-
-    def RaiseException(self,e,level='error',comment=None):
-        """ Record any exception class in the log file. 
-            Then terminate via regular exception handler. """
-        self.RecordTraceback(e)
-        if hasattr(e,'__dict__'): # The exception object has a dictionary that can be reported.
-            for key, value in e.__dict__.items():
-                self.Log("logfile.RaiseException():",key,":",value,level=level)
-        else:
-            self.Log("logfile.RaiseException(): No __dict__ object to report. (",type(e),")",level='error')
-        if comment != None:
-            self.Log("logfile.RaiseException(): Comment:",str(comment),level=level)
-        raise Exception('Program exception raised') from e # Terminate through regular exception stack.
-
-    def RecordTraceback(self,e,terminal=True):
-        """ Use Traceback module to report the execution stack to the log file.
-            Setting terminal=False prevents the error being displayed on the screen. """
-        self.Log("logfile.RecordTraceback(): ErrorMessage", str(e),terminal=terminal)
-        a = traceback.format_exc() # String representation of stack report.
-        b = a.split('\n')
-        for c in b:
-            self.Log("logfile.RecordTraceback():",c,terminal=terminal)
-
-# ------------------------------------------------------------------------------------------------------
-
-# Clear old log files.
 logdir = ProjectRoot + "/log"
 LogFileName = logdir + "/" + ProgramTitle + "_" + UtcTimeStamp() + ".log"
 print("Main log to", LogFileName)
 MainLog = logfile(LogFileName) # Create a MAIN log file object.
 MainLog.Log("Startup parameters:", RunArgs,terminal=False)
 CamLogFileName = logdir + "/" + ProgramTitle + "_camera_" + UtcTimeStamp() + ".log"
-MainLog.Log("Camera log to", LogFileName)
+print("Camera log to", CamLogFileName)
 CamLog = logfile(CamLogFileName) # Create a CAMERA specific log file. (This runs in separate thread, unsure if logging would be thread-safe.)
 HistoryFile = ProjectRoot + '/data/' + ProgramTitle + '_sessions.txt' # Chosen observation targets and settings are stored in this file.
-MainLog.Log("Skyfield version:", SkyfieldVersion,terminal=False)
-textcolor.GetTermType()
-MainLog.Log("Terminal type:", textcolor.TermType, textcolor.Mode,terminal=False)
 
 # ------------------------------------------------------------------------------------------------------
 
-def osCmd(cmd,output : str = 'none') -> list: # Common # 30 references.
-    """ Execute a command and record it to the log file.
-        command and result is always recorded in the log file,
-        1st return parameter is a clean list of output lines,
-        2nd return parameter is the return code, 0 = Success, <> 0 is error.
-        output='terminal' : Default output is to the terminal. 
-        output='none' : Suppresses output.
-        output contains '.' : Output is written to that file. 
-        This should be thread safe.
-        """
-    MainLog.Log(cmd,terminal=False)
-    # returncode = 0 # Assume success.
-    try:
-        result = subprocess.check_output(cmd,shell=True,stderr=subprocess.DEVNULL).decode('utf-8')
-    except subprocess.CalledProcessError as e:
-        MainLog.Log("osCmd " + cmd + " returned " + str(e),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned returncode " + str(e.returncode),terminal=False)
-        # returncode = e.returncode # return the return code.
-        MainLog.Log("osCmd " + cmd + " returned output " + str(e.output),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned cmd " + str(e.cmd),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned stdout " + str(e.stdout),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned stderr " + str(e.stderr),terminal=False)
-        result = "" # We lose result output, even if some was generated before the error was reached.
-    lines = result.split('\n')
-    returnlist = []
-    for line in lines:
-        if '.' in output:
-            with open(output,'a') as f: # Create or append to the specified file.
-                f.write(line + "\n")
-        if output == 'terminal': print (line) # display to the terminal
-        MainLog.Log(line,terminal=False)
-        returnlist.append(line) # Construct clean returnlist of the output.
-    return returnlist
-
-# ------------------------------------------------------------------------------------------------------
-
-def DrawDumbbell(imagebuffer,drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow):
-    """ Add a 'dumbbell' to an image between two different points.
-    
-        from = tuple (x,y)
-        to = tuple (x,y)
-        fromcolor = tuple (b,g,r,a) 
-        tocolor = tuple (b,g,r,a)
-        linecolor = tuple (b,g,r,a)
-        arrow = boolean 6
-    
-          xxx                     .    xxx
-         x   x                     .  x   x
-        x     x                     .x     x
-        x  O  x----------------------x  o  x
-        x     x                     .x     x 
-         x   x                     .  x   x
-          xxx                     .    xxx                   """
-        
-    fromx = drawfrom[0] # Centre of the FROM circle.
-    fromy = drawfrom[1]
-    tox = drawto[0] # Centre of the TO circle.
-    toy = drawto[1]
-    # Calculate distance between FROM and TO points.
-    dx = tox - fromx
-    dy = toy - fromy
-    distance = math.sqrt((dx **2) + (dy **2))
-    angle = math.atan2(dy,dx) # What angle is the joining line at?
-    # Line does not cross the boundary circle drawn around each point.
-    # Calculate the points on the circumference of each circle that the arrowed line will start and end on.
-    rc = rad * math.cos(angle) # x offset for circle edge where line starts.
-    rs = rad * math.sin(angle) # y offset for circle edge where line starts.
-    startx = int(fromx + rc) # Draw line from this point on the starting circle.
-    starty = int(fromy + rs)
-    endx = int(tox - rc) # Draw line to this point on the ending circle.
-    endy = int(toy - rs)
-    dia = rad * 2 # Only draw the line if there's a big enough gap between the two circles.
-    if distance > dia: # Enough space to draw a line.
-        arrowproportion = 10.0 / (distance - dia) # ArrowedLine specifies arrow size as proportion of line length. We need constant 10pixel arrow heads.
-        if arrow: imagebuffer = cv2.arrowedLine(imagebuffer, (startx,starty), (endx,endy), linecolor, thickness=1, line_type=cv2.LINE_AA, tipLength=arrowproportion)
-        else: imagebuffer = cv2.line(imagebuffer, (startx,starty), (endx,endy), linecolor, thickness=1, lineType=cv2.LINE_AA)
-    imagebuffer = cv2.circle(imagebuffer,(fromx, fromy), rad, fromcolor, thickness=1, lineType=cv2.LINE_AA)
-    imagebuffer = cv2.circle(imagebuffer,(tox, toy), rad, tocolor, thickness=1, lineType=cv2.LINE_AA)
-    return imagebuffer # The image now has the 'dumbbell' drawn on it.
-
-# ------------------------------------------------------------------------------------------------------
-
-def osCmdCode(cmd,output : str = 'none') -> list: # Common # 1 references.
-    """ Execute a command and record it to the log file.
-        command and result is always recorded in the log file,
-        Return parameter is the return code, 0 = Success, <> 0 is error.
-        output='terminal' : Default output is to the terminal. 
-        output='none' : Suppresses output.
-        output contains '.' : Output is written to that file. 
-        This should be thread safe.
-        """
-    MainLog.Log(cmd,terminal=False)
-    returncode = 0 # Assume success.
-    try:
-        result = subprocess.check_output(cmd,shell=True,stderr=subprocess.DEVNULL).decode('utf-8')
-    except subprocess.CalledProcessError as e:
-        MainLog.Log("osCmd " + cmd + " returned " + str(e),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned returncode " + str(e.returncode),terminal=False)
-        returncode = e.returncode # return the return code.
-        MainLog.Log("osCmd " + cmd + " returned output " + str(e.output),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned cmd " + str(e.cmd),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned stdout " + str(e.stdout),terminal=False)
-        MainLog.Log("osCmd " + cmd + " returned stderr " + str(e.stderr),terminal=False)
-        result = "" # We lose result output, even if some was generated before the error was reached.
-    lines = result.split('\n')
-    for line in lines:
-        if '.' in output:
-            with open(output,'a') as f: # Create or append to the specified file.
-                f.write(line + "\n")
-        if output == 'terminal': print (line) # display to the terminal
-        MainLog.Log(line,terminal=False)
-    return returncode
+OSCommand = oscommand(MainLog.Log) # Create OS Command executor. 
+osCmd = OSCommand.Execute # Shortcut point to the execution method which returns the output.
+osCmdCode = OSCommand.ExecuteCode # Shortcut point to the execution method which returns the termination code.
 
 # ------------------------------------------------------------------------------------------------------
 
 # Remove out of date log files to preserve disc space.
 print (textcolor.yellow('Removing out of date log files to preserve disc space...'))
+# Show what will be deleted.
+cmd = "find " + logdir + " -type f -name '" + ProgramTitle + "_*.log' -mtime +2"
+linelist = osCmd(cmd)
+for line in linelist:
+    print(line)
+# Now delete.
 cmd = "find " + logdir + " -type f -name '" + ProgramTitle + "_*.log' -mtime +2 -delete"
 print(cmd) # Show the user the command being executed.
 osCmd(cmd)
 print (textcolor.yellow('Done.'))
-# Check 32 vs 64 bit O/S
-osbits = int(osCmd('getconf LONG_BIT')[0])
+
+# Log details about the environment.
+MainLog.Log("Skyfield version:", SkyfieldVersion,terminal=False)
+textcolor.GetTermType()
+MainLog.Log("Terminal type:", textcolor.TermType, textcolor.Mode,terminal=False)
+osbits = int(osCmd('getconf LONG_BIT')[0]) # Check 32 vs 64 bit O/S
 unamem = osCmd('uname -m')[0]
 MainLog.Log('Running on', unamem, osbits, 'bit system.',terminal=False)
 
@@ -766,7 +450,7 @@ class attributemaster(): # A parent class containing some common methods that ot
             if allowlist == None or attr in allowlist: # Allowed item, save.
                 if nameprefix != None: attr = nameprefix + attr # Add optional prefix to fieldname.
                 confdict[attr] = value
-                MainLog.Log('SaveToDictionary: Saved: ', attr, value,terminal=False)
+#                MainLog.Log('SaveToDictionary: Saved: ', attr, value,terminal=False)
         return confdict
 
 # ------------------------------------------------------------------------------------------------------
@@ -1138,52 +822,6 @@ def XYZToAltAz(x:float, y:float, z:float) -> Tuple[float, float]: # 1 references
 
 # ------------------------------------------------------------------------------------------------------
 
-# def RotateYZ(y:float ,z:float ,angle:float) -> Tuple[float, float]: # 0 references.
-#     """ Rotate Y,Z coordinates around the X axis by 'angle'.
-#         This is the EAST-WEST axis. 
-#         Y represents position on NORTH-SOUTH axis. (?) 
-#         Z represents position on NADIR-ZENITH axis. (?) 
-#         - Function not used (Apr.2021), but retained for development of alternative camera mounts. """
-#     try:
-#         hyp = math.sqrt(y * y + z * z)
-#         OrigAngle = math.degrees(math.atan2(z,y))
-#         NewAngle = OrigAngle + angle
-#         NewY = math.cos(math.radians(NewAngle)) * hyp
-#         NewZ = math.sin(math.radians(NewAngle)) * hyp
-#     except Exception as e:
-#         MainLog.RaiseException(e,comment='RotateYZ') # Trap all the exception information in the main log file.
-#     return NewY, NewZ
-
-# ------------------------------------------------------------------------------------------------------
-
-# def FitPolynomial(xlist,ylist): # 0 references.
-#     """ Use numpy to find a best fit polynomial function for a series of values. 
-#         Used in estimating lens distortion.
-#         The 'z' object returned can be used directly by numpy to evaluate new values of 'x'. """
-#     x = np.array(xlist) # Convert 'X' values into a numpy array.
-#     y = np.array(ylist) # Convert 'Y' values into a numpy array.
-#     if len(xlist) != len(ylist): # Lists do not agree.
-#         MainLog.Log('FitPolynomial: Lists must be the same length :',len(xlist),'vs',len(ylist),level='error')
-#         return None
-#     if len(xlist) < 5: # Lists are not long enough.
-#         MainLog.Log('FitPolynomial: Lists need at least 5 entries :',len(xlist),'elements',level='error')
-#         return None
-#     z = np.polyfit(x, y, 3) # Numpy will calculate a reasonable fit polynomial for the lists.
-#     # eg: z = array([ 0.00001, -1.123123,  4.345354, 1.231123])
-#     #                 * x**3   * x**2      * x       constant
-#     return z
-
-# ------------------------------------------------------------------------------------------------------
-
-# def EvaluatePolynomial(xvalue,zmodel): # 0 references.
-#     """ Use numpy to estimate a 'y' value for any input 'xvalue' using the polynomial defined in zmodel.
-#         Used in estimating lens distortion. """
-#     p = np.poly1d(zmodel) # Define the polynomial function.
-#     y = p(xvalue) # Evaluate the function for xvalue.
-#     return y
-
-# ------------------------------------------------------------------------------------------------------
-
 def RelativeAltAz(StarAlt,StarAz,LookAtAlt,LookAtAz): # 35 references.
     """ Calculate the angles of a star relative to some look-at position. 
         There will be some wonderfully clever maths to do this cleanly, quickly and precisely.
@@ -1274,307 +912,20 @@ def GetTerminalSize(): # 3 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-class cpumonitor(): # 1 references.
-    """ Simple class to monitor the CPU load of the RPi.
-        This periodically polls the CPU load and establishes some metrics. """
-
-    def __init__(self):
-        self.Command = "grep 'cpu ' /proc/stat"
-        self.Timer = timer(60) # Set timer for 60 seconds.
-        self.CpuUsed = 0 # Cpu used slots since system start
-        self.CpuIdle = 0 # Cpu idle slots since system start
-        self.CpuBusy = 0 # Percentage busy over Poll period.
-        self.BusyHistory = [] # List of last 10 busy percentage figures.
-        self.CpuTemp = 0 # Reported CPU temperature.
-        self.Poll(force=True) # Update the stats initially.
-
-    def LogCpuInfo(self):
-        """ Record CPU information to the main log file. """
-        MainLog.Log("cpumonitor.LogCpuInfo:",terminal=False)
-        cCmd = 'cat /proc/cpuinfo'
-        listlines = osCmd(cCmd)
-        for line in listlines: MainLog.Log(line,terminal=False)
-
-    def GetCpuTemp(self):
-        """ Return the CPU temperature. """
-        MainLog.Log("cpumonitor.GetCpuTemp:",terminal=False)
-        cput = CPUTemperature()
-        self.CpuTemp = cput.temperature
-        return self.CpuTemp
-
-    def LogCpuTemp(self):
-        """ Record CPU temperature in main log file. """
-        MainLog.Log("cpumonitor.LogCpuTemp: Temperature",self.GetCpuTemp(),terminal=False)
-
-    def Poll(self,force = False):
-        """ Check if it is time to retrieve updated statistics from the CPU. """
-        if force or self.Timer.Due(): # Time to update the CPU figures.
-            result = osCmd(self.Command) # Check /proc/stat for CPU figures.
-            elements = result[0].split() # Break down the 1st line for analysis.
-            newUsed = int(elements[1]) + int(elements[2]) + int(elements[3]) # We consider cols 1,2,3 as 'busy' activities.
-            newIdle = int(elements[4]) # col 4 is an idle activity.
-            difUsed = newUsed - self.CpuUsed # Change since the last poll
-            difIdle = newIdle - self.CpuIdle # Change since the last poll
-            self.CpuUsed = newUsed # Update stored figures.
-            self.CpuIdle = newIdle
-            self.CpuBusy = int(100 * difUsed / (difUsed + difIdle)) # Calculate % busy since last poll.
-            self.BusyHistory.append(self.CpuBusy) # Add to history list.
-            self.BusyHistory = self.BusyHistory[-10:] # Only keep last 10 measures.
-            self.LogCpuTemp()
-
-    def PercentBusy(self,force=False) -> int:
-        """ Return the recent CPU Busy % figure. """
-        self.Poll(force=force) # Check we have recent enough numbers.
-        return self.CpuBusy 
-        
-    def GetBusyRange(self,force=False) -> str:
-        """ Return recent range of CPU busy percentages. """
-        self.Poll(force=force)
-        result = ''
-        if len(self.BusyHistory) > 5:
-            MinBusy = int(min(self.BusyHistory))
-            MaxBusy = int(max(self.BusyHistory))
-            result = '(' + str(MinBusy) + "% - " + str(MaxBusy) + "%" + ')'
-        return result
-
-CpuMonitor = cpumonitor() # Create new CPU monitor.
+CpuMonitor = cpumonitor(logger=MainLog.Log) # Create new CPU monitor.
 CpuMonitor.LogCpuInfo() # Note details about the CPU.
 
-# ------------------------------------------------------------------------------------------------------
-
-class memorymonitor(): # 1 references.
-    """ Simple class to monitor the memory load of the RPi. """
-
-    def __init__(self):
-        self.Command = "free -m"
-        self.Timer = timer(60) # Set timer for 60 seconds.
-        self.MemoryTotal = 0
-        self.MemoryUsed = 0
-        self.MemoryFree = 0
-        self.UsedHistory = []
-        self.FreeHistory = []
-        self.Poll(force=True) # Kickstart the values.
-
-    def Poll(self,force = False):
-        """ Decide if it is time to update the memory usage statistics. 
-            'Free' memory is based upon the 'available memory' figure rather than the 'free' column.
-            This is because 'free' is missing memory allocated to the O/S cache. 
-            'available' shows something closer to the memory that the system COULD allocate to running programs. """
-        #    $ free -m
-        #                  total        used        free      shared  buff/cache   available
-        #    Mem:           1815         175         216           1        1423        1548   <- This line is used.
-        #    Swap:            99          33          66
-        if force or self.Timer.Due(): # Time to update the CPU figures.
-            lines = osCmd(self.Command)  # osCmd function dedicated to the MAIN thread.
-            memoryfields = lines[1].split() # This splits by blocks of whitespace.
-            if len(memoryfields) > 2:
-                self.MemoryTotal = int(memoryfields[1]) * 1000000 # Total
-                self.MemoryUsed = int(memoryfields[2]) * 1000000 # Used
-                self.MemoryFree = int(memoryfields[6]) * 1000000 # 'Available' (Because FREE column is misleading.)
-            self.UsedHistory.append(self.MemoryUsed)
-            self.FreeHistory.append(self.MemoryFree)
-            self.UsedHistory = self.UsedHistory[-10:] # Last 10 entries only.
-            self.FreeHistory = self.FreeHistory[-10:] # Last 10 entries only.
-
-    def GetMemory(self,force=False):
-        """ Return recent memory usage statistics. """
-        self.Poll(force=force)
-        return self.MemoryTotal, self.MemoryUsed, self.MemoryFree
-        
-    def GetTotal(self,force=False) -> int:
-        """ Return recent total memory value. """
-        self.Poll(force=force)
-        return self.MemoryTotal
-
-    def GetUsed(self,force=False) -> int:
-        """ Return recent used memory value. """
-        self.Poll(force=force)
-        return self.MemoryUsed
-
-    def GetFree(self,force=False) -> int:
-        """ Return recent free memory value. """
-        self.Poll(force=force)
-        return self.MemoryFree
-
-    def GetUsedRange(self,force=False) -> str:
-        """ Return recent range of memory full. """
-        self.Poll(force=force)
-        result = ''
-        if len(self.UsedHistory) > 5:
-            MinUsed = int(100 * min(self.UsedHistory) / self.MemoryTotal)
-            MaxUsed = int(100 * max(self.UsedHistory) / self.MemoryTotal)
-            result = '(' + str(MinUsed) + "% - " + str(MaxUsed) + "%" + ')'
-        return result
-
-    def GetFreeRange(self,force=False) -> str:
-        """ Return recent range of memory free. """
-        self.Poll(force=force)
-        result = ''
-        if len(self.FreeHistory) > 5:
-            MinFree = int(100 * min(self.FreeHistory) / self.MemoryTotal)
-            MaxFree = int(100 * max(self.FreeHistory) / self.MemoryTotal)
-            result = '(' + str(MinFree) + "% - " + str(MaxFree) + "%" + ')'
-        return result
-
-MemoryMonitor = memorymonitor() # Create new memory monitor.
+MemoryMonitor = memorymonitor(logger=MainLog.Log) # Create new memory monitor.
 MainLog.Log("Memory available",MemoryMonitor.MemoryTotal,terminal=False)
 
-# ------------------------------------------------------------------------------------------------------
-
-class discmonitor(): # 2 references.
-    """ Class to monitor the storage capacity of the RPi.
-        Basic operation monitors the 'root' disc of the system (memory card).
-        But can also monitor other mounted disks, such as usb memory sticks.
-        - Will attempt to mount them using the default Raspbian desktop auto-mounting behaviour if needed. """
-
-    def __init__(self,name='root',devname='/dev/root',path='/',disctype='boot'):
-        self.Name = name # A label to refer to this instance.
-        self.DevName = devname # The storage mapping device name as seen by the operating system. /dev/root for example.
-        self.DiscType = disctype # 'boot' or 'usb'. 'usb' triggers some extra processing to check it is mounted and available.
-        self.Timer = timer(60) # Set timer for 60 seconds.
-        self.DiscFree = 0 # Bytes free.
-        self.LowDiscMB = 500 # Megabytes min disc free.
-        self.Path = path # This is the path without any device label (ie /media/pi  or   /   )
-        self.DfPath = path # This is the path including the device label (ie /media/pi/USBMEMORY   )
-        # USB storage details.
-        self.USBLabel = None # Label of the device when it was formatted. Something like 'USBMEMORY'. Will appear in DfPath and is part of drive mapping.
-        self.USBUUID = None # Unique ID
-        self.USBTYPE = None # file system type. FAT/FAT32.
-        self.USBPARTUUID = None # Unique ID
-        self.DriveAvailable = True # True if available (eg root or USB is mounted), else False.
-        if self.DiscType in ['usb']: # USB devices may need mounting. Check 'em out!
-            self.FindUSB(devname=self.DevName) # Check if USB memory stick is available.
-        self.Poll(force=True) # Kickstart the values.
-        MainLog.Log("discmonitor: Available storage on:",self.Name, self.DevName, self.Path, self.DiscFree,'bytes',terminal=False)
-        
-    def GetDfDictionary(self):
-        """ Return df information as a dictionary. """
-        dictionary = {}
-        #    $ df -h
-        #    $ df -h [mountpath]
-        #    Filesystem      Size  Used Avail Use% Mounted on
-        #    /dev/root        29G  7.5G   21G  27% /
-        #    devtmpfs        750M     0  750M   0% /dev
-        #    tmpfs           911M     0  911M   0% /dev/shm
-        #    tmpfs           911M  8.6M  902M   1% /run
-        #    tmpfs           5.0M  4.0K  5.0M   1% /run/lock
-        #    tmpfs           911M     0  911M   0% /sys/fs/cgroup
-        #    /dev/mmcblk0p1  253M   49M  204M  20% /boot
-        #    tmpfs           183M     0  183M   0% /run/user/1000
-        #    /dev/sda1       ***G   **G   **G  *** /media/pi/USBMEMORY
-        convlist = [['K',1024],['M',1024**2],['G',1024**3],['T',1024**4],["%",1]] # Conversions from 'human readable' forms back to float/integers.
-        cCmd = 'df -h' # Use the df command in human readable format.
-        lines = osCmd(cCmd) # Execute command and gather result.
-        fieldnames = None # This will be a list of the column headers from the first line of the 'df' command output.
-        for i,line in enumerate(lines): # Read the output lines one at a time.
-            lineitems = line.strip().split() # Split into individual fields.
-            if len(lineitems) > 0: # Poll through the devices.
-                if i == 0: # 1st line is just field names.
-                    fieldnames = lineitems
-                else: # Other lines contain data.
-                    for j in range(1,5): # Poll through the columns.
-                        v = lineitems[j] # Get raw column value.
-                        for ji in convlist: # Convert from HumanReadable into absolute value. Check all conversions.
-                            if ji[0] in v: # This HR value can be converted.
-                                v = int(float(v[:-1]) * ji[1]) # Convert from HR text value into absolute value.
-                                break # No need to convert further.
-                        lineitems[j] = v # Store back in the line.
-                    dictentry = {} # Create an entry for this particular drive mount.
-                    for j,v in enumerate(lineitems): # Pull each field and convert into dictionary entry.
-                        dictentry[fieldnames[j]] = lineitems[j]
-                    dictionary[lineitems[-1]] = dictentry # Append this entry to the dictionary of all mount points.
-        return dictionary 
-        
-    def Poll(self,force = False):
-        """ Decide if it is time to update the storage statistics. """
-        if force or self.Timer.Due():
-            dfdict = self.GetDfDictionary()
-            if self.DriveAvailable: # Drive is available, so report the space left.
-                self.DiscFree = dfdict[self.DfPath]['Avail']
-            else:
-                self.DiscFree = 0 # Drive isn't available, so no space.
-            
-    def FreeBytes(self,force = False) -> int:
-        """ Return the amount of memory left free. """
-        self.Poll(force=force) # Make sure that the figures are the very latest.
-        return self.DiscFree
-        
-    def FreeMegaBytes(self,force=False) -> int:
-        """ Return the amount of memory left free in megabytes. """
-        return self.FreeBytes(force=force) / (1024 ** 2)
-        
-    def DiscOK(self, force = False) -> bool:
-        """ Check that there is at least 500megabytes of storage available. """
-        megabytes = self.FreeMegaBytes(force=force)
-        if megabytes < self.LowDiscMB: return False
-        else: return True
-        
-    def FindUSB(self,devname='/dev/sda1'):
-        """ Return True if a USB memory stick exists. """
-        # /dev/usb1 might mount automatically if desktop is running, but it doesn't happen when running headlessly.
-        #           Does pcmanfm process help?
-        #           Website suggests udisksctl mount -b /dev/sda1                  will create /media/pi folder on the USB memory stick.
-        result = False # Assume there's no USB memory available at first.
-        MainLog.Log("discmonitor.FindUSB: Checking if",devname,"is recognised",terminal=False)
-        validdevnames = ['/dev/sda1']
-        if devname in validdevnames: # Safety check. Don't run commands with values we don't trust.
-            cCmd = 'sudo blkid ' + devname
-            lines = osCmd(cCmd) # Run the command and gather the results.
-            # Example output:    /dev/sda1: LABEL="USBMEMORY" UUID="B267-53C5" TYPE="vfat" PARTUUID="c3072e18-01"
-            for line in lines: # Run through each result line in turn.
-                if len(line) == 0: continue # Ignore blanks.
-                items = line.strip().split(" ") # Clean and separate out the line elements.
-                if items[0][:-1] == devname: # Found the USB memory stick. Extract details. (Ignore trailing ':' character)
-                    self.USBLabel = items[1].split("=")[1].replace('"','') # Volume label - Will be the folder name under /media/pi/{USBLabel}
-                    self.USBUUID = items[2].split("=")[1].replace('"','') # Unique ID of the memory stick.
-                    self.USBFSType = items[3].split("=")[1].replace('"','') # File system type - vfat / vfat32 etc.
-                    self.USBPartUUID = items[4].split("=")[1].replace('"','') # Universal identifier.
-                    MainLog.Log("discmonitor.FindUSB: Device:",devname,"Label:",self.USBLabel,"UUID:",self.USBUUID,"FS Type:",self.USBFSType,"PARTUUID:",self.USBPartUUID,terminal=False)
-                    result = True # We're happy so far.
-        else: # The device value was not valid. Tell the user.
-            MainLog.Log("discmonitor.FindUSB: '",devname,"' is invalid. Must be in",str(validdevnames),level='error',terminal=True)
-        if result: # Previous steps succeeded.
-            MainLog.Log("discmonitor.FindUSB: ",devname,"is recognised as",self.USBLabel,".",terminal=False)
-        else: # Previous steps failed.
-            MainLog.Log("discmonitor.FindUSB: ",devname,"is NOT recognised.",terminal=True)
-        
-        if result: # OK so far.
-            self.DfPath = self.Path + "/" + self.USBLabel # The path to the mapped drive as it will appear in 'df' command output and in directory structures later on.
-            MainLog.Log("discmonitor.FindUSB: Checking if",devname,"is mounted as",self.DfPath,terminal=False)
-            if os.path.exists(self.DfPath): # The directory exists.
-                MainLog.Log("discmonitor.FindUSB:",self.DfPath,"exists.",terminal=False)
-            else: # The directory does not exist. The drive is recognised by the system, but not mounted. Try to mount it now.
-                MainLog.Log("discmonitor.FindUSB:",self.DfPath,"does not exist. Will attempt to mount.",terminal=True)
-                # Warn the user that the 'pi' user password will be required. The udisksctl utility requires it in order to mount the disc.
-                print(textcolor.yellow('Mounting ' + self.USBLabel + ' under ' + self.Path))
-                print(textcolor.yellow('You will be prompted for the "pi" user password as part of the mount process.'))
-                print(textcolor.yellow('If you do not give the correct password the USB storage will not be mounted.'))
-                cCmd = 'udisksctl mount -b ' + devname # Construct the mount command.
-                print(textcolor.yellow('Executing: ' + cCmd)) # Show the user exactly what's being executed.
-                temp = osCmdCode(cCmd) # Check return code.
-                if temp == 0: # Return code '0' means success.
-                    print('Thank you.')
-                    MainLog.Log("discmonitor.FindUSB: Mount",devname,"as",self.DfPath,'success.',terminal=False)
-                else: # Any other return code value means a problem.
-                    result = False # Failed.
-                    MainLog.Log("discmonitor.FindUSB: Mount",devname,"as",self.DfPath,'failed.',level='error',terminal=True)
-        if result: # OK so far.
-            dictionary = self.GetDfDictionary() # Get the 'df' results from the operating system.
-            if self.DfPath in dictionary: # We found it now in the list of mount points.
-                MainLog.Log("discmonitor.FindUSB: Check",devname,"as",self.DfPath,'found.',terminal=False)
-            else: # We still can't find it. Something failed.
-                MainLog.Log("discmonitor.FindUSB: Check",devname,"as",self.DfPath,'not found.',terminal=True)
-                result = False # Failed.
-        self.DriveAvailable = result
-        MainLog.Log("discmonitor: FindUSB: DriveAvailable",self.DriveAvailable,terminal=False)
-        return result
-
-SDCardMonitor = discmonitor(name='root',devname='/dev/root',path='/',disctype='boot') # Create new disc space monitor for the SD card.
-USBDiscMonitor = discmonitor(name='usb',devname='/dev/sda1',path='/media/pi',disctype='usb') # Create USB memory card monitor (if it exists).
+SDCardMonitor = discmonitor(name='root',devname='/dev/root',path='/',disctype='boot',logger=MainLog.Log) # Create new disc space monitor for the SD card.
+USBDiscMonitor = discmonitor(name='usb',devname='/dev/sda1',path='/media/pi',disctype='usb',logger=MainLog.Log) # Create USB memory card monitor (if it exists).
 # Decide which of the two above monitors will be the one that images are stored in. Create a pointer to that one for the status monitoring later on.
 if Parameters.UseUSBStorage and USBDiscMonitor.DriveAvailable: 
+    MainLog.Log("Using USB storage for images.",USBDiscMonitor.DfPath,terminal=True)
     ImageStorageMonitor = USBDiscMonitor # Point to USB storage when checking available space.
 else: 
+    MainLog.Log("Using SD card for images.",SDCardMonitor.DfPath,terminal=True)
     ImageStorageMonitor = SDCardMonitor # Point to the SD card storage when checking available space.
 
 # ------------------------------------------------------------------------------------------------------
@@ -1632,9 +983,10 @@ class metcheck_handler(attributemaster): # 1 references.
     """ Load and maintain Astronomical Seeing conditions from www.metcheck.com 
         Other sources are probably available, this demonstrates what is possible. """
     
-    def __init__(self):
+    def __init__(self,logger=None):
         # Available products are 'As' (astro), 'No' (normal) and others...
         self.SourceTitle = 'Metcheck.com'
+        self.Log = logger # Handle to logging procedure. Must support .Log() style calls.
         self.WebServiceOK = False # Indicates that last web service call was successful. 
         self.AstroURL = 'http://ws1.metcheck.com/ENGINE/v9_0/json.asp?lat={lat}&lon={lon}&Fc=As' # Template for request URL.
         self.AstroURL = self.AstroURL.format(lon=Parameters.HomeLonVal,lat=Parameters.HomeLatVal) # Insert the current location into the request.
@@ -1642,7 +994,6 @@ class metcheck_handler(attributemaster): # 1 references.
         self.CivilURL = 'http://ws1.metcheck.com/ENGINE/v9_0/json.asp?lat={lat}&lon={lon}&Fc=No' # Template for request URL.
         self.CivilURL = self.CivilURL.format(lon=Parameters.HomeLonVal,lat=Parameters.HomeLatVal) # Insert the current location into the request.
         self.CivilResult = {} # Empty result dictionary. 
-        self.Log = MainLog.Log # Decide which log file this class uses.
         self.AstroCacheFilename = ProjectRoot + '/data/astrocache.json' # Store latest data on disc, good for debug/development and reduces calls to web service.
         self.CivilCacheFilename = ProjectRoot + '/data/civilcache.json'
         self.Timer = timer(3600) # Set refresh timer for every 60 minutes (=3600 seconds).
@@ -1955,13 +1306,24 @@ class metcheck_handler(attributemaster): # 1 references.
             self.WebServiceOK = WSOK
             self.ForecastTable() # Prepare matrix table of times and values.
 
+    def FileAge(self,filename): # 2 references.
+        """ How many seconds old is a file? """
+        if os.path.exists(filename):
+            mtime = os.path.getmtime(filename)
+            td = datetime.now() - datetime.fromtimestamp(mtime)
+            result = int(td.total_seconds())
+        else:
+            result = None
+        return result
+
     def LoadCache(self,filename):
         """ Load a single cache if available and recent enough. """
         result = {} # Return empty cache.
         if os.path.exists(filename):
-            fa = FileAge(filename)
+            fa = self.FileAge(filename)
             self.Log("metcheck_handler.LoadCache:",filename,fa,"seconds old",terminal=False)
-            if FileAge(filename) < 3600: # Only use the cache if less than an hour old.
+            #if FileAge(filename) < 3600: # Only use the cache if less than an hour old.
+            if fa < 3600: # Only use the cache if less than an hour old.
                 with open(filename,'r') as f:
                     self.Log("metcheck_handler.LoadCache: Loading Cache: " + filename,terminal=False)
                     result = json.load(f) # Overwrite the default parameter values with anything from file.
@@ -2114,7 +1476,7 @@ class metcheck_handler(attributemaster): # 1 references.
 MainLog.Log("AstroSeeing: Initializing...")
 if Parameters.UseWeatherService != True:
     MainLog.Log("AstroSeeing: WARNING: Parameters.UseWeatherService is FALSE. Atmospheric conditions will not be processed.",level='warning')
-AstroSeeing = metcheck_handler() # Create instance of the 'astronomical visibility conditions' object. 
+AstroSeeing = metcheck_handler(logger=MainLog.Log) # Create instance of the 'astronomical visibility conditions' object. 
 MainLog.Log("AstroSeeing: Loaded")
 
 def VerifyFolder(FN): # 18 references.
@@ -2324,7 +1686,6 @@ MiscWindow = colordisplay(rows=9,columns=84,row=CameraWindow.LastDisplayRow + 2,
 MiscWindow.ClipWindow = True # Allow the display to be clipped if there's not enough terminal space available for the entire display.
 MiscWindow.DrawBorder = True # Test the 'draw border' facility.
 MiscWindow.SetBorderColors(OSW_BORDER_FG,OSW_BORDER_BG) # Set border colors.
-MiscWindow.PlaceString('  Motor clocks: Azimuth: [AZCLOCK ] Hrs             Altitude: [ALTCLOCK] Hrs        ',row=1,col=0)
 MiscWindow.PlaceString('Field rotation: [FIELDROTATION                        ] Blur: [BLUR       ]         ',row=3,col=0)
 MiscWindow.PlaceString('          Moon: Brightness: [MOONP]% [W]             Visible: [MOONV]               ',row=4,col=0)
 MiscWindow.PlaceString('   Light level: [TWILIGHT             ]     Object magnitude: [MAGNITUDE]           ',row=5,col=0)
@@ -2332,8 +1693,6 @@ MiscWindow.PlaceString('     Loop time: [TOTLOOP       ]                     Ave
 MiscWindow.PlaceString('    Loop times: [RECLOOPS                                                      ]    ',row=7,col=0)
 MiscWindow.ScanForFields() # Scan the current image for field markers.
 swFields = MiscWindow.ListFields()
-MiscWindow.FieldFormat('AZCLOCK',justify='right')
-MiscWindow.FieldFormat('ALTCLOCK',justify='right')
 MiscWindow.FieldFormat('MOONP',justify='right')
 for key,value in swFields.items():
     MiscWindow.FieldColor(key,fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG)
@@ -3562,8 +2921,8 @@ class astrocamera(attributemaster): # 1 references.
         blur = cv2.GaussianBlur(gray, (5,5), 0)
         # Apply the Canny edge algorithm
         canny = cv2.Canny(blur, 100, 200, 3)
-        filename = '/home/pi/pilomar/temp/plane-canny.jpg'
-        cv2.imwrite(filename,canny) # Save the marked up image.
+        #filename = '/home/pi/pilomar/temp/plane-canny.jpg'
+        #cv2.imwrite(filename,canny) # Save the marked up image.
         # The Hough line detection algorithm.
         lines = cv2.HoughLinesP(canny, 1, np.pi/180, 25, minLineLength=50, maxLineGap=5)
         linereturn = [] # The list of selected lines that will be returned.
@@ -3577,8 +2936,8 @@ class astrocamera(attributemaster): # 1 references.
                 longest = max(length,longest) # Is this the longest line found so far?
                 linereturn.append([x1,y1,x2,y2]) # Add to the list of detected lines.
                 imagebuffer = cv2.line(imagebuffer, (x1, y1), (x2, y2), (255,0,255), 2) # Mark the line on the image.
-            filename = '/home/pi/pilomar/temp/plane-lines.jpg'
-            cv2.imwrite(filename,imagebuffer) # Save the marked up image.
+            #filename = '/home/pi/pilomar/temp/plane-lines.jpg'
+            #cv2.imwrite(filename,imagebuffer) # Save the marked up image.
         self.Log("astrocamera.LineDetection: Found", len(linereturn), "lines in the image.",terminal=False)
         self.Log("astrocamera.LineDetection: Longest line is", longest, "pixels.",terminal=False)
         return linereturn
@@ -3591,6 +2950,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("astrocamera.MeteorFileScan(): Starting",terminal=True)
         # Find all image files that need converting.
         rootfolder = FolderList['imageroot'] # This is the parent data folder for all Pilomar images.
+        self.Log("astrocamera.MeteorFileScan(): Searching for .jpgs in",rootfolder,terminal=True)
         allfiles = glob.glob(rootfolder + '**/*.jpg', recursive=True) # Every jpg in every folder and subfolder.
         files = [] # Cleaned list of files to handle.
         folders = ['light'] # Which subfolders do we want?
@@ -3609,7 +2969,8 @@ class astrocamera(attributemaster): # 1 references.
         if filecount > 0:
             for i,file in enumerate(files):
                 # Check for EXIT from keyboard.
-                if Keyboard.Check().lower() == 'x': # Exit key pressed.
+                kcl = Keyboard.Check().lower()
+                if kcl in ['x',chr(27)]: # Exit key pressed.
                     print ("")
                     print ("** Quit **")
                     break
@@ -3662,6 +3023,7 @@ class astrocamera(attributemaster): # 1 references.
         FileRoot = FolderList.get('dark') + 'dark_'
         self.Log("Generating DARK image set.")
         self.Log("These match the LIGHT exposure time of",self.ExposureSeconds,"seconds.")
+        self.Log("These are used to remove electrical noise from the images.")
         self.Log("Lens cap must be ON.")
         self.Log("Images will be stored in", FileRoot)
         #inp = input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
@@ -3687,6 +3049,7 @@ class astrocamera(attributemaster): # 1 references.
         self.SetImageType('darkflat') # Tell the camera we are taking darkflat photos.
         FileRoot = FolderList.get('darkflat') + 'darkflat_'
         self.Log("Generating DARK FLAT image set.")
+        self.Log("These help remove electrical and manufacturing noise from the images.")
         self.Log("These match the FLAT exposure time of",ExposureMicroseconds / 1000000, "seconds.")
         self.Log("Lens cap must be ON.")
         self.Log("Images will be stored in", FileRoot)
@@ -3713,6 +3076,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("Generating FLAT image set.")
         self.Log("These are flat white unfocused images.")
         self.Log("These will be a short exposure time (Auto exposure)")
+        self.Log("Flat images are used to compensate for vignetting and dealing with dust and dead pixels.")
         self.Log("The lens cap must be OFF. You need a evenly lit neutral white target.")
         self.Log("People often stretch a white t-shirt over the lens and point at a bright area of sky.")
         self.Log("You can re-use the flat image set across multiple campaigns.")
@@ -3739,6 +3103,8 @@ class astrocamera(attributemaster): # 1 references.
         FileRoot = FolderList.get('bias') + 'bias_'
         self.Log("Generating OFFSET/BIAS image set.")
         self.Log("These will be the shortest possible exposure time (FASTEST)",ExposureMicroseconds / 1000000,"seconds")
+        self.Log("The temperature and ISO settings must be the same as the LIGHT images.")
+        self.Log("These are used to remove manufacturing defects from the images that the sensor captures.")
         self.Log("Lens cap must be ON.")
         #inp = input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
@@ -5191,9 +4557,10 @@ class imagetracker(attributemaster): # 1 references.
         self.rotation = None # Measured rotation between images.
         self.measureddelta = None # Total seconds between reference images.
 
-
-        self.imagepc = 100 # Percent scale for images when stored and processed. Smaller is faster but less precise. Find a good balance.
-                           # NOTE: As the image scale changes, the CountStars() method's min/max thresholds may need adjusting.
+        #self.imagepc = 100 # Percent scale for images when stored and processed. Smaller is faster but less precise. Find a good balance.
+        #                   # NOTE: As the image scale changes, the CountStars() method's min/max thresholds may need adjusting.
+        #                   # *Q* Remove this parameter, it is not being used anymore.
+                           
         self.PreparedImages = 0 # Incrementing counter of images handled.
         self.TargetStarMatchList = [] # List of star locations in TargetImage (calculated by FindTransform method)
         self.LatestStarMatchList = [] # List of star locations in LatestImage (calculated by FindTransform method)
@@ -5222,25 +4589,25 @@ class imagetracker(attributemaster): # 1 references.
         self.measureddelta = None # Total seconds between reference images.
         self.Log("ImageTracker.Reset: End",terminal=False)
 
-    def ScaleImage(self,cvimagebuffer):
-        """ Take a CVImage buffer and scale it based upon self.imagepc percent. 
-            If that is 100% then no scaling is done. 
-            Note: The scaling is relative to the SENSOR dimensions, NOT the current image dimensions.
-                  This is so that images from multiple sources are all scaled relative to the same standard.
-                  Changing the scale may also change the sensitivity of the CountStars() method.                  """
-        self.Log("ImageTracker.ScaleImage: Begin",terminal=False)
-        if self.imagepc != 100:
-            width = int(SensorInUse.PixelWidth * self.imagepc / 100) # Always scale relative to sensor size for consistency.
-            if width % 1 == 1: width += 1 # Must be even dimensions.
-            height = int(SensorInUse.PixelHeight * self.imagepc / 100) # Always scale relative to sensor size for consistency.
-            if height % 1 == 1: height += 1 # Must be even dimensions.
-            dim = (width, height)
-            self.Log("Imagetracker.ScaleImage: Scaling to h", height, ", w", width,terminal=False)
-            cvimagebuffer = cv2.resize(cvimagebuffer, dim, interpolation = cv2.INTER_AREA)
-        else:
-            self.Log("Imagetracker.ScaleImage: Retaining original 100% scale.",terminal=False)
-        self.Log("ImageTracker.ScaleImage: End. Dimensions", cvimagebuffer.shape[0], "*", cvimagebuffer.shape[1],terminal=False)
-        return cvimagebuffer
+    #def ScaleImage(self,cvimagebuffer):
+    #    """ Take a CVImage buffer and scale it based upon self.imagepc percent. 
+    #        If that is 100% then no scaling is done. 
+    #        Note: The scaling is relative to the SENSOR dimensions, NOT the current image dimensions.
+    #              This is so that images from multiple sources are all scaled relative to the same standard.
+    #              Changing the scale may also change the sensitivity of the CountStars() method.                  """
+    #    self.Log("ImageTracker.ScaleImage: Begin",terminal=False)
+    #    if self.imagepc != 100:
+    #        width = int(SensorInUse.PixelWidth * self.imagepc / 100) # Always scale relative to sensor size for consistency.
+    #        if width % 1 == 1: width += 1 # Must be even dimensions.
+    #        height = int(SensorInUse.PixelHeight * self.imagepc / 100) # Always scale relative to sensor size for consistency.
+    #        if height % 1 == 1: height += 1 # Must be even dimensions.
+    #        dim = (width, height)
+    #        self.Log("Imagetracker.ScaleImage: Scaling to h", height, ", w", width,terminal=False)
+    #        cvimagebuffer = cv2.resize(cvimagebuffer, dim, interpolation = cv2.INTER_AREA)
+    #    else:
+    #        self.Log("Imagetracker.ScaleImage: Retaining original 100% scale.",terminal=False)
+    #    self.Log("ImageTracker.ScaleImage: End. Dimensions", cvimagebuffer.shape[0], "*", cvimagebuffer.shape[1],terminal=False)
+    #    return cvimagebuffer
 
     def CountStars(self,cvimagebuffer,minval=3,maxval=300):
         """ Count the number of stars in an image. 
@@ -5288,8 +4655,8 @@ class imagetracker(attributemaster): # 1 references.
         # - Use adaptive thresholding now to make the stars more crisp.
         # - Adaptive means that the threshold limit between BLACK and WHITE is chosen by the function.
         retval, cvimagebuffer = cv2.threshold(cvimagebuffer,16,255,cv2.THRESH_BINARY + cv2.THRESH_OTSU) # OTSU is adaptive threshold limits.
-        # 4th shrink the image to make movement comparisons faster (though less precise).
-        cvimagebuffer = self.ScaleImage(cvimagebuffer)
+        # # 4th shrink the image to make movement comparisons faster (though less precise).
+        # cvimagebuffer = self.ScaleImage(cvimagebuffer)
         self.Log("ImageTracker.PrepareImage: End. Image is",cvimagebuffer.shape[0],"*",cvimagebuffer.shape[1],terminal=False)
         return cvimagebuffer
         
@@ -5414,8 +4781,10 @@ class imagetracker(attributemaster): # 1 references.
                     self.Log("ImageTracker.FindTransform: Example LSL 1st entry is:", str(LSL[0]),terminal=False)
                 self.Log("ImageTracker.FindTransform: Identified " + str(len(LSL)) + " suitable stars in latest image.",terminal=False)
                 self.Log("ImageTracker.FindTransform: LatestStarMatchList " + str(LSL) + ".",terminal=False)
-                self.dx = int(-1 * (100 / self.imagepc) * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
-                self.dy = int(-1 * (100 / self.imagepc) * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
+                #self.dx = int(-1 * (100 / self.imagepc) * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
+                self.dx = int(-1 * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
+                #self.dy = int(-1 * (100 / self.imagepc) * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
+                self.dy = int(-1 * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
                 self.rotation = round(math.degrees(transform.rotation),3) # How does the image need to be rotated? Convert radians into degrees.
                 self.Log("ImageTracker.FindTransform: Calculated transform: dx=" + str(self.dx),"dy=" + str(self.dy),terminal=False)
                 self.Log("ImageTracker.FindTransform: Calculated rotation:",self.rotation,"degrees",terminal=False) # How does the image need rotating?
@@ -5495,8 +4864,10 @@ class imagetracker(attributemaster): # 1 references.
                     self.Log("ImageTracker.FindTransform: Example LSL 1st entry is:", str(LSL[0]),terminal=False)
                 self.Log("ImageTracker.FindTransform: Identified " + str(len(LSL)) + " suitable stars in latest image.",terminal=False)
                 self.Log("ImageTracker.FindTransform: LatestStarMatchList " + str(LSL) + ".",terminal=False)
-                self.dx = int(recoveryfactor * -1 * (100 / self.imagepc) * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
-                self.dy = int(recoveryfactor * -1 * (100 / self.imagepc) * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
+                #self.dx = int(recoveryfactor * -1 * (100 / self.imagepc) * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
+                self.dx = int(recoveryfactor * -1 * transform.translation[0]) # X-Difference scaled back up to compensate for any image scaling.
+                #self.dy = int(recoveryfactor * -1 * (100 / self.imagepc) * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
+                self.dy = int(recoveryfactor * -1 * transform.translation[1]) # Y-Difference scaled back up to compensate for any image scaling.
                 self.rotation = round(math.degrees(transform.rotation),3) # How does the image need to be rotated? Convert radians into degrees.
                 self.Log("ImageTracker.FindTransform: Calculated transform: dx=" + str(self.dx),"dy=" + str(self.dy),terminal=False)
                 self.Log("ImageTracker.FindTransform: Calculated rotation:",self.rotation,"degrees",terminal=False) # How does the image need rotating?
@@ -5529,18 +4900,66 @@ class imagetracker(attributemaster): # 1 references.
             self.Log("imagetracker.ValidStarValues(",entry,") type",type(entry),"was unacceptable.",terminal=True)
         return result
 
-    def MarkLocation(self,image,starx,stary,color,font):
+    def MarkLocation(self,image,starx,stary,color,font,text=None):
         """ Write the location text next to the star.
-            Places the text left/right/above/below depending upon it's location in the image. """
+            Places the text left/right depending upon it's location in the image.
+            Write any 'text' value above centre of star. """
         starx = int(starx)
         stary = int(stary)
         if starx < (image.shape[1] / 2): xloc = starx + 10
         else: xloc = starx - 120
-        if stary < (image.shape[0] / 2): yloc = stary + 10
-        else: yloc = stary - 20
-        text = "(" + str(starx) + "," + str(stary) + ")"
-        image = cv2.putText(image,text,(xloc,yloc),font,0.5,color)
+        #if stary < (image.shape[0] / 2): yloc = stary + 10
+        #else: yloc = stary - 20
+        yloc = stary
+        loctext = "(" + str(starx) + "," + str(stary) + ")"
+        image = cv2.putText(image,loctext,(xloc,yloc),font,0.5,color)
+        if text != None: # There's additional info to print above the star.
+            image = cv2.putText(image,text,(starx - 10,yloc - 20),font,0.5,color)
         return image
+        
+    def DrawDumbbell(self,imagebuffer,drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow):
+        """ Add a 'dumbbell' to an image between two different points.
+        
+            from = tuple (x,y)
+            to = tuple (x,y)
+            fromcolor = tuple (b,g,r,a) 
+            tocolor = tuple (b,g,r,a)
+            linecolor = tuple (b,g,r,a)
+            arrow = boolean 6
+        
+              xxx                     .    xxx
+             x   x                     .  x   x
+            x     x                     .x     x
+            x  O  x----------------------x  o  x
+            x     x                     .x     x 
+             x   x                     .  x   x
+              xxx                     .    xxx                   """
+            
+        fromx = drawfrom[0] # Centre of the FROM circle.
+        fromy = drawfrom[1]
+        tox = drawto[0] # Centre of the TO circle.
+        toy = drawto[1]
+        # Calculate distance between FROM and TO points.
+        dx = tox - fromx
+        dy = toy - fromy
+        distance = math.sqrt((dx **2) + (dy **2))
+        angle = math.atan2(dy,dx) # What angle is the joining line at?
+        # Line does not cross the boundary circle drawn around each point.
+        # Calculate the points on the circumference of each circle that the arrowed line will start and end on.
+        rc = rad * math.cos(angle) # x offset for circle edge where line starts.
+        rs = rad * math.sin(angle) # y offset for circle edge where line starts.
+        startx = int(fromx + rc) # Draw line from this point on the starting circle.
+        starty = int(fromy + rs)
+        endx = int(tox - rc) # Draw line to this point on the ending circle.
+        endy = int(toy - rs)
+        dia = rad * 2 # Only draw the line if there's a big enough gap between the two circles.
+        if distance > dia: # Enough space to draw a line.
+            arrowproportion = 10.0 / (distance - dia) # ArrowedLine specifies arrow size as proportion of line length. We need constant 10pixel arrow heads.
+            if arrow: imagebuffer = cv2.arrowedLine(imagebuffer, (startx,starty), (endx,endy), linecolor, thickness=1, line_type=cv2.LINE_AA, tipLength=arrowproportion)
+            else: imagebuffer = cv2.line(imagebuffer, (startx,starty), (endx,endy), linecolor, thickness=1, lineType=cv2.LINE_AA)
+        imagebuffer = cv2.circle(imagebuffer,(fromx, fromy), rad, fromcolor, thickness=1, lineType=cv2.LINE_AA)
+        imagebuffer = cv2.circle(imagebuffer,(tox, toy), rad, tocolor, thickness=1, lineType=cv2.LINE_AA)
+        return imagebuffer # The image now has the 'dumbbell' drawn on it.
         
     def SaveTrackingAnalysis(self,latestlist=None,targetlist=None):
         """ Combine LATEST, TARGET star lists and show which stars were matched up in FindTransform.
@@ -5569,27 +4988,27 @@ class imagetracker(attributemaster): # 1 references.
                 else: self.Log("imagetracker.SaveTrackingAnalysis: LatestStarMatchList. lstar",lstar,"bad values.",terminal=True)
                 if self.ValidStarValues(tstar) and self.ValidStarValues(lstar): image = cv2.arrowedLine(image,(lx,ly),(tx,ty),BGRWhite,thickness=1,line_type=cv2.LINE_AA,tipLength=0.1) # Green circle around matched Target stars.
                 # New solution to above code... remove above if this works.
-                image = DrawDumbbell(image,(lx,ly),(tx,ty),20,BGRRed,BGRGreen,BGRYellow,arrow=True)
+                image = self.DrawDumbbell(image,(lx,ly),(tx,ty),20,BGRRed,BGRGreen,BGRYellow,arrow=True)
         else: # Lists don't agree, so don't try to map them.
             self.Log("imagetracker.SaveTrackingAnalysis: Conflicting length of star lists: Target", len(self.TargetStarMatchList), "vs Latest", len(self.LatestStarMatchList),terminal=False)
             DriftWindow.Print(NowHMS() + " drift analysis image not done.") # Note analysis not done.
         # Superimpose all the TARGET stars. (Stars we expect to see)
-        for star in self.TargetStarList: 
+        for i,star in enumerate(self.TargetStarList): 
             self.Log("SaveTrackingAnalysis: target star",star,terminal=False)
             if self.ValidStarValues(star): 
                 starx = int(star[0])
                 stary = int(star[1])
                 image = cv2.circle(image,(starx,stary),5,BGRGreen,thickness=-1,lineType=cv2.LINE_AA) # Green dot for Target stars.
-                image = self.MarkLocation(image,starx,stary,BGRGreen,font)
+                image = self.MarkLocation(image,starx,stary,BGRGreen,font,"[" + str(i) + "]")
             else: self.Log("imagetracker.SaveTrackingAnalysis: TargetStarList. star",star,"bad values.",terminal=True)
         # Superimpose all the LATEST stars. (Stars we actually see)
-        for star in self.LatestStarList: 
+        for i,star in enumerate(self.LatestStarList): 
             self.Log("SaveTrackingAnalysis: latest star",star,terminal=False)
             if self.ValidStarValues(star): 
                 starx = int(star[0])
                 stary = int(star[1])
                 image = cv2.circle(image,(starx,stary),5,BGRRed,thickness=-1,lineType=cv2.LINE_AA) # Red dot for Latest stars.
-                image = self.MarkLocation(image,starx,stary,BGRRed,font)
+                image = self.MarkLocation(image,starx,stary,BGRRed,font,"[" + str(i) + "]")
             else: self.Log("imagetracker.SaveTrackingAnalysis: LatestStarList. star",star,"bad values.",terminal=True)
         timestamp = str(NowUTC()).split('.')[0] + " UTC"
         image = cv2.putText(image,"Tracking Analysis " + timestamp,(1300,100),font,2,BGRWhite,thickness=2,lineType=cv2.LINE_AA)
@@ -5870,11 +5289,6 @@ comets = (comets.sort_values('reference')
 
 CometList = comets['designation'].tolist() # Convert comet designations column into a list for searching later on.
 
-MainLog.Log("Establish observer's location...")
-HomeSite = planets['earth'] + HomeSiteTopos # Define HomeSite as a point on earth. Could be from GPS too.
-#Pole = planets['earth'] + PoleTopos # Define North Pole. This is used to align a polar mounted camera with a distant object. (Won't work for satellites!)
-RadecBase = Star(ra_hours=(0,0,0.0), dec_degrees=(0,0,0.0)) # To calculate where Radec ZERO point is. (For Equatorial mount positioning)
-
 # ----------------------------------------------------------------------------------------------------------
 
 class localstars(attributemaster): # 1 references.
@@ -6091,32 +5505,143 @@ for key,value in Meteor_dictionary.items(): # Python3: Check every item in the m
     Meteor_namelist.append(key)
 MainLog.Log('Meteor shower list:', Meteor_namelist,terminal=False)
 
+# ---------------------------------------------------------------------------------------------------------------        
+
+class celestrak():
+    """ Download celestrak TLE data. 
+        Data is cached on disc and only updated once the disc cache is > 30 days old. """
+    def __init__(self,url,logger=None):
+        self.Log = logger # Define which logging stream to use.
+        self.URL = url # "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle" # Where to find the latest TLE data
+        self.TLEDict = {} # TLE data converted into a dictionary for easy searching.
+        self.CelestrakCacheFileName = '/home/pi/pilomar/data/celestrakcache.json' # The disc cache filename used to store the data locally.
+        self.SatelliteList = [] # List of satellite names, use for selecting objects.
+        self.Refresh() # Refresh the data, load from CelesTrak if needed else use the disc cache.
+        
+    def TleAgeWarning(self,name):
+        """ Extract the epoch datetime from the 1st line of a TLE entry.
+            Warn if it's > 90days old. It will need updating. """
+        line1, line2 = self.GetTleLines(name)
+        if line1 == None:
+            if self.Log != None: self.Log("celestrak.TleAgeWarning:",name,"is not recognised.",level='error',terminal=True)
+            return
+        epochyear = int(line1[18:20]) + 2000
+        epochday = float(line1[20:32])
+        epochdate = datetime(year=epochyear,month=1,day=1)
+        epochdate += timedelta(days=int(epochday) - 1)
+        daysold = (datetime.now() - epochdate).days
+        if self.Log != None: self.Log(name,"TLE data was updated",epochdate,terminal=False)
+        if daysold > 30:
+            print(textcolor.YELLOW("WARNING: " + name + " TLE data is " + str(daysold) + " days old. It may now be inaccurate. Consider refreshing it."))
+            print(textcolor.YELLOW("Check the source of data from the celestrak.org website."))
+        else:
+            print(textcolor.GREEN(name + " TLE data is " + str(daysold) + " days old."))
+            
+    def Refresh(self):
+        """ Load data from cache if recent enough, else from celestrak.org website. """
+        if self.Log != None: 
+            self.Log("celestrak.Refresh: Begin",terminal=False)
+            self.Log("celestrak.Refresh: Try disc cache",terminal=False)
+        self.TLEDict = {} # No data until refreshed.
+        self.LoadCache(self.CelestrakCacheFileName) # Try to load from disc if recent enough.
+        if self.TLEDict == {}: # Empty, get a fresh copy.
+            if self.Log != None: self.Log("celestrak.Refresh: Download fresh from internet.",terminal=False)
+            self.DownloadData()
+        if self.Log != None:     
+            self.Log("celestrak.Refresh: Satellites:", self.SatelliteList, terminal=False)
+            self.Log("celestrak.Refresh: done",terminal=False)
+        
+    def DownloadData(self):
+        """ Download fresh data from CelesTrak directly. """
+        if self.Log != None: self.Log("celestrak.DownloadData: begin",terminal=False)
+        WSOK = True
+        try: # Trap and report errors, but don't allow the entire program to abort.
+            response = requests.get(self.URL) # Try to retrieve the response from the remote server.
+            response.raise_for_status() # Check for errors in the request.
+            TLEText = response.text # Convert the response into a text object. 
+            self.ExtractData(TLEText) # Convert text into dictionary.
+        except HTTPError as e: # There was an HTTP error.
+            if self.Log != None: self.Log('celestrak.DownloadData: HTTPError: ' + str(e),level='warning',terminal=False)
+            WSOK = False
+        except Exception as e: # There was some other sort of error.
+            if self.Log != None: self.Log('celestrak.DownloadData: Error: ' + str(e),level='warning',terminal=True)
+            WSOK = False
+        self.Log("celestrak.DownloadData: end",WSOK,terminal=False)
+        return WSOK
+
+    def FileAge(self,filename): # 2 references.
+        """ How many seconds old is a file? """
+        if os.path.exists(filename):
+            mtime = os.path.getmtime(filename)
+            td = datetime.now() - datetime.fromtimestamp(mtime)
+            result = int(td.total_seconds())
+        else:
+            result = None
+        return result
+
+    def LoadCache(self,filename):
+        """ Load a single cache if available and recent enough. """
+        if os.path.exists(filename):
+            fa = self.FileAge(filename)
+            self.Log("celestrak.LoadCache:",filename,"is",HRSeconds(fa),"old",terminal=False)
+            if fa < (7 * 24 * 60 * 60): # Only use the cache if less than a week old.
+                with open(filename,'r') as f:
+                    self.Log("celestrak.LoadCache: Loading Cache: " + filename,terminal=False)
+                    self.TLEDict = json.load(f)
+        else:
+            if self.Log != None: self.Log("celestrak.LoadCache:",filename,"cache does not exist.",terminal=False)
+        
+    def ExtractData(self,TLEText):
+        """ Given the TLEText list of satellites, extract each satellite entry into a dictionary.
+            Save the dictionary as a json file so it can be reused without more web calls. """
+        if self.Log != None: self.Log("celestrak.ExtractData: Begin",terminal=False)
+        itemdict = {}
+        itemname = ''
+        for line in TLEText.split('\n'): # Split the text by newline characters.
+            line = line.strip() # Remove all other line terminators.
+            if line.startswith('1 '): #1st data line of tle data.
+                itemdict['1'] = line # Set TLE line 1 element.
+            elif line.startswith('2 '): #last data line of tle data.
+                itemdict['2'] = line # Set TLE line 2 element.
+                self.TLEDict[itemname] = itemdict # This completes the TLE entry, add it to the dictionary.
+                itemdict = {} # clear for building next entry.
+            else: # 1st line of tle data.
+                itemname = line # Set the name of the satellite.
+                self.SatelliteList.append(itemname) # Add to the search list of recognised satellite names.
+        with open(self.CelestrakCacheFileName,'w') as f: # Dump as json to disc.
+            json.dump(self.TLEDict,f,indent=4,default=str) # Save the updated dictionary back to disc.
+                
+    def GetTleLines(self,name):
+        """ Return the two TLE lines for any given satellite name. """
+        line1 = None
+        line2 = None
+        if name in self.TLEDict:
+            line1 = self.TLEDict[name]['1']
+            line2 = self.TLEDict[name]['2']
+        return line1, line2
+        
+# ---------------------------------------------------------------------------------------------------------------        
+        
 # And ISS position from CelesTrak data (TLE files).
-def TleAgeWarning(name,tleline): # 2 references.
-    epochyear = int(tleline[18:20]) + 2000
-    epochday = float(tleline[20:32])
-    epochdate = datetime(year=epochyear,month=1,day=1)
-    epochdate += timedelta(days=int(epochday) - 1)
-    daysold = (datetime.now() - epochdate).days
-    MainLog.Log(name,"TLE data was updated",epochdate,terminal=False)
-    if daysold > 90:
-        MainLog.Log("WARNING:",name,"TLE data is",daysold,"days old. It may be inaccurate. Consider refreshing it.",level='warning',terminal=True)
-        MainLog.Log("A good source of up-to-date TLE data is the CelesTrak website.",level='warning',terminal=True)
-    else:
-        MainLog.Log(name,"TLE data is",daysold,"days old.",terminal=True)
-    
-MainLog.Log("Loading earth satellites...",terminal=True)
-MainLog.Log("- ISS (ZARYA)",terminal=True)
-line1 = '1 25544U 98067A   23052.38451573  .00021406  00000+0  39294-3 0  9990' # Updated 21.Feb.2023
-line2 = '2 25544  51.6386 182.1199 0005240  12.7328  23.3861 15.49187897383833'
+
+MainLog.Log("Loading CelesTrak station data...",terminal=True)
+CelesTrak = celestrak("https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle",logger=MainLog.Log)
+MainLog.Log("Calculating earth stations from CelesTrak data",terminal=True)
+
+MainLog.Log("ISS (ZARYA)",terminal=True)
+line1, line2 = CelesTrak.GetTleLines("ISS (ZARYA)")
 ISS = EarthSatellite(line1, line2, 'ISS (ZARYA)', ts)
-TleAgeWarning('ISS',line1)
-# And CSS position from CelesTrak data (TLE files).
-MainLog.Log("- CSS (TIANHE-1)",terminal=True)
-line1 = '1 48274U 21035A   23052.28652856  .00016986  00000+0  19781-3 0  9998' # Updated 21.Feb.2023
-line2 = '2 48274  41.4743 142.7275 0004853 293.9518 164.9312 15.61282286103703'
-CSS = EarthSatellite(line1, line2, 'CSS (TIANHE-1)', ts)
-TleAgeWarning('CSS',line1)
+
+MainLog.Log("CSS (TIANHE)",terminal=True)
+line1, line2 = CelesTrak.GetTleLines("CSS (TIANHE)")
+CSS = EarthSatellite(line1, line2, 'CSS (TIANHE)', ts)
+
+# ------------------------------------------------------------------------------------------------------
+
+MainLog.Log("Establish observer's location...")
+HomeSite = planets['earth'] + HomeSiteTopos # Define HomeSite as a point on earth. Could be from GPS too.
+#Pole = planets['earth'] + PoleTopos # Define North Pole. This is used to align a polar mounted camera with a distant object. (Won't work for satellites!)
+RadecBase = Star(ra_hours=(0,0,0.0), dec_degrees=(0,0,0.0)) # To calculate where Radec ZERO point is. (For Equatorial mount positioning)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -6302,19 +5827,19 @@ class target(attributemaster): # 28 references.
         TempStarAstro = HomeSite.at(time).observe(self.RotationPoint) # Work out where the rotation point is.
         TempStarApparent = TempStarAstro.apparent() # Calculate its position in the sky
         TempStarAlt, TempStarAz, TempStardistance = TempStarApparent.altaz() # Get the azimuth and altitude position of the rotation point in the sky.
-        self.Log('target.RotationPointBearing: Rotation point Alt/Az',TempStarAlt, TempStarAz,terminal=False)
+        #self.Log('target.RotationPointBearing: Rotation point Alt/Az',TempStarAlt, TempStarAz,terminal=False)
         az_degree, alt_degree = self.AzAltDegrees(time=time) # Get current target position.
-        self.Log('target.RotationPointBearing: Target Alt/Az',alt_degree, az_degree,terminal=False)
+        #self.Log('target.RotationPointBearing: Target Alt/Az',alt_degree, az_degree,terminal=False)
         PlotStarAlt, PlotStarAz = RelativeAltAz(TempStarAlt.degrees,TempStarAz.degrees,alt_degree,az_degree)
-        self.Log('target.RotationPointBearing: Relative Alt/Az',PlotStarAlt, PlotStarAz,terminal=False)
+        #self.Log('target.RotationPointBearing: Relative Alt/Az',PlotStarAlt, PlotStarAz,terminal=False)
         TempStarX, TempStarY = PlotRelativeAltAz(PlotStarAlt,PlotStarAz,SensorInUse.PixelHeight,SensorInUse.PixelWidth)
-        self.Log('target.RotationPointBearing: PlotRelative X/Y',TempStarX, TempStarY,terminal=False)
+        #self.Log('target.RotationPointBearing: PlotRelative X/Y',TempStarX, TempStarY,terminal=False)
         xpos = round(SensorInUse.PixelWidth/2)
         ypos = round(SensorInUse.PixelHeight/2)
         # Calculate rotation angle.
         opposite = TempStarX - xpos
         adjacent = TempStarY - ypos
-        self.Log('target.RotationPointBearing: Opposite',opposite, ', Adjacent',adjacent,terminal=False)
+        #self.Log('target.RotationPointBearing: Opposite',opposite, ', Adjacent',adjacent,terminal=False)
         rotation = math.degrees(math.atan2(opposite,adjacent))
         self.Log('target.RotationPointBearing: rotation=',rotation,DegreeSymbol,terminal=False)
         return rotation
@@ -7111,22 +6636,12 @@ def ChooseHistory(selection=None): # 1 references.
                 if az <= 180: direction = Symbol['up'] # Indicate if it's rising or setting. In northern hemisphere the azimuth is usually enough.
                 else: direction = Symbol['down']
                 visline = "   " + str(round(alt,3)).rjust(7) + " " + direction + " / " + str(round(az,3)).rjust(8)
-                risesetline = temptarget.NextRiseSetHHMM().ljust(7)[:7] # When is next RISE/SET?
-                #if temptarget.Magnitude != None: # Show apparent magnitude if known too.
-                #    magline = "  " + str(temptarget.Magnitude).rjust(5)
-                #else: # Apparent magnitude not known.
-                #    magline = "---"
+                if temptarget.ObjectType == "earth satellite": # Rise/Set is not calculated for satellites yet.
+                    risesetline = '??:??'.ljust(7)[:7]
+                else:
+                    risesetline = temptarget.NextRiseSetHHMM().ljust(7)[:7] # When is next RISE/SET?
                 if temptarget.Visible(time=temptime) == False: 
                     print(textcolor.red(str(count).rjust(6)[:6]),displine, textcolor.red(visline),risesetline,miscline)
-                #    # Check if it will rise soon. (Default is in the next hour).
-                #    # risetime = temptarget.WillBeVisible()
-                #    risetime, settime = temptarget.RiseSet()
-                #    #self.Log('target.WillBeVisible: RiseSet()=', risetime, settime, terminal=False)
-                #    MainLog.Log('ChooseHistory: RiseSet()=', risetime, settime, terminal=False)
-                #    if risetime != None:
-                #        print(textcolor.yellow("                           Will rise " + str(risetime).split('.')[0] + " UTC"))
-                #    else:
-                #        print(textcolor.red("                           Will not rise."))
                 elif temptarget.ApproachingLimit(time=temptime): 
                     print(textcolor.yellow(str(count).rjust(6)[:6]),displine,textcolor.yellow(visline),risesetline,miscline)
                 else: 
@@ -7194,6 +6709,7 @@ print ("Target selection")
 
 def ChooseLastTarget(): # 2 references.
     """ Quick resume of previous observation target and settings. """
+    MainLog.Log("ChooseLastTarget: Begin",terminal=False)
     obstarget = None # No target selected yet.
     if not os.path.exists(HistoryFile): # No file to process yet.
         print (textcolor.red("ChooseLastTarget: " + HistoryFile + " does not yet exist."))
@@ -9345,8 +8861,12 @@ def UpdateWindGustCheck(az): # 1 references.
         else:
             WeatherWindow.FieldColor('NOTES',fg=OSW_TEXT_GOOD)
         WeatherWindow.FieldValue('NOTES','Target is ' + str(round(az)) + DegreeSymbol + ', wind from ' + str(winddir) + DegreeSymbol + ', ' + Symbol['delta'] + ' ' + str(winddelta) + DegreeSymbol + ' ' + windtemp)
+        tempdict = AstroSeeing.GetFogData() # Pull weather metrics and establish a risk of fog.
+        fr = tempdict.get('fogrisk','')
+        WeatherWindow.FieldValue('FOG',fr)
+        if fr in ['3/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_BAD,bg=OSW_TEXT_BG)
+        elif fr in ['0/3','1/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG)
         if windtemp in ['(no wind risk)','(low wind risk)']: # So consider FOG risk instead.
-            tempdict = AstroSeeing.GetFogData() # Pull weather metrics and establish a risk of fog.
             if tempdict['fogrisk'] in ['3/3']: # Some risk of fog.
                 WeatherWindow.FieldValue('NOTES','Fog risk: dewpoint' + Symbol['delta'] + ':' + tempdict['dewpointstatus'] + ' wind:' + tempdict['windspeedstatus'] + ' humidity:' + tempdict['humiditystatus'] + '%')
                 if tempdict['fogrisk'] in ['3/3']: WeatherWindow.FieldColor('NOTES',fg=OSW_TEXT_BAD)
@@ -9561,7 +9081,7 @@ def ObservationRun(): # 1 references.
             keypress = "" # Don't check keyboard this time round.
         if keypress != "": # Some keyboard input detected. 
             if ord(keypress) == 410: pass # Ignore the 410 character, it is associated with screen resizing.
-        if keypress == "x": # Break.
+        if keypress == "x" or keypress == chr(27): # Break with 'x' or 'esc' key.
             MainLog.Log("Keyboard interrupt: Terminating.",level='warning',terminal=False)
             ErrorWindow.Print(NowHMS() + ' Keyboard interrupt. Terminating observation.')
             observationresult = False # Don't continue.
@@ -9832,12 +9352,14 @@ def ObservationRun(): # 1 references.
             #ImageStatusWindow.Draw(TerminalRows,TerminalCols)
             ImageStatusWindow.Display(TerminalRows,TerminalCols)
             AstroSeeing.UpdateWindow(WeatherWindow) # Update weather measures in the window buffers.
-            FogForecast = AstroSeeing.GetFogData()
-            fr = FogForecast.get('fogrisk','')
-            WeatherWindow.FieldValue('FOG',fr)
-            if fr in ['3/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_BAD,bg=OSW_TEXT_BG)
-            elif fr in ['0/3','1/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG)
-            else: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_POOR,bg=OSW_TEXT_BG)
+# # -
+#             FogForecast = AstroSeeing.GetFogData()
+#             fr = FogForecast.get('fogrisk','')
+#             WeatherWindow.FieldValue('FOG',fr)
+#             if fr in ['3/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_BAD,bg=OSW_TEXT_BG)
+#             elif fr in ['0/3','1/3']: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG)
+#             else: WeatherWindow.FieldColor('FOG',fg=OSW_TEXT_POOR,bg=OSW_TEXT_BG)
+# # -            
             WeatherWindow.Display(TerminalRows,TerminalCols) # Display weather status.
             InstructionWindow.Display(TerminalRows,TerminalCols) # Display session status.
             if Parameters.ChartEnabled: # On screen primitive sky tracking chart.
@@ -9882,10 +9404,9 @@ def ObservationRun(): # 1 references.
     if Parameters.MarkupAvi: # We can generate a small animation (slow!) of the observation from the preview images.
         GeneratePreviewAvi()
 
-
     ReportObservationErrors()
 
-    print(textcolor.yellow("The images are stored in " + FolderList.get('session')))
+    textcolor.TextBox("The images are stored in " + FolderList.get('session'),fg=textcolor.YELLOW,bg=textcolor.BLACK)
     if CameraInUse.FastImageCapture: # Only JPG files have been created so far.
         print(textcolor.yellow("FastImageCapture is active. Only the raw JPG data files have been created so far."))
         print(textcolor.yellow("If you want to create separate DNG files, or pure JPG files you still need to process them."))
