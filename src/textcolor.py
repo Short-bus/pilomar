@@ -58,7 +58,7 @@ class textcolor:
         It includes various constants such as names of colors.
         It also makes some unicode symbols available via a dictionary so you can refer to them by name. """
 
-    __version__ = '0.0.3'
+    __version__ = '0.0.4'
     TermType = None
     Mode = 'putty' # 'putty' = full colour remote terminal, 'simple' = No colour, 'local' = Direct connection colour.
     # Some standard color names (XTERM names & a couple of common aliases).
@@ -102,8 +102,8 @@ class textcolor:
     LIGHTSEAGREEN = 37
     DEEPSKYBLUE2 = 38
     DEEPSKYBLUE1 = 39
-    GREEN3 = 40
-    SPRINGGREEN3 = 41
+    GREEN3A = 40
+    SPRINGGREEN3A = 41
     SPRINGGREEN2 = 42
     CYAN3 = 43
     DARKTURQUOISE = 44
@@ -133,12 +133,12 @@ class textcolor:
     STEELBLUE3 = 68
     CORNFLOWERBLUE = 69
     CHARTREUSE3 = 70
-    DARKSEAGREEN4 = 71
+    DARKSEAGREEN4A = 71
     CADETBLUE = 72
     CADETBLUEA = 73
     SKYBLUE3 = 74
     STEELBLUE1 = 75
-    CHARTREUSE3 = 76
+    CHARTREUSE3A = 76
     PALEGREEN3 = 77
     SEAGREEN3 = 78
     AQUAMARINE3 = 79
@@ -212,14 +212,14 @@ class textcolor:
     LIGHTSTEELBLUE = 147
     YELLOW3 = 148
     DARKOLIVEGREEN3 = 149
-    DARKSEAGREEN3 = 150
+    DARKSEAGREEN3A = 150
     DARKSEAGREEN2 = 151
     LIGHTCYAN3 = 152
     LIGHTSKYBLUE1 = 153
     GREENYELLOW = 154
     DARKOLIVEGREEN2 = 155
     PALEGREEN1 = 156
-    DARKSEAGREEN2 = 157
+    DARKSEAGREEN2A = 157
     DARKSEAGREEN1 = 158
     PALETURQUOISE1 = 159
     RED3A = 160
@@ -255,7 +255,7 @@ class textcolor:
     YELLOW2 = 190
     DARKOLIVEGREEN1 = 191
     DARKOLIVEGREEN1A = 192
-    DARKSEAGREEN1 = 193
+    DARKSEAGREEN1A = 193
     HONEYDEW2 = 194
     LIGHTCYAN1 = 195
     RED1 = 196
@@ -436,6 +436,60 @@ class textcolor:
         return (cols,rows)
 
     @staticmethod
+    def HRNumber(value,base=1000,decimals=1):
+        """ Given a number return a human readable text version.
+            Eg, turning 1,000,000 into 1.0M 
+            
+            inputs :-
+                value = The number to be converted.
+                base = 1000. Runs in thousands.
+                     = 1024. Runs in IT measurements.
+                decimals = The number of decimal places to return.
+
+            HRNumber(56312703,1000) returns :-
+                result = '56.3M'
+                prefix = 'mega'
+                symbol = 'M' 
+                
+                """
+        valdic = {'yocto':{'power':-8,'symbol':'y','name':'septillionth'},
+                  'zepto':{'power':-7,'symbol':'z','name':'sextillionth'},
+                  'atto' :{'power':-6,'symbol':'a','name':'quintillionth'},
+                  'femto':{'power':-5,'symbol':'f','name':'quadrillionth'},
+                  'pico': {'power':-4,'symbol':'p','name':'trillionth'},
+                  'nano': {'power':-3,'symbol':'n','name':'billionth'},
+                  'micro':{'power':-2,'symbol':'u','name':'millionth'},
+                  'milli':{'power':-1,'symbol':'m','name':'thousandth'},
+                  '':     {'power':0, 'symbol':'','name':''},
+                  'kilo': {'power':1, 'symbol':'k','name':'thousand'},
+                  'mega': {'power':2, 'symbol':'M','name':'million'},
+                  'giga': {'power':3, 'symbol':'G','name':'billion'},
+                  'tera': {'power':4, 'symbol':'T','name':'trillion'},
+                  'peta': {'power':5, 'symbol':'P','name':'quadrillion'},
+                  'exa':  {'power':6, 'symbol':'E','name':'quintillion'},
+                  'zetta':{'power':7, 'symbol':'Z','name':'sextillion'},
+                  'yotta':{'power':8, 'symbol':'Y','name':'septillion'}}
+                  # Not used here...
+                  #'centi':{'power':-2, 'symbol':'c','name':'hundredth'},
+                  #'deci': {'power':-1, 'symbol':'d','name':'tenth'},
+                  #'deca': {'power':1,  'symbol':'da','name':'ten'},
+                  #'hecto':{'power':2,  'symbol':'h','name':'hundred'},
+        # Default return values.
+        result = str(value) # Default has no conversion.
+        prefix = ''
+        symbol = ''
+        # Find better return conversion if possible.
+        for key,subdict in valdic.items():
+            scale = base ** subdict['power']
+            ranged = round(value / scale,decimals)
+            if 1.0 <= ranged < 1000: # This is a good fit.
+                result = str(ranged) + subdict['symbol']
+                prefix = key
+                symbol = subdict['symbol']
+                break
+        return result, prefix, symbol
+
+    @staticmethod
     def oscommand(cmd): # Common
         """ Execute a command,result is returned as clean list of lines. """
         try:
@@ -552,6 +606,14 @@ class textcolor:
             return "\033[38;5;" + str(value) + "m" + text + textcolor.reset()
 
     @staticmethod
+    def truecolor(r,g,b,text=''):
+        """ Truecolor colour mode supported. """
+        if textcolor.Mode == 'simple':
+            return text
+        else:
+            return "\033[38;2;" + str(r)+ ";" + str(g) + ";" + str(b) + "mtext\033[0m" + text + textcolor.reset()
+
+    @staticmethod
     def bgcolor(value=0,text=''):
         """ 256 colour mode supported."""
         if textcolor.Mode == 'simple':
@@ -560,31 +622,80 @@ class textcolor:
             return "\033[48;5;" + str(value) + "m" + text + textcolor.reset()
 
     @staticmethod
-    def rgbdecimal(r,g,b):
-        """ Take rgb values (scale 0.00-1.00) and calculate nearest 256 colour scheme value. """
-        v = int(round(r * 6 * 6 * 6)) + int(round(g * 6 * 6)) + int(round(b * 6)) + 16
-        return v
+    def rgbassign(r):
+        """ change r(or g or b) value from 0.0-1.0 range into 0-5 range
+            This assigns the 0-5 range more evenly depending upon the input 0.0-1.0 value. """
+        #if r <= 0.167: re = 0
+        #elif r <= 0.333: re = 1
+        #elif r <= 0.500: re = 2
+        #elif r <= 0.668: re = 3
+        #elif r <= 0.833: re = 4
+        #else: re = 5
+        re = min(int(r // (1/6)),5)
+        return re
 
     @staticmethod
+    def rgbdecimal(r,g,b):
+        """ Take rgb values (scale 0.00-1.00) and calculate nearest 215 color scheme value.
+            method parameter allows for alternative calculations.        """
+        # 0.0 = Level 0
+        # 1.0 = Level 5
+        #re = round(r * 5)
+        #ge = round(g * 5)
+        #be = round(b * 5)
+        re = textcolor.rgbassign(r)
+        ge = textcolor.rgbassign(g)
+        be = textcolor.rgbassign(b)
+        v = int(re * 6 * 6) + int(ge * 6) + int(be) + 16
+        return v
+        
+    @staticmethod
+    def rgbditherdecimal(r,g,b):
+        """ Take rgb values (scale 0.00-1.00) and calculate 2 nearest 215 color scheme values. 
+            This is to support using 'dithering' to match colors better.
+            Returns 2 colors.            """
+        # How close is the closest single available color?
+        ri = round(r * 5) / 5 # What are the rounded r,g,b levels for input values.
+        gi = round(g * 5) / 5
+        bi = round(b * 5) / 5
+        # What's the difference?
+        rd = r - ri
+        gd = g - gi
+        bd = b - bi
+        # Calculate colors each side of the nearest color.
+        r1 = max(r - rd,0.0)
+        g1 = max(g - gd,0.0)
+        b1 = max(b - bd,0.0)
+        r2 = min(r + rd,1.0)
+        g2 = min(g + gd,1.0)
+        b2 = min(b + bd,1.0)
+        # Establish the TWO colors either side of the NEAREST color. When mixed is this closer to the original.
+        #v1 = int(round(r1 * 5) * 6 * 6) + int(round(g1 * 5) * 6) + int(round(b1 * 5)) + 16
+        #v2 = int(round(r2 * 5) * 6 * 6) + int(round(g2 * 5) * 6) + int(round(b2 * 5)) + 16
+        v1 = textcolor.rgbdecimal(r1,g1,b1)
+        v2 = textcolor.rgbdecimal(r2,g2,b2)
+        return v1, v2
+        
+    @staticmethod
     def rgbpure(r,g,b):
-        """ Take RGB values (scale 0-5) and calculate nearest 256 colour scheme value. """
+        """ Take RGB values (scale 0-5) and calculate nearest 256 color scheme value. """
         v = (r * 6 * 6) + (g * 6) + b + 16
         v = v % 256 # Clip for safety.
         return v
 
-    @staticmethod
-    def fgbgcolorxxx(fg=7,bg=0,text='',reset=True):
-        """ 256 colour mode supported. 
-            if reset=True, the color is stopped at the end of the text. 
-            if reset=False, the color setting remains active after the text. """
-        print ('fgbgcolorxxx is a depricated version of fgbgcolor()')
-        if textcolor.Mode == 'simple':
-            return text
-        else:
-            if reset: 
-                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text + textcolor.reset() # Stop using this color after the text.
-            else:
-                return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text # Leave the color active.
+    #@staticmethod
+    #def fgbgcolorxxx(fg=7,bg=0,text='',reset=True):
+    #    """ 256 colour mode supported. 
+    #        if reset=True, the color is stopped at the end of the text. 
+    #        if reset=False, the color setting remains active after the text. """
+    #    print ('fgbgcolorxxx is a depricated version of fgbgcolor()')
+    #    if textcolor.Mode == 'simple':
+    #        return text
+    #    else:
+    #        if reset: 
+    #            return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text + textcolor.reset() # Stop using this color after the text.
+    #        else:
+    #            return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text # Leave the color active.
 
     @staticmethod
     def fgbgcolor(fg=7,bg=0,*args,sep=' ',reset=True):
@@ -630,7 +741,17 @@ class textcolor:
         print (textcolor.aqua('AQUA'))
         print (textcolor.white('WHITE'))
         print (textcolor.magenta('MAGENTA'))
-        print ("termtype",textcolor.TermType())
+        print ("termtype",textcolor.GetTermType())
+
+    @staticmethod
+    def opposite(colnum,color=False):
+        """ Return an opposing color to the proposed one. 
+            color = True: Return the 'negative' color. 
+            coloer = False: Return BLACK or WHITE. """
+        # *Q* Not finished yet.
+        if colnum == textcolor.BLACK: oppcol = textcolor.WHITE
+        else: oppcol = textcolor.BLACK
+        return oppcol
 
     @staticmethod
     def black(*args,sep=' ',invert=False):
@@ -907,6 +1028,92 @@ class messagewindow():
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
+class bigletters():
+    """ Primitive large font sizes. """
+    def __init__(self):
+        self.LetterDictionary = {}
+        self.InitialiseLD()
+        
+    def InitialiseLD(self):
+        self.LetterDictionary = {}
+        self.LetterDictionary['unknown'] = ["#####","# # #","## ##","# # #","#####"]
+        self.LetterDictionary[' '] = ["     ","     ","     ","     ","     "]
+        self.LetterDictionary['"'] = [" # # "," # # ","     ","     ","     "]
+        self.LetterDictionary["'"] = ["  #  ","  #  ","     ","     ","     "]
+        self.LetterDictionary['0'] = ["#####","#  ##","# # #","##  #","#####"]
+        self.LetterDictionary['1'] = ["   # ","  ## ","   # ","   # "," ####"]                                      
+        self.LetterDictionary['2'] = ["#####","    #","#####","#    ","#####"]                                      
+        self.LetterDictionary['3'] = ["#####","    #","#####","    #","#####"]                                      
+        self.LetterDictionary['4'] = ["#   #","#   #","#####","    #","    #"]                                      
+        self.LetterDictionary['5'] = ["#####","#    ","#####","    #","#####"]                                      
+        self.LetterDictionary['6'] = ["#####","#    ","#####","#   #","#####"]                                      
+        self.LetterDictionary['7'] = ["#####","    #","    #","    #","    #"]                                      
+        self.LetterDictionary['8'] = ["#####","#   #","#####","#   #","#####"]                                      
+        self.LetterDictionary['9'] = ["#####","#   #","#####","    #","    #"]                                      
+        self.LetterDictionary['.'] = ["     ","     ","     ","     ","  #  "]                                      
+        self.LetterDictionary[','] = ["     ","     ","     ","  ## ","   # "]                                      
+        self.LetterDictionary[':'] = ["     ",
+                                      "  #  ",
+                                      "     ",
+                                      "  #  ",
+                                      "     "]                                      
+        self.LetterDictionary['!'] = ["  #  ",
+                                      "  #  ",
+                                      "  #  ",
+                                      "     ",
+                                      "  #  "]                                      
+        self.LetterDictionary['-'] = ["     ",
+                                      "     ",
+                                      " ### ",
+                                      "     ",
+                                      "     "]                                      
+        self.LetterDictionary['+'] = ["     ",
+                                      "  #  ",
+                                      " ### ",
+                                      "  #  ",
+                                      "     "]                                      
+        self.LetterDictionary['*'] = ["  #  ",
+                                      "# # #",
+                                      " ### ",
+                                      " # # ",
+                                      "#   #"]                                      
+        self.LetterDictionary['='] = ["     ",
+                                      " ### ",
+                                      "     ",
+                                      " ### ",
+                                      "     "]                                      
+        self.LetterDictionary['?'] = [" ### ",
+                                      "#   #",
+                                      "  ## ",
+                                      "     ",
+                                      "  #  "]                                      
+        #for key,item in self.LetterDictionary.items():
+        #    # item is a list of 5 lines. Convert the '#' characters into BLOCKS.
+        #    newitem = []
+        #    for lineitem in item:
+        #        newline = ''
+        #        for i in range(len(lineitem)):
+        #            if lineitem[i] == ' ': newline += ' '
+        #            else: newline += '\u2588'
+        #        newitem.append(newline)
+        #    self.LetterDictionary[key] = newitem
+
+    def GetLetter(self,letter):
+        """ Return letter pattern. """
+        if letter in self.LetterDictionary: return self.LetterDictionary[letter]
+        else: return self.LetterDictionary['unkown']
+        
+    def GenerateText(self,originaltext):
+        """ Given original text, generate the BigLetters version of it. """
+        lines = [[] for i in range(5)] # Create 5 empty lines.
+        for character in originaltext:
+            LD = self.GetLetter(character) # Returns 5 character lines.
+            for i,LL in enumerate(LD): # Parse each line in turn.
+                lines[i].append(LL + ' ')
+        return lines
+                                      
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
 class field():
     """ A data field in a colordisplay window.
 
@@ -922,7 +1129,7 @@ class field():
         self.Column = col
         self.Length = length
         self.Value = None
-        self.Justify = justify
+        self.Justify = justify # 'left','centre','right'
         self.Type = 'Data' # 'Data' field or 'ProgressBar'
         self.FGColor = None # Current color if it differs from the display defaults.
         self.BGColor = None
@@ -936,15 +1143,23 @@ class field():
         self.BadBG = None # LOWLOW and HIGHHIGH values use these colors
         self.PoorFG = None # LOW and HIGH values use these colors
         self.PoorBG = None # LOW and HIGH values use these colors
+        # Special effects.
+        self.BlinkRate = 0 # Seconds between changing FG/BG colors when blinking. 0 = No blink.
+        self.BlinkColors = [[textcolor.WHITE,textcolor.BLACK],[textcolor.RED,textcolor.BLACK]] # FG/BG pairs to alternate between when blinking.
         
     def Justified(self):
-        sval = str(self.Value)
-        if len(sval) < self.Length:
+        sval = str(self.Value) # Convert to string.
+        if len(sval) < self.Length: # Does the field need padding?
             jval = ' ' * (self.Length - len(sval))
         else:
             jval = ''
-        if self.Justify[0].lower() == 'r': sval = jval + sval
-        else: sval = sval + jval
+        if self.Justify[0].lower() == 'r': sval = jval + sval # Right justify
+        elif self.Justify[0].lower() == 'c': # Centre justify
+            i = len(jval) # How many spaces to share out?
+            if i > 0:
+                i = i // 2 # Half the spaces (rounded down using integer division)
+                sval = jval[:i] + sval + jval[i:] # Half the spaces + text + remaining spaces.
+        else: sval = sval + jval # Left justify
         return sval
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
@@ -956,13 +1171,29 @@ class colordisplay():
         Supports sprites.
         Supports labelled data fields. """
     
-    __version__ = '0.0.3'
+    __version__ = '0.0.5'
     DefinedWindows = [] # Handles of all defined windows. Useful for scanning/updating all available windows.
                         # The defining class contains some methods which can perform general updates via this list.
-    # TODO: Add support for 'resizing' a window. Esp for simple scrolling displays, allow size to change and remap existing text to fit.
-    #       - Direct resizing, or maybe just cloning the stored information to a replacement window of new dimensions.
+    CDLayout = [] # Array of major rows/columns that colordisplay instances can self-align with.
+                  # Each entry defines a high level 'column' of colordisplay locations. [[fromcol,colwidth],[fromcol,colwidth],...]
+                  # When defining new colordisplay instances you can then just refer to these columns rather than tailoring the coordinates of each individual window.
+
+    @staticmethod
+    def AddCDEntry(colwidth,startcol=None):
+        """ Add new entry to the colordisplay.CDLayout list.
+            You must assign colwidth, but startcol is optional.
+            If startcol is not specified, the next available one is assigned. """
+        if startcol == None: # Starting column isn't specified, so calculate the next available one.
+            startcol = 1 # Find the next free one. 1st column if nothing exists yet.
+            for cd in colordisplay.CDLayout: # Check each layout already defined.
+                temp = cd[0] + cd[1]
+                if temp >= startcol: startcol = temp + 1 # Start at next free column (with 1 space for border).
+        startcol = max(startcol,1) # Must be at least 1 (1st column)
+        colordisplay.CDLayout.append([startcol,colwidth])
+        #print("colordisplay.AddCDEntry:",colordisplay.CDLayout)
+        return True
     
-    def __init__(self,rows,columns,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None):
+    def __init__(self,rows,columns=None,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None,cdlayout=None):
         """ fg and bg parameters can be single integer value (0-255) or a list of values [(0-255),(0-255),..] 
             The Print() method will cycle through the colors if lists are given. 
             Other modes operate with just the first given fg and bg values, the rest of any lists are ignored. 
@@ -976,14 +1207,24 @@ class colordisplay():
             title = Window title.
             titlefg = Title foreground. Single color code (0-255). None will use window bg value.
             titlebg = Title background. Single color code (0-255). None will use window fg value. 
+            cdlayout = index of the colordisplay.CDLayout list. A shortcut to set col and or row values more dynamically.
             -------------------------
             After instantiation, you can also set self.ClipWindow = True to allow the window to truncate display if insufficient realestate available.
                Otherwise the entire window will be suppressed until the display is big enough to accomodate the entire window. """
-        colordisplay.DefinedWindows.append(self) # Add this window to the global list of all windows.
         self.DisplayName = name
+        if columns == None and cdlayout == None:
+            raise Exception("colordisplay.__init__(): You must specify columns or cdlayout parameter to define a window.")
         if self.DisplayName == '':
             self.DisplayName = "win_" + str(len(colordisplay.DefinedWindows)) # Generate a default name.
         self.DisplayRows = rows # How many rows deep is the display?
+        self.CDEntry = cdlayout # If using predefined columns, make a note which one we're using.
+        if self.CDEntry != None and self.CDEntry >= 0 and self.CDEntry < len(colordisplay.CDLayout): # Automatically assign location on the screen.
+            # Use the CDLayout list of window columns to define the start column.
+            col = colordisplay.CDLayout[self.CDEntry][0] # Pull the start character column from the CDLayout list.
+            columns = colordisplay.CDLayout[self.CDEntry][1] # Pull the character column width from the CDLayout list.
+            row = 1
+            for cd in colordisplay.DefinedWindows: # Stack each new window beneath previous ones in a column.
+                if cd.CDEntry == self.CDEntry and cd.LastDisplayRow >= row: row = cd.LastDisplayRow + 2 # Start at next free row (with 1 row for border).
         self.DisplayColumns = columns # How many columns wide is the display?
         self.DisplayRow = row # What's the location of the 1st cell in the display on the actual terminal?
         self.DisplayCol = col
@@ -992,7 +1233,8 @@ class colordisplay():
         else:
             self.LastDisplayRow = None
         if self.DisplayCol != None and self.DisplayColumns != None:
-            self.LastDisplayCol = self.DisplayCol + self.DisplayColumns - 1
+            #self.LastDisplayCol = self.DisplayCol + self.DisplayColumns - 1
+            self.LastDisplayCol = self.DisplayCol + self.DisplayColumns
         else:
             self.LastDisplayCol = None
         if type(fg) == list:
@@ -1011,40 +1253,41 @@ class colordisplay():
             self.DefaultBGs = [bg] # List of all background colors.
         self.BGColorCount = len(self.DefaultBGs) # How many colors are available?
         self.BGColorIndex = 0 # Which color do we start with if multiple available?
-        self.TitleFG = titlefg
+        self.TitleFG = titlefg # What color is the title row?
         if self.TitleFG == None: self.TitleFG = self.DefaultBG # Default to inverse.
-        self.TitleBG = titlebg
+        self.TitleBG = titlebg # What color is the title row?
         if self.TitleBG == None: self.TitleBG = self.DefaultFG # Default to inverse.
-        self.BorderFG = borderfg
-        if self.BorderFG == None: self.BorderFG = self.DefaultFG
-        self.BorderBG = borderbg
-        if self.BorderBG == None: self.BorderBG = self.DefaultBG
-        self.WindowTitle = title # Does the window have a title row?
-        # Try more sophisticated display model that handles characters and colours more flexibly.
+        self.BorderFG = borderfg # What color is the border?
+        if self.BorderFG == None: self.BorderFG = self.DefaultFG # Default is same as general window.
+        self.BorderBG = borderbg # What color is the border.
+        if self.BorderBG == None: self.BorderBG = self.DefaultBG # Default is same as general window.
+        # Create array of each cell in the window, we need character, foreground color and background color.
         self.fgcolor = [[self.DefaultFG for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Foreground colour of each character.
         self.bgcolor = [[self.DefaultBG for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Background colour of each character.
         self.character = [[" " for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Characters to display.
-        # Default colour and characters used if the screen is cleared. Can be set with the SetDefault() method to store the current display as a default.
+        # Store the default state of the window here. This is used if the window is 'cleared'.
         self.default_fgcolor = [[self.DefaultFG for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Foreground colour of each character.
         self.default_bgcolor = [[self.DefaultBG for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Background colour of each character.
         self.default_character = [[" " for c in range(self.DisplayColumns)] for r in range(self.DisplayRows)] # Characters to display.
         self.PrevLineStrings = [None for r in range(self.DisplayRows)] # List of the display commands last issued to paint the display. Used to check for changes.
-        self.ReduceIO = False # If set to true, then the Display() method will only update lines of the display that it thinks have changed.
-        self.sprites = []
+        self.ReduceIO = False # If set to true, Display() method will only update lines of the display that it thinks have changed.
+        self.sprites = [] # List of any active sprites in the display.
         self.PrintHistory = [] # Cache of recently printed lines, used for repainting and exporting.
         self.FirstScrollRow = FirstScrollRow # 0 means data starts at the first row of the window, 1 means there's a title or something in row 0, etc. Scrolling takes this into account.
         self.Log = None # Can store handle to a 'Log' method for logging messages. Needs to be defined and assigned by the calling program.
         self.RefreshRate = None # Can specify how quickly the display refreshes (in seconds).
         self.LastRefresh = None # When did the display last update?
-        self.Metadata = {} # Dictionary of metadata for fields in the display. (Experimental)
-                           # {'name' : 'xxx', 'row' : nn, 'col' : nn, 'fg' : nn, 'bg' : nn}
+        #self.Metadata = {} # Dictionary of metadata for fields in the display. (Experimental)
+        #                   # {'name' : 'xxx', 'row' : nn, 'col' : nn, 'fg' : nn, 'bg' : nn}
         self.Fields = [] # List of fields if defined.
         self.MarkDisplay = False # If TRUE the corners are highlighted in RED, and the FIELDS are highlighted in YELLOW(for layout checking)
-        self.SetTitle(self.WindowTitle)
+        if title == None: self.WindowTitle = None # Does the window have a title row?
+        else: self.SetTitle(title)
         self.ClipWindow = False # If TRUE, the window can be clipped to fit available terminal display. This will simply truncate.
         self.DrawBorder = False # If TRUE, an additional single line border is drawn on the RIGHT and BOTTOM of the window. Takes 1 extra character in each dimension.
         self.BorderFG = self.DefaultFG
         self.BorderBG = self.DefaultBG
+        colordisplay.DefinedWindows.append(self) # Add this window to the global list of all windows.
 
     def __del__(self):
         """ Remove this window from the list of defined windows.
@@ -1058,7 +1301,7 @@ class colordisplay():
         """ Turn first row of a window into a title row.
             Color appropriately and change the scroll behaviour of the window.
             1st line nolonger scrolls. """
-        self.WindowTitle = title
+        self.WindowTitle = ' ' + title.strip()
         if self.WindowTitle != None: 
             temp = self.WindowTitle
             self.FirstScrollRow = 1
@@ -1145,6 +1388,32 @@ class colordisplay():
         with open(filename,'w') as f:
             json.dump(tempdict,f)
         return True
+
+    def UpdateBlinkStatus(self):
+        """ Check for any fields with 'BlinkRate' set. 
+            Adjust colors accordingly. """
+        for f in self.Fields:
+            if f.BlinkRate != 0: # This field is in BLINK mode.
+                # Choose an appropriate color scheme.
+                t = datetime.now().timestamp() # Current time as seconds.
+                c = round(t / f.BlinkRate,0) % len(self.BlinkColors) # Cycle through the list of BlinkColor pairs.
+                self.FieldValue(f.name,fg=self.BlinkColors[c][0],bg=self.BlinkColors[c][1])
+        return True
+
+    def SetBlinkStatus(self,name,blinkrate,blinkcolors=[[textcolor.WHITE,textcolor.BLACK],[textcolor.BLACK,textcolor.WHITE]]):
+        """ Setup blink data.
+                    """
+        # Validate the color list.
+        lOK = True
+        for a in blinkcolors:
+            if len(a) != 2: # Must be 2 colors listed in each entry.
+                lOK = False
+                break
+        if lOK: 
+            for f in self.Fields:
+                if f.Name == name:
+                    f.BlinkRate = blinkrate
+                    f.BlinkColors = blinkcolors
         
     def FieldValue(self,name,value,fg=None,bg=None):
         """ Update the value of a field and display it. """
@@ -1281,6 +1550,77 @@ class colordisplay():
                 self.default_bgcolor[r][c] = self.bgcolor[r][c]
                 self.default_character[r][c] = self.character[r][c]
 
+    def ConvertLines(self):
+        """ Scan the current layout for '-','|','+' symbols and convert to primitive line drawing. """
+        # Not yet implemented.
+        return True
+
+    def ClipRow(self,row):
+        if row < 0: row = 0
+        if row >= self.DisplayRows: row = self.DisplayRows - 1
+        return row
+        
+    def ClipCol(self,col):
+        if col < 0: col = 0
+        if col >= self.DisplayColumns: col = self.DisplayColumns - 1
+        return col
+        
+    def DrawBox(self,fromloc,toloc,fg=None,bg=None,border=True,fill=True,overwritelist=['+','-','|',' ']):
+        """ Use unicode line characters to draw a box on a colordisplay window. 
+            fromloc = (fromrow,fromcol)
+            toloc = (torow,tocol) 
+            fg = Optional Foreground color.
+            bg = Optional Background color.
+            border = True : Draw border line. 
+                   = False : Just color the box. 
+            fill = True : Color the interior cells of the box.
+                   False : Leave interior cell colors unchanged. 
+            overwritelist = [] List of characters that linedrawing is allowed to overwrite. 
+                            So you can 'draw' the box using these characters when you define 
+                            the display and ONLY these characters get overwritten, this lets
+                            you have overlapping titles or gaps in the box if needed by using
+                            other characters that are not in the overwritelist """
+        #print("textcolor.DrawBox:",fromloc,toloc)
+        (fromrow, fromcol) = fromloc
+        (torow, tocol) = toloc
+        #print("textcolor.DrawBox: From",fromrow,fromcol,"To",torow,tocol)
+        fromrow = self.ClipRow(fromrow)
+        torow = self.ClipRow(torow)
+        fromcol = self.ClipCol(fromcol)
+        tocol = self.ClipCol(tocol)
+        #print("textcolor.DrawBox: Clipped From",fromrow,fromcol,"To",torow,tocol)
+        if border: # Draw lines around box.
+            for c in range(fromcol,tocol + 1):
+                # Draw top
+                if c == fromcol: char = textcolor.SYMBOLS['corner_tl']
+                elif c == tocol: char = textcolor.SYMBOLS['corner_tr']
+                else: char = textcolor.SYMBOLS['horizontal']
+                cv, _ , _ = self.CellValue(fromrow,c)
+                if cv in overwritelist:
+                    self.PlaceString(char,fromrow,c,fg=fg,bg=bg)
+                # Draw bottom
+                if c == fromcol: char = textcolor.SYMBOLS['corner_bl']
+                elif c == tocol: char = textcolor.SYMBOLS['corner_br']
+                else: char = textcolor.SYMBOLS['horizontal']
+                cv , _ , _ = self.CellValue(torow,c)
+                if cv in overwritelist:
+                    self.PlaceString(char,torow,c,fg=fg,bg=bg)
+            char = textcolor.SYMBOLS['vertical']
+            if (torow - fromrow) > 1:
+                for r in range(fromrow + 1,torow):
+                    # Draw left
+                    cv , _ , _ = self.CellValue(r,fromcol)
+                    if cv in overwritelist:
+                        self.PlaceString(char,r,fromcol,fg=fg,bg=bg)
+                    # Draw right
+                    cv , _ , _ = self.CellValue(r,tocol)
+                    if cv in overwritelist:
+                        self.PlaceString(char,r,tocol,fg=fg,bg=bg)
+        if fill: # Fill the rectangle with the color.
+            for c in range(fromcol,tocol + 1):
+                for r in range(fromrow,torow + 1):
+                    self.ColorCell(r,c,fg,bg)
+
     def RefreshDue(self):
         """ Return True if refresh is due, else False. """
         result = False
@@ -1373,7 +1713,7 @@ class colordisplay():
     def CellValue(self,row,col):
         """ Return cell contents. Character, fg and bg colors. """
         fg, bg = self.CellColor(row,col)
-        char = self.character(row,col)
+        char = self.character[row][col]
         return char,fg,bg
         
     def ColorCell(self,row,col,fg,bg):
@@ -1383,8 +1723,10 @@ class colordisplay():
 
     def CellColor(self,row,col):
         """ Return current color of a cell. """
-        fg = self.fgcolor[row][col]
-        bg = self.bgcolor[row][col]
+        if row < 0 or row >= self.DisplayRows: fg = self.DefaultFG
+        else: fg = self.fgcolor[row][col]
+        if col < 0 or col >= self.DisplayColumns: bg = self.DefaultBG
+        else: bg = self.bgcolor[row][col]
         return fg, bg
 
     def ScrollUp(self,lines=1,immediate=False):
@@ -1581,6 +1923,7 @@ class colordisplay():
         HorizontalChar = textcolor.SYMBOLS['horizontal'] # '\u2500'
         VerticalChar = textcolor.SYMBOLS['vertical'] # '\u2502'
         CornerChar = textcolor.SYMBOLS['corner_br'] # '\u2518'
+        self.UpdateBlinkStatus() # If any fields are supposed to blink, check their color now.
         if self.MarkDisplay: # We need to mark up the corners and fields.
             self._MarkDisplay()
         for r in range(self.DisplayRows): # Go through all the rows in turn. *Q* Should respect 'ClipWindow' too.
@@ -1740,27 +2083,9 @@ class colordisplay():
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
 class menu():
-    """ Simple menu driver.
-        Create a menu object.
-        Give it a dictionary of menu items.
-        Call the Prompt() method to execute the menu. 
-        Menu quits when user selects 'x' option. 
-        
-        dictionary format 
-                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call, 'break': False},
-                 'menuitem2key':{'label':'menu item 2 label', 'bold':True/False, 'call': ProcedureName to call}
-                }
-                
-                'docurl' = URL for help documentation about the menu option.
-                'helpdoc' = Local text file location for help documentation about the menu option.
-                'break' = Insert a blank line separator in the menu after the option.
-                'call' = Procedure to call if option is selected. (No parameters supported)
-                'bold' = Print the menu option in bold text.
-                'label' = The label to appear in the menu.
-                
-        You can trigger user input via the Prompt() method.
-        You can directly run a menu option without user input via the Run() method.
-        """
+    """ Original menu class. Now replaced by proceduremenu class. """
+
+    __version__ = '0.0.1'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
         """ Create the menu, load the dictionary.
@@ -1769,171 +2094,12 @@ class menu():
             titlebg/fg colors of menu title.
             helpdir = directory where help text files exist. 
             helpurl = url to help file. """
-        print ('textcolor.menu: NOTE: This is replaced by the proceduremenu() class now!')
-        self.Dictionary = dictionary
-        self.Title = title
-        self.IdWidth = 2
-        self.LabelWidth = 20
-        self.TitleFG = titlefg
-        self.Columns = 2 # How many columns to draw?
-        self.Log = logger # Can define a logging function to use.
-        if titlefg == None: self.TitleFG = textcolor.BLACK
-        self.TitleBG = titlebg
-        if titlebg == None: self.TitleBG = textcolor.YELLOW
-        Counter = 0
-        for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
-            Counter += 1
-            value['id'] = Counter
-            self.LabelWidth = max(self.LabelWidth,len(value['label'])) # Make sure column labels are large enough.
-            try: # Check that the procedure name to be called looks valid.
-                if type(value['call']) != None: # This will fail if the procedure name is wrong.
-                    pass
-            except Exception as e:
-                # The procedure call will not succeed if called.
-                print (textcolor.red(self.Title,'Cannot execute procedure',value['label']))
-                print (textcolor.red(str(e)))
-                traceback.print_exc()
-        self.HelpDir = helpdir
-        self.HelpUrl = helpurl
-
-    def GetHelpFile(self,menuid):
-        """ Given an ID number, retrieve and display the help text if it exists. """
-        filename = None
-        for key,value in self.Dictionary.items(): # Find entry with matching ID.
-            if value['id'] == menuid: # Found a match.
-                filename = value.get('helpdoc',None) # Get the helpdoc filename.
-                break # Look no further.
-        if filename != None and self.HelpDir != None:
-            filename = self.HelpDir + filename # Construct path to file.
-        return filename
-        
-    def ShowHelpText(self,menuid):
-        filename = self.GetHelpFile(menuid)
-        if filename != None:
-            try:
-                with open(filename,'r') as f:
-                    for line in f.readlines():
-                        print (textcolor.cyan(line))
-            except Exception as e:
-                print(textcolor.red('Sorry, unable to show the help file.'))
-                print(str(e))
-        else:
-            print (textcolor.red('Sorry, no help file is defined for menu item',menuid))
-        
-    def GetHelpUrl(self,menuid):
-        """ Given an ID number, return URL associated with the help documentation. """
-        helpurl = None
-        for key,value in self.Dictionary.items(): # Find entry with matching ID.
-            if value['id'] == menuid: # Found a match.
-                helpurl = value.get('helpurl',None) # Get the helpdoc helpurl.
-                break # Look no further.
-        if helpurl != None and self.HelpDir != None:
-            helpurl = self.HelpDir + helpurl # Construct path to file.
-        return helpurl
-        
-    def Draw(self,menuprefix=''):
-        """ Draw the menu on the terminal.
-            The menu list from the dictionary will automatically gain '?' and 'x' options too. """
-        # In Python 3.7 onwards, dictionaries should retain the sequence in which items are added. No sorting required.
-        count = 0
-        print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
-        print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
-        for key,value in self.Dictionary.items(): # Go through each menu item in turn.
-            entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
-            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
-                entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
-            else: # Menu item is not in bold.
-                entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
-            entry += ' ' # Space between columns of menu entries. 
-            print (entry,end='') # Print the menu entry column, don't include 'newline' yet.
-            count += 1 # Count how many entries.
-            if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
-                print ('')
-            if 'break' in value and value['break']: 
-                if count % self.Columns != 0: # We're terminating the line early.
-                    print ('')
-                    count = 0
-                print ('') # Insert a blank line break in the menu.
-        if count % self.Columns != 0: # Print 'newline' if we didn't complete the 2nd column when the menu list ran out.
-            print ('') # Terminate line if not already done.
-        # Always include 'x' and '?' menu options automatically.
-        print (textcolor.yellow('x'.rjust(self.IdWidth,' ')) + ' ' + 'Exit'.ljust(self.LabelWidth,' ')[:self.LabelWidth] + ' ',end='')
-        print (textcolor.yellow('?'.rjust(self.IdWidth,' ')) + ' ' + 'Refresh'.ljust(self.LabelWidth,' ')[:self.LabelWidth])
-        
-    def Run(self,key):
-        """ Given a menu option key, execute the procedure or sub-menu associated with it. """
-        Procedure = self.Dictionary[key]['call'] # What procedure is to be called?
-        if Procedure == None: # No option to run.
-            print(textcolor.yellow(str(key) + " does not have a related procedure to call."))
-        elif type(Procedure) == type(self): # A submenu, so we trigger the nested submenu instead. 
-            Procedure.Prompt() # Execute the submenu.
-        else: # See if it's a callable function.
-            try: # See if the procedure will execute. 
-                Procedure() # Call it.
-            except Exception as e:
-                # Procedure didn't execute. Report the error and return to the menu.
-                print(textcolor.red('** Menu failed to call ' + str(key) + " ; " + str(Procedure)))
-                print(textcolor.red(str(e)))
-                traceback.print_exc()
-
-    def ProcessHelpRequest(self,answer):
-        """ Receive a text type menu id. 
-            if it converts to an integer successfully, 
-            show the help text associated with that menu item. """
-        answer = answer.replace('?','') # Remove any question mark.
-        try:
-            menuid = int(answer)
-        except:
-            menuid = None
-        if menuid != None:
-            self.ShowHelpText(menuid)
-        
-    def Prompt(self,menuprefix=''):
-        """ Execute the menu. 
-            This paints the menu on the terminal and deals with user selections. 
-            Menu items are numbered dynamically, the user selects an item by selecting the number.
-            If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
-            The method closes when the user selects the 'x' option. 
-            
-            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
-        # Now paint the menu and ask the user what to do.
-        self.Draw(menuprefix=menuprefix) # Paint the menu.
-        while True: # Loop until explicitly told to terminate.
-            if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
-            answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
-            if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
-            if '?' in answer: # User wants help about an option.
-                self.ProcessHelpRequest(answer)
-                continue # Prompt again.
-            # Process menu choice.
-            try: # Convert text into integer if possible.
-                menuid = int(answer)
-            #except Exception as e:
-            except Exception:
-                # Text would not convert into integer. 
-                menuid = None
-            if menuid != None: # 
-                found = False # Have we found and executed the menu option?
-                for key,value in self.Dictionary.items():
-                    if value['id'] == menuid:
-                        self.Run(key) # Execute the option.
-                        self.Draw() # Refresh the menu.
-                        found = True # We have found and executed the option. OK to return to ask user for new input.
-                        break # Next
-                if found: # Option was found and executed. Return to user input.
-                    continue # Next user input.
-            if answer.lower() == '?': # Refresh option chosen.
-                self.Draw() # Refresh the menu.
-                continue # Next user input.
-            if answer.lower() == 'x': # User chose to quit the menu. Terminate the loop.
-                break # Go UP a level, quit if at root.
-            # User input was not recognised. Try again.
-            print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
+        print ('textcolor.menu: NOTE: This is replaced by the textcolor.proceduremenu class now!')
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
 class proceduremenu():
-    """ Simple menu driver.
+    """ Menu driver.
         Create a menu object.
         Give it a dictionary of menu items, including labels and functions/methods to call.
         Call the Prompt() method to execute the menu. 
@@ -1950,10 +2116,32 @@ class proceduremenu():
                 'call' = Procedure to call if option is selected. (No parameters supported)
                 'bold' = Print the menu option in bold text.
                 'label' = The label to appear in the menu.
+                'precall' = Optional: Procedure call to make BEFORE the 'call' procedure is called. If this fails, the 'call' and 'postcall' procedures are not called.
+                'postcall' = Optional: Procedure call to make AFTER the 'call' procedure is called. This is executed even if the 'call' procedure fails.
+                
+        You can also specify global PRE and POST procedure calls by setting the procedure handle in 
+        self.PreCall and self.PostCall attributes.
+        - self.PreCall is called for all menu options BEFORE any of the procedures defined in the dictionary.
+        - self.PostCall is called for all menu options AFTER all the procedures defined in the dictionary.
+        
+        Therefore a single menu option can execute up to 5 procedures in sequence.
+        - self.PreCall gives a global 'preparation' routine to run before all menu options.
+            If self.PreCall fails, the 'precall' and 'call' procedures are skipped, execution passes
+            immediately to the 'postcall' and self.PostCall procedures.
+        - 'precall' gives an option specific preparation routine to run before the main option.
+            If 'precall' fails, the 'call' procedure does not get executed, control passes immediately
+            to the 'postcall' and self.PostCall procedures.
+        - 'call' is the main routine to run for the menu option.
+            If self.PreCall or 'precall' options fail, the 'call' option is not executed, execution passes
+            immediately to the cleanup 'postcall' and self.PostCall procedures.
+        - 'postcall' gives an option specific cleanup routine to run after the menu option even if it failed.
+        - self.PostCall gives a global cleanup routine to run after all menu options even if they failed.
                 
         You can trigger user input via the Prompt() method.
         You can directly run a menu option without user input via the Run() method.
         """
+
+    __version__ = '0.0.2'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None,labelwidth=23):
         """ Create the menu, load the dictionary.
@@ -1969,6 +2157,8 @@ class proceduremenu():
         self.TitleFG = titlefg
         self.Columns = 2 # How many columns to draw?
         self.Log = logger # Can define a logging function to use.
+        self.PreCall = None # Specify a procedure to call before ALL options.
+        self.PostCall = None # Specify a procedure to call AFTER ALL options.
         if titlefg == None: self.TitleFG = textcolor.BLACK
         self.TitleBG = titlebg
         if titlebg == None: self.TitleBG = textcolor.YELLOW
@@ -1977,12 +2167,31 @@ class proceduremenu():
             Counter += 1
             value['id'] = Counter
             self.LabelWidth = max(self.LabelWidth,len(value['label']))
+            
             try: # Check that the procedure name to be called looks valid.
                 if type(value['call']) != None: # This will fail if the procedure name is wrong.
                     pass
             except Exception as e:
                 # The procedure call will not succeed if called.
                 print (textcolor.red(self.Title,'Cannot execute procedure',value['label']))
+                print (textcolor.red(str(e)))
+                traceback.print_exc()
+                
+            try: # Check that the pre-procedure name to be called looks valid.
+                if type(value.get('precall',None)) != None: # This will fail if the procedure name is wrong.
+                    pass
+            except Exception as e:
+                # The procedure call will not succeed if called.
+                print (textcolor.red(self.Title,'Cannot execute pre-procedure',value['label']))
+                print (textcolor.red(str(e)))
+                traceback.print_exc()
+                
+            try: # Check that the post-procedure name to be called looks valid.
+                if type(value.get('postcall',None)) != None: # This will fail if the procedure name is wrong.
+                    pass
+            except Exception as e:
+                # The procedure call will not succeed if called.
+                print (textcolor.red(self.Title,'Cannot execute post-procedure',value['label']))
                 print (textcolor.red(str(e)))
                 traceback.print_exc()
         self.HelpDir = helpdir
@@ -2053,21 +2262,86 @@ class proceduremenu():
         print (textcolor.yellow('?'.rjust(self.IdWidth,' ')) + ' ' + 'Refresh'.ljust(self.LabelWidth,' ')[:self.LabelWidth])
         
     def Run(self,key):
-        """ Given a menu option key, execute the procedure or sub-menu associated with it. """
-        Procedure = self.Dictionary[key]['call'] # What procedure is to be called?
-        if Procedure == None: # No option to run.
-            print(textcolor.yellow(str(key) + " does not have a related procedure to call."))
-        elif type(Procedure) == type(self): # A submenu, so we trigger the nested submenu instead. 
-            Procedure.Prompt() # Execute the submenu.
-        else: # See if it's a callable function.
-            try: # See if the procedure will execute. 
+        """ Given a menu option key, execute the procedure or sub-menu associated with it.
+            if PRE and/or POST procedures are defined, execute those too. 
+            These allow you to prepare and/or cleanup even if the main call fails. """
+            
+        ExecuteMain = True
+        Success = True # Set the return code.
+        
+        # Global Pre procedure. # Execute BEFORE the main procedure call.
+        if self.PreCall != None: # See if it's a callable function.
+            try: # See if the pre-procedure will execute. 
+                self.PreCall() # Call it.
+            except Exception as e:
+                # Procedure didn't execute. Report the error and return to the menu.
+                print(textcolor.red(' *** OOPS! *** ',invert=True))
+                print(textcolor.red('** Menu failed to execute ' + str(key) + " ; global pre-call " + str(self.PreCall)))
+                print(textcolor.red(str(e)))
+                traceback.print_exc()
+                ExecuteMain = False # Do not execute the main call.
+                Success = False # Set the return code.
+                
+        # Option Pre procedure. # Execute BEFORE the main procedure call.
+        if ExecuteMain: # OK to proceed.
+            Procedure = self.Dictionary[key].get('precall',None) # What pre-procedure is to be called?
+            if Procedure != None: # See if it's a callable function.
+                try: # See if the pre-procedure will execute. 
+                    Procedure() # Call it.
+                except Exception as e:
+                    # Procedure didn't execute. Report the error and return to the menu.
+                    print(textcolor.red(' *** OOPS! *** ',invert=True))
+                    print(textcolor.red('** Menu failed to execute ' + str(key) + " ; option pre-call " + str(Procedure)))
+                    print(textcolor.red(str(e)))
+                    traceback.print_exc()
+                    ExecuteMain = False # Do not execute the main call.
+                    Success = False # Set the return code.
+                
+        # Main procedure.
+        if ExecuteMain: # OK to proceed.
+            Procedure = self.Dictionary[key]['call'] # What procedure is to be called?
+            if Procedure == None: # No option to run.
+                print(textcolor.yellow(str(key) + " does not have a related procedure to call."))
+            elif type(Procedure) == type(self): # A submenu, so we trigger the nested submenu instead. 
+                Procedure.Prompt() # Execute the submenu.
+            else: # See if it's a callable function.
+                try: # See if the procedure will execute. 
+                    Procedure() # Call it.
+                except Exception as e:
+                    # Procedure didn't execute. Report the error and return to the menu.
+                    print(textcolor.red(' *** OOPS! *** ',invert=True))
+                    print(textcolor.red('** Menu failed to execute ' + str(key) + " ; call " + str(Procedure)))
+                    print(textcolor.red(str(e)))
+                    traceback.print_exc()
+                    Success = False # Set the return code.
+
+        # Option Post procedure. # Execute AFTER the main procedure call.
+        Procedure = self.Dictionary[key].get('postcall',None) # What post-procedure is to be called?
+        if Procedure != None: # See if it's a callable function.
+            try: # See if the post-procedure will execute. 
                 Procedure() # Call it.
             except Exception as e:
                 # Procedure didn't execute. Report the error and return to the menu.
-                print(textcolor.red('** Menu failed to call ' + str(key) + " ; " + str(Procedure)))
+                print(textcolor.red(' *** OOPS! *** ',invert=True))
+                print(textcolor.red('** Menu failed to execute ' + str(key) + " ; option post-call " + str(Procedure)))
                 print(textcolor.red(str(e)))
                 traceback.print_exc()
+                Success = False # Set the return code.
 
+        # Global Post procedure. # Execute AFTER the main procedure call.
+        if self.PreCall != None: # See if it's a callable function.
+            try: # See if the post-procedure will execute. 
+                self.PostCall() # Call it.
+            except Exception as e:
+                # Procedure didn't execute. Report the error and return to the menu.
+                print(textcolor.red(' *** OOPS! *** ',invert=True))
+                print(textcolor.red('** Menu failed to execute ' + str(key) + " ; global post-call " + str(self.PostCall)))
+                print(textcolor.red(str(e)))
+                traceback.print_exc()
+                Success = False # Set the return code.
+
+        return Success # True if all succeeded, False if any failed.
+        
     def ProcessHelpRequest(self,answer):
         """ Receive a text type menu id. 
             if it converts to an integer successfully, 
@@ -2148,6 +2422,8 @@ class optionmenu():
         You can trigger user input via the Prompt() method.
         You can directly run a menu option without user input via the Run() method.
         """
+
+    __version__ = '0.0.1'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
         """ Create the menu, load the dictionary.
@@ -2306,6 +2582,8 @@ class listchooser():
         If multiple entries remain, they are presented as a new list to choose from. 
         '?' to show list. 
         'x' to return to previous selection. """
+
+    __version__ = '0.0.1'
         
     def __init__(self,inputlist,title=None,default=None,compress=True):
         self.FullList = inputlist

@@ -73,7 +73,7 @@ echo -e "\E[35;40m PILOMAR: (Skyfield and Astroalign packages!) \E[0m"
 echo -e "==========================================================="
 echo -e "\E[36;40mSupport for skyfield (Python3 - pip)...\E[0m"
 echo $(date) skyfield - YES >>$pilomarhome/log/buildpilomar
-sudo pip3 install skyfield 
+sudo pip3 install skyfield==1.39
 echo $(date) pip3 install python-dateutil>>$pilomarhome/log/buildpilomar
 sudo pip3 install python-dateutil 
 
