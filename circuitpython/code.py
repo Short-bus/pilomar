@@ -8,9 +8,13 @@
 #   motor status 20210409090949 altitude False 20210409090949 0 0 0.0 True
 #  From RPi to microcontroller
 #   configure motor 20210409090949 azimuth 180.0
+#   sendstatus 20210409090949 False
 
-# RP2040 doesn't have enough GPIO pins available in CircuitPython to support Microstepping.
+# Tiny2040 doesn't have enough GPIO pins available in CircuitPython to support Microstepping.
 # So if MODE0/1/2 pins are declared as None, Microstepping is disabled.
+
+VERSION = '0.1.0' # Software version reported to the RPi.
+ACCEPTABLERPIVERSIONS = ['0.0.0','0.1.0'] # Which RPi versions are acceptable?
 
 print ('hello')
 CircuitPython = True # Indicates CircuitPython rather than MicroPython.
@@ -22,11 +26,6 @@ import analogio
 import busio
 import time
 import gc # Garbage Collector
-# You need to download the neopixel library from the web.
-# - Circuitpython.org/libraries.
-# - Select the ZIP file for the version you're running (see boot_out.txt on the CIRCUITPY drive)
-# - Copy the lib/neopixel.mpy file into the CIRCUITPY/LIB folder and reboot the Feather RP2040.
-# import neopixel # Neopixel is a FEATHER feature, TinyRP2040 doesn't need it.
 
 def neatprint(*args):
     """ Own 'print' function. Formats neatly in early Python versions and allows
@@ -43,7 +42,7 @@ def neatprint(*args):
         pass
 
 neatprint ('CIRCUITPYTHON: code.py running...')
-neatprint ('Pimoroni Tiny RP2040 board.')
+neatprint ('Pimoroni Tiny2040 board.')
 
 class GPIOpin():
     def __init__(self,pin):
@@ -65,7 +64,7 @@ class GPIOpin():
 
 class led():
     def __init__(self,pin,state=False):
-        """ TinyRP2040 LED on/off state is inverted!
+        """ Tiny2040 LED on/off state is inverted!
             ie to turn LED ON, pin must go LOW.
                to turn LED OFF, pin must go HIGH. """
         self.Led = digitalio.DigitalInOut(pin)
@@ -84,12 +83,12 @@ class led():
         self.Off()
 
     def On(self):
-        """ TinyRP2040 uses opposite pin state to control LED. """
+        """ Tiny2040 uses opposite pin state to control LED. """
         if self.Enabled: self.Led.value = False
         else: self.Led.value = True
 
     def Off(self):
-        """ TinyRP2040 uses opposite pin state to control LED. """
+        """ Tiny2040 uses opposite pin state to control LED. """
         self.Led.value = True
 
     def Toggle(self):
@@ -99,24 +98,21 @@ class led():
     def State(self):
         return self.Led.value
 
-#print(dir(board))
-#print(board.LED_B)
-
 class statusled():
-    """ Pimoroni TinyRP2040 version of RGB LED handling. """
+    """ Pimoroni Tiny2040 version of RGB LED handling. """
     def __init__(self):
         self.LedR = led(board.LED_R)
         self.LedG = led(board.LED_G)
         self.LedB = led(board.LED_B)
         self.TaskList = {'idle': (False,False,False), # Off
-                         'tx': (True,True,False), # 100% Yellow - Flashes when writing output to UART
-                         'rx': (True,True,False), # 100% Yellow - Flashes when clearing input from UART
-                         'altitude': (False,True,False), # 50% green - Flashes when ALTITUDE motor is moving.
-                         'azimuth': (False,True,False), # 50% green - Flashes when AZIMUTH motor is moving.
-                         'move': (False,True,False), # 50% red - Flashes when motor is moving (If no specific motor colour).
-                         'error': (True,False,False), # 100% Red - Indicates failure/fault.
-                         'pulse': (True,False,True), # 100% Pink - Heartbeat signal (if used).
-                         'init': (True,False,True)} # 100% Pink - System is initializing.
+                         'tx': (False,False,True), # Blue - Flashes when writing output to UART
+                         'rx': (False,False,True), # Blue - Flashes when clearing input from UART
+                         'altitude': (False,True,False), # green - Flashes when ALTITUDE motor is moving.
+                         'azimuth': (False,True,False), # green - Flashes when AZIMUTH motor is moving.
+                         'move': (False,True,False), # green - Flashes when motor is moving (If no specific motor colour).
+                         'error': (True,False,False), # Red - Indicates failure/fault.
+                         'pulse': (True,False,True), # Pink - Heartbeat signal (if used).
+                         'init': (True,False,True)} # Pink - System is initializing.
         # self.Led.brightness = 0.01
         self.Enabled = True # If set to FALSE, the LED is permanently off except for ERROR conditions.
         self.Task('idle')
@@ -148,28 +144,12 @@ class statusled():
             self.LedG.Off()
             self.LedB.Off()
 
-#print ('initialise statusled')
 StatusLed = statusled()
 StatusLed.Task('init') # System is initializing...
 time.sleep(5)
-#BoardLed = led(board.LED,state=True) # Heartbeat indicator.
 
 button = digitalio.DigitalInOut(board.USER_SW) # Built in button.
 button.switch_to_input(pull=digitalio.Pull.DOWN)
-#counter = 0
-#print ('enter boot state')
-#while True: # Loop until user acknowledges reset.
-#    if not button.value: # Button pressed (to GND)
-#        break
-#    counter = (counter + 1) % 2
-#    if counter == 0: StatusLed.Task('idle') # Off
-#    else: StatusLed.Task('move') # Red
-#    time.sleep(0.2)
-#StatusLed.Task('init') # Cyan
-#print ('enter ack state')
-#while True:
-#    time.sleep(1) # Loop here forever.
-#
 DegreeSymbol = 'deg'
 
 def BoolToString(value):
@@ -177,9 +157,10 @@ def BoolToString(value):
     else: result = 'n'
     return result
 
-def StringToBool(value):
-    if value == 'y' or value == 'True': result = True
-    else: result = False
+def StringToBool(value,default=False):
+    if value.lower() == 'y' or value.lower() == 'true': result = True
+    elif value.lower() == 'n' or value.lower() == 'false': result = False
+    else: result = default
     return result
 
 def HRSeconds(seconds):
@@ -202,6 +183,8 @@ def IntToTimeString(timestamp):
     entry += ('00' + str(lt[4]))[-2:] # Minute
     entry += ('00' + str(lt[5]))[-2:] # Second
     return entry
+
+print("Base clock:",IntToTimeString(time.time()))
 
 def TimeStringToInt(timestamp):
     # Sometime after 2030, this may cause problems for localtime() method if it generates longint values.
@@ -257,22 +240,58 @@ class timer():
                 repeat = 30 seconds between events.
                 offset = 1st event is current time + 10 seconds.
         Use with
-            if NAME.Due(): print ('Event due') """
+            if NAME.Due(): print ('Event due')
+
+        This returns TRUE if the timer has expired.
+        It automatically resets the timer to repeat.
+
+        MyTimer = timer('demo',30)
+        while True:
+            if MyTimer.Due(): print("another 30 seconds has passed.")
+
+        """
+        
     def __init__(self,name,repeat,offset=0):
+        """ Create the timer. 
+            Initialize the first due time. """
         self.Name = name
-        if repeat < 1: repeat = 1
+        if repeat < 1: repeat = 1 # Minimum repeat cycle is 1 second.
         self.RepeatSeconds = repeat
-        if offset != 0: self.NextDue = time.time() + offset
-        else: self.NextDue = time.time() + repeat
+        if offset != 0: self.NextDue = time.time() + offset # If the timer starts with an offset then that's the FIRST due time.
+        else: self.NextDue = time.time() + repeat # There's no offset, so due time is calculated from now.
 
     def SetNextDue(self):
+        """ If NextDue has expired, this calculates the next future value. 
+            It always rolls forward a whole number of 'repeat seconds' to the first due time that is in the future. """
         while self.NextDue <= time.time():
-            self.NextDue = self.NextDue + self.RepeatSeconds
-        # print('timer.SetNextDue(): ', IntToTimeString(self.NextDue))
+            gap = ((time.time() - self.NextDue) // self.RepeatSeconds) + 1 # How many multiples of 'repeatseconds' do we need to add to get to the next timeslot?
+            if gap >= 0:
+                self.NextDue = self.NextDue + (self.RepeatSeconds * gap)
+
+    def SetNextDue_orig(self):
+        """ Original NEXT DUE calculation, rolls forward 1 RepeatSeconds slot at a time until it's in the future. """
+        while self.NextDue <= time.time():
+            self.NextDue = self.NextDue + self.RepeatSeconds # Move forward if still needed.
+
+    def Reset(self):
+        """ Restart the time from NOW. """
+        self.NextDue = time.time() + self.RepeatSeconds
+
+    def Remaining(self):
+        """ How many seconds left on the timer? """
+        remaining = self.NextDue - time.time()
+        return remaining
 
     def Due(self):
+        """ This returns TRUE if the timer has expired.
+            It returns FALSE if the timer is still running. 
+            If the timer expires, it also resets the timer for the next event. """
         result = False
-        if time.time() >= self.NextDue:
+        temp = self.Remaining()
+        if temp > self.RepeatSeconds: # If the local clock changes, the timer may be left out of sync. Reset it.
+            print("clock(",self.Name,") remaining",temp,"exceeds repeat",self.RepeatSeconds,". Timer reset.")
+            self.NextDue = time.time() + self.RepeatSeconds 
+        elif temp <= 0: # Timer expired.
             result = True
             self.SetNextDue()
         return result
@@ -284,7 +303,14 @@ class logfile():
     """ A simple logging mechanism.
         Record any log messages in a temporary list.
         When directed, send the list to the remote server
-        for storage. """
+        for storage. 
+        
+        MyLog = logfile() 
+        MyLog.Log("This is a message for the logfile") 
+        ...
+        MyLog.SendAll()
+        
+        """
     def __init__(self):
         self.Lines = []
         self.BufferSize = 0
@@ -303,23 +329,34 @@ class logfile():
         self.Lines.append(line)
         self.BufferSize += len(line)
 
-    def Send(self):
+    def SendAll(self):
+        """ Call this to send ALL the outstanding log entries. """
         for line in self.Lines:
-            RPi.Write('controller log :' + line,log=False)
+            RPi.Write('log :' + line,log=False)
         self.Lines = []
         self.BufferSize = 0
+
+    def SendOne(self):
+        """ Call this to send a single log entry if the microcontroller is idle. """
+        if len(self.Lines) > 0:
+            line = self.Lines.pop(0)
+            tottemp = 0
+            for line in self.Lines: tottemp += len(line)
+            self.BufferSize = tottemp
+            RPi.Write('log :' + line,log=False)
 
     def SendCheck(self,force=False):
         """ If local buffer is large enough, send it to the host
             and reset ready for new messages. """
         if self.BufferSize > 80 or force:
-            self.Send()
+            self.SendAll()
 
 LogFile = logfile()
 
 print ('ResetReason: ' + str(microcontroller.cpu.reset_reason))
 
 def MicroControllerLog():
+    """ Report microcontroller condition back to RPi. """
     i = 0
     x = ''
     for s in microcontroller.cpu.uid:
@@ -344,7 +381,8 @@ class uarthost():
             self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
             print ('UART TX=', board.GP0, 'UART RX=', board.GP1)
         else: # UART1
-            raise Exception('uarthost on Tiny RP2040 not configued for UART channel 1. Use channel 0 only.')
+            raise Exception('uarthost on Tiny2040 not configued for UART channel 1. Use channel 0 only.')
+            # We can quit here because without a UART channel there's no way to report the error back to the RPi.
         self.WriteChunk = 32 # 32 seems OK on Circuitpython.
         self.ReceivedLines = [] # No lines received yet.
         self.LinesRead = 0 # total number of lines received.
@@ -358,13 +396,27 @@ class uarthost():
         self.ReceivingLine = '' # Current line being received. It's constructed here until '\n' received.
         self.WriteQueue = [] # List of queued messages to be sent when safe.
         self.WriteDrops = 0 # Number of messages dropped because queue filled.
+        self.ReadDrops = 0 # How many received messages are dropped because input buffer is full?
         self.LastTxms = self.ticks_ms() # Milliseconds since last transmission.
-        self.Clock = None
+        self.LastRxms = self.ticks_ms() # Milliseconds since last receipt.
+        self.Clock = None # *Q* Is this used?
         neatprint (self.Name, self.uart)
 
+    def Reset(self):
+        """ Reset communications (flush output buffers). """
+        self.WriteQueue = [] # Empty the write queue.
+        self.ReceivedLines = [] # Empty the input queue.
+        for i in range(2): self.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
+        self.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
+        self.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
+        
     def ticks_ms(self):
         """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
-        return int(time.monotonic_ns() / 1000000)
+        return int(time.monotonic_ns() / 1000000) # Nano seconds. Reduce by 1.0e6 to get milliseconds (as integer).
+
+    def ticks_s(self):
+        """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
+        return float(time.monotonic_ns() / 1000000000) # Seconds. Reduce by 1.0e9 to get seconds (as decimal).
 
     def CalculateChecksum(self,line):
         """ Simple checksum calculation. """
@@ -434,15 +486,23 @@ class uarthost():
                         if len(self.ReceivedLines) < 10: # Only buffer 10 lines, discard the rest. No space!
                             self.ReceivedLines.append(line) # Add to list of lines to handle.
                             line = self.RemoveChecksum(line)
-                            report = 'controller received: ' + line
-                            print (report)
-                            x = line.split(' ')[-1] # Last entry should be message sequence number.
-                            if x.startswith('['): report = 'controller received: ' + x # If we have message sequence number, just report that back to the RPi.
-                            LogFile.Log(report)
+                            report = 'rec: ' + line
+                            print (report) # Report all receipts to serial out.
+                            if line[0] != "#": # Acknowledge receipt of all messages except comments via the log file back to the RPi too.
+                                x = line.split(' ')[-1] # Last entry should be message sequence number.
+                                if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
+                                LogFile.Log(report)
                         else:
                             print('warning: receive buffer full. Ignored: ' + line)
+                            self.ReadDrops += 1
                 self.ReceivingLine = ''
+            self.LastRxms = self.ticks_ms() # When was last message received?
         StatusLed.Task('idle')
+    
+    def ReceiveAge(self):
+        """ How many ms old is the last receipt? """
+        LastRecMs = self.ticks_ms() - self.LastRxms # How old is the last receipt?
+        return LastRecMs
 
     def Read(self):
         """ Return next available complete received line. """
@@ -502,26 +562,87 @@ class uarthost():
 
     def Heartbeat(self):
         """ Send Heartbeat signal to the RPi. """
-        self.Write('controller heartbeat ' + IntToTimeString(Clock.Now()))
+        self.Write('controller heartbeat ' + IntToTimeString(Clock.Now()) + " on " + IntToTimeString(time.time()))
 
 RPi = uarthost(channel=0) # Create UART serial comms with Raspberry Pi. # Feather RP2040
 
 class clock():
-    """ Maintain a clock that is roughly in sync with the host server.
-        *Q* Currently only accurate to the second, needs improving. """
+    """ Maintain a clock that is roughly in sync with the host server. 
+        If the microcontroller is running standalone, then its internal clock 
+        does not get synchronised. This class allows a 'timedelta' to be 
+        defined in the program which is applied to the internal clock to 
+        give an approximately current timestamp. 
+        If the microcontroller is linked to a development tool such as Thonny
+        it may synchronise the internal clock, in which case the TimeDelta will
+        not be used.
+        If the Thonny connection is made AFTER the program has started, the
+        TimeDelta value will no longer be needed when the internal clock itself
+        is synchronised. If this is detected, TimeDelta is cleared and rechecked. """
     def __init__(self,TimeValue=None):
-        self.TimeDelta = 0
-        self.ClockSynchronised = False
+        self.TimeDelta = 0 # Offset from machine clock to current date/time (in seconds).
+        self.ClockSynchronised = False # Indicates that the clock is synchronised.
+        self.PrevTime = time.time() # Record the initial unmodified time of the clock. Used to detect if machine clock gets updated.
         if type(TimeValue) == type(str):
             self.SetTimeFromString(TimeValue)
         elif type(TimeValue) == type(int):
             self.SetTimeFromInt(TimeValue)
 
+    def UpdateClockFromInt(self,TimeInt):
+    
+        """ Given any integer timestamp this will compare against the clock
+            and update the clock if the new timestamp is AHEAD of the current 
+            clock. This increases the accuracy/synchronisation of the clock with the RPi's clock.
+            This can be run against any received timestamp to continually improve the clock's time. """
+        
+        tn = self.Now() # What time does the microcontroller think it is at the moment?
+        result = False
+        if TimeInt != None and TimeInt > tn: # We can nudge the clock forward, never backwards.
+            self.SetTimeFromInt(TimeInt)
+            LogFile.Log("UpdateClockFromInt(",IntToTimeString(TimeInt),") replaces",IntToTimeString(tn),"Updated clock.")
+            result = True
+        #else:
+        #    LogFile.Log("UpdateClockFromInt(",IntToTimeString(TimeInt),") does not replace",IntToTimeString(tn))
+        return result
+
+    def UpdateClockFromString(self,TimeString):
+    
+        """ Given any character timestamp this will compare against the clock
+            and update the clock if the new timestamp is AHEAD of the current 
+            clock. This increases the accuracy/synchronisation of the clock with the RPi's clock.
+            This can be run against any received timestamp to continually improve the clock's time.   
+
+            If the microcontroller is connected via USB to Thonny on a remote machine, the machine clock may then
+            get synchronised, in which case the TimeDelta value is nolonger needed. """
+
+        #print("c.UCFS: Received",TimeString)
+        result = False
+        for a in [' ','.','-',':']:
+            TimeString = TimeString.replace(a,"")
+        try:
+            #print("c.UCFS: Using",TimeString)
+            result = TimeStringToInt(TimeString)
+            #print("c.UCFS: As int",result)
+            self.UpdateClockFromInt(result)
+        except:
+            LogFile.Log("UpdateClockFromString(",TimeString,") failed.")
+        return result
+
+    def CheckTimeDelta(self,now):
+        """ If the basic clock time suddenly jumps, assume that the clock has been synchronised
+            in which case clear TimeDelta because it's nolonger needed. """
+        # now = time.time()
+        if now - self.PrevTime > 3600: # Clock has suddenly jumped an hour or more!
+            print("c.CTD: Internal clock may have synchronised. Resetting clock synchronisation.")
+            self.TimeDelta = 0
+            self.ClockSynchronised = False
+            LogFile.Log("CheckTimeDelta(): Internal clock may have synchronised. Resetting clock synchronisation.")
+        self.PrevTime = now
+        
     def SetTimeFromInt(self,TimeInt):
         """ Set clock offset from an INTEGER TIME. """
-        self.TimeDelta = TimeInt - time.time()
+        self.TimeDelta = max(TimeInt - time.time(),0) # Time offset is the received time - the realtime clock time. Cannot be negative.
         self.ClockSynchronised = True
-        RPi.Write('# Microcontroller timedelta is ' + str(self.TimeDelta) + ' seconds.')
+        RPi.Write('# Clock now ' + IntToTimeString(self.Now()) + ' timedelta ' + str(self.TimeDelta) + ' seconds.')
         result = True
 
     def SetTimeFromString(self,TimeString):
@@ -537,7 +658,13 @@ class clock():
 
     def Now(self):
         """ Return current clock time. As micropython number of seconds."""
-        return (time.time() + self.TimeDelta)
+        now = time.time()
+        self.CheckTimeDelta(now) # If the internal clock has recently been synchronised clear TimeDelta until it can be recalculated.
+        return (now + self.TimeDelta)
+        
+    def NowString(self):
+        """ Return current clock time. As character string. """
+        return IntToTimeString(self.Now())
 
 Clock = clock(time.time()) # Simulate RTC
 LogFile.Clock = Clock # Tell the LogFile which clock to use.
@@ -573,10 +700,15 @@ class trajectorypoint():
         return line
 
     def ExpectedAngle(self,timeint=None):
-        """ Calculate the expected angle based upon this entry. """
+        """ Calculate the expected angle based upon this entry.
+            If the trajectory point's start time has not yet been reached, 
+            we 'loiter' at the start angle. Useful for satellite passes when 
+            we need to go to the 'rise' position and wait for it to appear.
+            if the trajectory segment has expired, the expected angle is the end of the segment. """
         if timeint == None:
             timeint = Clock.Now()
         if timeint > self.EndTime: timeint = self.EndTime # Cannot proceed past the end of the planned trajectory.
+        elif timeint < self.StartTime: timeint = self.StartTime # Cannot extrapolate backwards in time, just hover at the start point.
         elapsedseconds = timeint - self.StartTime
         AngleDelta = self.EndAngle - self.StartAngle
         TimeDelta = self.EndTime - self.StartTime
@@ -670,17 +802,7 @@ class trajectory():
 # Use ADC to read VMOT value. We can detect if motors are actually powered.
 # - Losing power is an easy problem to detect and report.
 print (dir(analogio))
-# VMotADC = machine.ADC(board.A0) # Use ADC0 channel GP26.
 VMotADC = analogio.AnalogIn(board.A0)
-
-def VMot_xxx():
-    """ Read the current MotorPower voltage from the ADC. """
-    #print ('ADC value', VMotADC.value)
-    result = 3.3 * VMotADC.value / 65535
-    # This voltage is only 1/11 of the actual voltage because of the resistors on the ADC pin. So scale back up.
-    result = result * 11
-    result = round(result,1) # Accurate to 0.1V
-    return result
 
 def VMot():
     """ Read the current MotorPower ADC value directly.
@@ -698,7 +820,9 @@ class steppermotor():
         self.CurrentPosition = None
         self.TargetPosition = None
         self.MotorConfigured = False
-        self.StatusTimer = timer(name,10) # Set up an internal timer for sending status messages every 10 seconds.
+        self.FaultSensitive = False # Set to TRUE to monitor the 'fault' pin on the DRV8825 chip.
+        self.SendStatus = True # Set to FALSE to disable status messages while downloading batches of data (eg Trajectories)
+        self.StatusTimer = timer(name,10) # Set up an internal timer for sending status messages every 10 seconds. Can we overridden by RPi.
         # self.FastTime = 0.005 # The fastest pulse time for moving the motor.
         self.FastTime = 0.0005 # The fastest pulse time for moving the motor.
         #print ('NOTE: Using experimental super-fast pulse time for motor!')
@@ -754,6 +878,27 @@ class steppermotor():
         #LogFile.Log(self.MotorName, 'Step rate range:', int(1/(2 * self.SlowTime)), 'to', int(1/(2 * self.FastTime)), '/s')
         #LogFile.Log('steppermotor.__init__: WARNING DRV8825 fault pin is not monitored yet!')
         #print('steppermotor.__init__: WARNING DRV8825 fault pin is not monitored yet!')
+        # Latest Start/Stop times for config and status methods.
+        self.ConfigStartTime = None
+        self.ConfigEndTime = None
+        self.StatusStartTime = None
+        self.StatusEndTime = None
+
+    def ReportStamps(self):
+        """ Report back start/end timestmaps for config and status methods. """
+        line = "# Timestamps: " + self.MotorName + " Config "
+        if self.ConfigStartTime == None: line += "NOT SET"
+        else: line += IntToTimeString(self.ConfigStartTime)
+        line += "-"
+        if self.ConfigEndTime == None: line += "NOT SET"
+        else: line += IntToTimeString(self.ConfigEndTime)
+        line += " Status "
+        if self.StatusStartTime == None: line += "NOT SET"
+        else: line += IntToTimeString(self.StatusStartTime)
+        line += "-"
+        if self.StatusEndTime == None: line += "NOT SET"
+        else: line += IntToTimeString(self.StatusEndTime)
+        RPi.Write(line) # Send over UART to RPi.
 
     def CheckOnTarget(self):
         """ Set the OnTarget indicator if it looks like we're on-target.
@@ -782,7 +927,8 @@ class steppermotor():
         self.RequestedPosition = None
         self.RequestedAngle = None
         self.MotorConfigured = False
-        self.SendMotorStatus(immediate=True)
+        self.SendStatus = True 
+        self.SendMotorStatus(immediate=True,codes='rst')
         return True
 
     def AddTrajectoryPoint(self,entry):
@@ -790,12 +936,12 @@ class steppermotor():
             self.Trajectory.Add(entry)
         except Exception as e:
             LogFile.Log('steppermotor(' + self.MotorName + ').AddTrajectoryPoint: ' + str(entry) + ': Failed. ' + str(e))
-        self.SendMotorStatus(immediate=True) # This triggers the next trajectory point faster than waiting for the regular status message will.
+        self.SendMotorStatus(immediate=True,codes='atp') # This triggers the next trajectory point faster than waiting for the regular status message will.
 
     def ClearTrajectory(self):
         """ Remove current trajectory. """
         self.Trajectory.Clear() # Empty the entire trajectory.
-        self.SendMotorStatus(immediate=True)
+        self.SendMotorStatus(immediate=True,codes='clt')
 
     def Stop(self):
         """ Immediately stop the motor. """
@@ -844,8 +990,8 @@ class steppermotor():
             print ('GoToAngle: Motor NOT configured')
             LogFile.Log('steppermotor.GoToAngle(' + self.MotorName + ') Rejected. Motor is not configured.')
             RPi.Write('goto rejected ' + self.MotorName + ' ' + str(newangle) + ' MotorNotConfigured')
-        print ('GoToAngle: SendMotorStatus')
-        self.SendMotorStatus(immediate=True) # Tell RPi latest condition of the motor.
+        print ('GoToAngle: SendMotorStatus (immediate) gte')
+        self.SendMotorStatus(immediate=True,codes='gte') # Tell RPi latest condition of the motor.
 
     def SetNewTargetAngle(self,newangle):
         """ Set a new target ANGLE (and therefore position) for the motor.
@@ -928,7 +1074,7 @@ class steppermotor():
             self.LatestTuneSteps = delta # Record details of the last tune command received. So we can see it was handled.
             self.LatestTuneTime = Clock.Now()
             RPi.Write('tune complete ' + self.MotorName + ' ' + str(self.LatestTuneTime) + ' ' + str(delta))
-            self.SendMotorStatus(immediate=True) # Tell RPi latest condition of the motor.
+            self.SendMotorStatus(immediate=True,codes='tup') # Tell RPi latest condition of the motor.
         else:
             RPi.Write('tune rejected ' + self.MotorName + ' ' + str(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
             LogFile.Log("error : TunePosition(" + self.MotorName + ") Rejected, motor is not yet configured.")
@@ -1033,47 +1179,73 @@ class steppermotor():
         """ This loads the motor configuration received from the RPi.
             It can override some default values in the configuration.
             All values are optional.
-            Any value of 'none' is ignored. """
+            Any value of 'none' is ignored.
+
+            configure motor 20231016085541 azimuth 130.492 0 360 0.0 -1 0.001 0.05 0.003 10 n
+                0       1         2           3       4    5  6   7  8   9     10    11  12 13
+                
+            """
+        #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") start.")
+        #print("s.CM rec:",line)
+        self.ConfigStartTime = Clock.Now()
         try:
             lineitems = line.split(' ')
-            if len(lineitems) > 4 and lineitems[4].lower() != 'none': # To apply to live copy.
+            lc = len(lineitems)
+            if lc > 2: 
+                #print("s.CM Check clock",lineitems[2])
+                Clock.UpdateClockFromString(lineitems[2]) # Check that the clock is as synchronised as possible.
+            if lc > 4 and lineitems[4].lower() != 'none': # To apply to live copy.
                 self.CurrentAngle = float(lineitems[4]) # Restore current position of the motor from the RPi's memory.
                 self.CurrentPosition = self.AngleToStep(self.CurrentAngle)
-            if len(lineitems) > 5 and lineitems[5].lower() != 'none':
+            if lc > 5 and lineitems[5].lower() != 'none':
                 self.MinAngle = float(lineitems[5]) # Set new minimum angle for motor.
                 self.MinPosition = self.AngleToStep(self.MinAngle)
-            if len(lineitems) > 6 and lineitems[6].lower() != 'none':
+            if lc > 6 and lineitems[6].lower() != 'none':
                 self.MaxAngle = float(lineitems[6]) # Set new maximum angle for motor.
                 self.MaxPosition = self.AngleToStep(self.MaxAngle)
-            if len(lineitems) > 7 and lineitems[7].lower() != 'none':
+            if lc > 7 and lineitems[7].lower() != 'none':
                 self.BacklashAngle = float(lineitems[7]) # Set new backlash angle for motor.
-            if len(lineitems) > 8 and lineitems[8].lower() != 'none':
+            if lc > 8 and lineitems[8].lower() != 'none':
                 self.Orientation = int(lineitems[8]) # Set new orientation for motor.
-            if len(lineitems) > 9 and lineitems[9].lower() != 'none':
+            if lc > 9 and lineitems[9].lower() != 'none':
                 self.FastTime = float(lineitems[9]) # Set new FASTEST PULSE time for motor.
-            if len(lineitems) > 10 and lineitems[10].lower() != 'none':
+            if lc > 10 and lineitems[10].lower() != 'none':
                 self.SlowTime = float(lineitems[10]) # Set new SLOWEST PULSE time for motor.
-            if len(lineitems) > 11 and lineitems[11].lower() != 'none':
+            if lc > 11 and lineitems[11].lower() != 'none':
                 self.TimeDelta = float(lineitems[11]) # Set new acceleration rate for motor.
             if self.WaitTime < self.FastTime: self.WaitTime = self.FastTime # Current motor speed cannot be faster than new fastest limit.
             if self.WaitTime > self.SlowTime: self.WaitTime = self.SlowTime # Current motor speed cannot be slower than new slowest limit.
+            if lc > 12 and lineitems[12].lower() != 'none': # Must be within reasonable limits.
+                temp = int(lineitems[12])
+                if temp < 1: temp = 1
+                elif temp > 30: temp = 30
+                self.StatusTimer = timer(self.MotorName,temp) # Set new repeat time for sending motor status messages back to the RPi
+            if lc > 13 and lineitems[13].lower() != 'none': # Enable/disable fault sensitivity. DRV8825 can then abort an observation.
+                self.FaultSensitive = StringToBool(lineitems[13])
             self.MotorConfigured = True
+            #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") success.")
         except Exception as e:
             LogFile.Log("steppermotor.ConfigureMotor(line) failed: " + str(e))
+            print("steppermotor.ConfigureMotor() failed.")
+        self.ConfigEndTime = Clock.Now()
+        #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") end.")
         return self.MotorConfigured
 
     def MoveFullStep(self,stepsize=1):
         """ Move the motor one full step. Target must be initialized before calling this.
-            if Microstepping is enabled, then this accepts 2 stepsize values.
-                Stepsize = 1 = Micro step movement.
-                Stepsize = 32 = Full step movement.
-            if Microstepping is disabled, then this only accepts stepsize = 1 """
-        # *Q* The fault pin needs re-enabling when the circuit is actually enabled.
-        if False and self.FaultBCM.GetValue() == False: # value() < 1:
-            LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') Fault signal received from DRV8825 chip')
-            raise Exception ('MoveFullStep: ' + self.MotorName + ' FAULT signal received from motor. (No power, not connected or overheated?)')
+            If Microstepping is enabled, then this accepts 2 stepsize values.
+                stepsize = 1 = Micro step movement.
+                stepsize = 32 = Full step movement.
+            If Microstepping is disabled, then this only accepts stepsize = 1 """
+        if self.FaultBCM.GetValue() == False: # DRV8825 'fault' pin is triggered.
+            LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault.')
+            if self.FaultSensitive: return
+            #raise Exception ('MoveFullStep: ' + self.MotorName + ' FAULT signal received from motor. (No power, not connected or overheated?)') 
+            # Don't raise exception because it will never get the chance to report the fault in the log file.
         if abs(self.StepDir) != 1: # self.StepDir must be +1 or -1
-            raise Exception ('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
+            #raise Exception ('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
+            LogFile.Log('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
+            return
         if (self.StepDir * self.Orientation) > 0:
             self.DirectionBCM.SetValue(True) # value(1) # Move motor forward.
         else:
@@ -1124,6 +1296,9 @@ class steppermotor():
         MicroStepCount = 0
         if MotorSteps != 0:
             StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
+            if abs(MotorSteps) > 100: # Large moves will reset the 'OnTarget' flag.
+                LogFile.Log('steppermotor.MoveMotor: Large move (',MotorSteps,'). OnTarget=False')
+                self.OnTarget = False
         while MotorSteps != 0:
             # If supporting microstepping. If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
             # We can make a FULL step.
@@ -1147,7 +1322,7 @@ class steppermotor():
             #    self.SendMotorStatus() # Long slow moves would cause RPi to trigger a reset otherwise.
             #elif self.MotorName == 'altitude':
             #    self.SendMotorStatus() # Long slow moves would cause RPi to trigger a reset otherwise.
-            self.SendMotorStatus() # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
+            self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
             for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
                 RPi.BufferInput() # Keep polling for input from the RPi.
                 RPi.WritePoll() # Keep sending data to RPi.
@@ -1173,15 +1348,22 @@ class steppermotor():
             result = None
         return result
 
-    def SendMotorStatus(self,immediate=False):
+    def SendMotorStatus(self,immediate=False,codes='?-?'):
         """ Generate status message to RPi.
             The RPi uses this to decide what commands and configurations to send to the microcontroller.
-            This can send multipleitems to the RPi, they are sent individually in sequence rather than as
-            a single large packet of everything. Smaller messages work more reliably.
             This can be triggered via multiple methods and in some circumstances can flood the RPi with
             messages. So there is a maximum repeat rate built in.
+            immediate: True means that the status is sent even if not due.
+                       False means that the status is only sent if the timer is due.
+            codes: Optional string of codes that are added to the status message. (Debug/test/dev etc)
             """
         if immediate or self.StatusTimer.Due(): # Only send the status at regular intervals, otherwise we flood communications.
+            #print("motorcontrol.SendMotorStatus(",self.MotorName,"): Start")
+            self.StatusStartTime = Clock.Now()
+            if self.SendStatus == False: # Don't send status message.
+                RPi.Write('# SendMotorStatus ' + IntToTimeString(Clock.Now()) + ' ' + self.MotorName + ' disabled. ' + str(codes))
+                print("SendMotorStatus",self.MotorName,"currently disabled.",codes)
+                return
             line = 'motor status '
             line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
             line += self.MotorName + ' '
@@ -1194,7 +1376,12 @@ class steppermotor():
             line += BoolToString(self.OnTarget) + ' ' # Motor is on target or not.
             line += str(self.WaitTime * 2) + ' ' # The pulse period (indicates speed) of the motor.
             line += str(VMot()) + ' ' # Measure the motor power voltage from ADC0
+            line += str(codes) + ' ' # Optional codes added to status message.
             RPi.Write(line) # Send over UART to RPi.
+            self.StatusEndTime = Clock.Now()
+            # Reset the status timer.
+            self.StatusTimer.Reset()
+            print(self.MotorName,"status next due in",self.StatusTimer.Remaining(),"s. at",IntToTimeString(self.StatusTimer.NextDue),"Repeat",self.StatusTimer.RepeatSeconds,"s.", codes)
 
 # Define pins for motorcontroller chips.
 AzimuthStepBCM = GPIOpin(board.GP29) # Tiny RP2040
@@ -1232,6 +1419,11 @@ Altitude = steppermotor('altitude')
 Altitude.SetPins(stepBCM=AltitudeStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AltitudeFaultBCM) # Direct control over Altitude motor.
 Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
 Motors = [Azimuth, Altitude] # Control over 'all' motors.
+# Report back which motors are configured.
+line = "defined motors "
+for i in Motors:
+    line += i.MotorName + ' '
+RPi.Write(line)
 
 class picosession():
     def __init__(self):
@@ -1239,6 +1431,9 @@ class picosession():
         self.AutonomousControl = False # Triggers movement of the motors when they are configured and trajectories loaded.
         self.RemoteControl = False # Allows movement of the motors when they are configured, regardless of trajectories existing.
         self.Quit = False # Set to TRUE to terminate the session.
+        self.TrajectorySafetyms = 2 * 60 * 1000 # How many milliseconds can a valid trajectory remain in use before comms failure terminates it? == 2 minutes.
+        self.TrajectorySafetyFlushes = 0 # How many times have we had to flush the trajectories for safety when comms seemed to fail?
+        self.FailsafeLatch = False # Latch to prevent 'failsafe' messages flooding the commication buffers when safety flush is triggered.
 
     def MovePermission(self):
         # Decide if the microcontroller can accept remote control of the motors.
@@ -1258,16 +1453,43 @@ class picosession():
         #    RPi.Write('AutonomousControl ' + BoolToString(result))
         self.AutonomousControl = result
 
-    def SendMotorStatus(self,motorname):
-        """ Decide which motor status to send. """
+    def SendMotorStatus(self,motorname,immediate=False,codes='?-?'):
+        """ Decide which motor status to send. 
+            immediate: True: Status is sent even if not due. 
+                       False: Status is only sent if timer is due. 
+            codes: Optional extra codes added to the status message (dev/test/debug etc) """
         for i in Motors:
-            if i.MotorName == motorname: i.SendMotorStatus()
+            if i.MotorName == motorname: i.SendMotorStatus(immediate=immediate,codes=codes)
+            
+    def TrajectorySafety(self):
+        """ If the remote RPi crashes while a trajectory is underway but leaves the microcontroller powered
+            the microcontroller will continue to follow the trajectory until it expires, this could be 20+ minutes.        
+            For safety, clear trajectories of all motors if communication has stalled. 
+            If communication resumes, the RPi will send the trajectory again. """
+        failsafe = False
+        try:
+            elapsed = RPi.ticks_ms() - RPi.LastRxms # How many ms elapsed since last receipt?
+        except:
+            elapsed = 0
+            LogFile.Log('TrajectorySafety: elapsed calculation failed.',RPi.ticks_ms(),RPi.LastRxms)
+        if self.TrajectorySafetyms != None and elapsed > self.TrajectorySafetyms: # No messages received recently.
+            for i in Motors:
+                if i.Trajectory.Valid: # There's a trajectory underway.
+                    failsafe = True # Trigger failsafe activity.
+        if failsafe and self.FailsafeLatch == False:
+            LogFile.Log('TrajectorySafety:',elapsed,'ms, failsafe?')
+            self.FailsafeLatch = True # Don't let this message repeat continually.
+            self.TrajectorySafetyFlushes += 1 # Increment the number of times we've flushed the trajectories for safety.
+            for i in Motors:
+                i.ClearTrajectory() # Flush the trajectory from each motor for safety.
+        if failsafe == False: self.FailsafeLatch = False # Reset the latch.
 
-    def SendSessionStatus(self):
+    def SendSessionStatus(self,codes='?-?'):
         """ Generate status message to RPi.
             The RPi uses this to decide what commands and configurations to send to the microcontroller.
             This can send multipleitems to the RPi, they are sent individually in sequence rather than as
             a single large packet of everything. Smaller messages work more reliably.
+            codes: Optional extra flags added to status message (dev/test/debug etc)
             """
         line = "session status "
         i = time.time() - RPi.StartTime # Alive seconds. Use CPU clock not synchronised clock.
@@ -1276,6 +1498,8 @@ class picosession():
         line += BoolToString(self.AutonomousControl) + ' '  # Can motors drive themselves? Fully configured and trajectory known.
         line += BoolToString(self.RemoteControl) + ' '  # Can motors be commanded remotely? Fully configured.
         line += str(i) + ' ' # Alive seconds. Use CPU clock, not synchronised clock.
+        line += str(self.TrajectorySafetyFlushes) + ' ' # How many times has the trajectory been flushed for safety when comms failed?
+        line += str(codes) + ' ' # Add optional extra codes.
         RPi.Write(line) # Send over UART to RPi.
         line = "comms status "
         line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
@@ -1283,9 +1507,16 @@ class picosession():
         line += str(RPi.CharactersRead) + ' '  # How many bytes received from RPi by Microcontroller.
         line += str(RPi.CharactersWritten) + ' '  # How many bytes written by Microcontroller to RPi.
         line += str(RPi.WriteDrops) + ' '  # How many messages were dropped due to buffer overflow?
+        line += str(RPi.ReceiveAge()) + ' ' # Report how old the last received message is...
+        line += str(RPi.ReadDrops) + ' ' # How many received messages have been dropped because input buffer was full?
+        line += str(len(RPi.WriteQueue)) + ' ' # How many messages in the send queue currently? Checking for backlog building up.
+        line += str(codes) + ' ' # Add optional extra codes.
         RPi.Write(line) # Send over UART to RPi.
+        #for i in Motors: i.ReportStamps() # Report timestamps to aid tracing situations where motor status messages stop for a motor sometimes.
 
     def AutoMoveMotors(self): # Trigger movement of the motors.
+        """ Call this to check the current position of each motor against their trajectory.
+            If the motor needs to move, this will perform the motion. """
         overallresult = False
         self.MovePermission() # Is motor still capable of autonomous movement?
         if self.AutonomousControl:
@@ -1298,6 +1529,13 @@ class picosession():
                     LogFile.Log('AutoMoveMotors',i.MotorName,'failed: TargetExpectedAngle returned', result)
                     overallresult = False
         return overallresult
+
+def CheckVersionCompatibility(rpiversion):
+    """ The Raspberry Pi has sent the version number for pilomar.py
+        Check that it's compatible with this code.py program.
+        This issues a log file warning. It will not terminate the program. """
+    if not rpiversion in ACCEPTABLERPIVERSIONS:
+        LogFile.Log('CheckVersionCompatibility',rpiversion,'not in',str(ACCEPTABLERPIVERSIONS))
 
 Session = picosession() # Instantiate a sesson object.
 
@@ -1318,12 +1556,19 @@ def ProcessInput(line):
             i.Reset()
         Session.MovePermission() # Decide if we have valid trajectories and configuration in every motor. OK to move if we do!
     elif lineitems[0] == 'reset':
-        RPi.Write('acknowledged reset')
         for i in Motors:
-            i.Reset()
+            i.Reset() # Reset motor status.
+        RPi.Reset() # Flush output buffers.
+        RPi.Write('acknowledged reset') # Confirm reset performed.
+    elif lineitems[0] == 'sendstatus': # Turn off status messages for motors. Useful when downloading a batch of trajectories, so no conflicting requests exchanged.
+        RPi.Write('# ' + line)
+        for i in Motors:
+            i.SendStatus = StringToBool(lineitems[2])
     elif lineitems[0] == 'tune':
         for i in Motors:
             if i.MotorName == lineitems[2]: i.TunePosition(int(lineitems[3]))
+    elif line.startswith('rpi version'):
+        CheckVersionCompatibility(lineitems[3])        
     elif line.startswith('clear trajectory'):
         RPi.Write('cleared trajectory')
         for i in Motors:
@@ -1332,7 +1577,8 @@ def ProcessInput(line):
     elif line.startswith('configure motor'):
         for i in Motors:
             if i.MotorName == lineitems[3]:
-                i.ConfigureMotor(line)
+                i.ConfigureMotor(line) # Load configuration.
+                i.SendMotorStatus(immediate=True,codes='cfg') # Immediately respond with lates motor status.
         Session.MovePermission() # Decide if we have valid trajectories and configuration in every motor. OK to move if we do!
     elif lineitems[0] == 'trajectory':
         for i in Motors:
@@ -1347,10 +1593,10 @@ def ProcessInput(line):
         Clock.SetTimeFromString(lineitems[2])
         Session.MovePermission() # Decide if we have valid trajectories and configuration in every motor. OK to move if we do!
     elif line.startswith('leds off'): # Go to stealth mode, turn LEDs off.
-        StatusLed.Disable()
+        StatusLed.Disable() # Disable the onboard status LED.
         #BoardLed.Disable()
     elif line.startswith('leds on'): # Enable the LEDs to show processing.
-        StatusLed.Enable()
+        StatusLed.Enable() # Enable the onboard status LED.
         #BoardLed.Enable()
     else:
         RPi.Write('error: unrecognised RPi command: ' + line)
@@ -1358,8 +1604,9 @@ def ProcessInput(line):
 class memorymanager():
     def __init__(self):
         self.currmem = None
+        self.Poll()
 
-    def Poll(self):
+    def Poll(self): # Check current memory and trigger memory garbage collection early if needed.
         self.currmem = gc.mem_free()
         if self.currmem < 3000:
             gc.collect()
@@ -1369,26 +1616,76 @@ MemMgr = memorymanager()
 print ('Starting...')
 for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
 RPi.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
+RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
 
 try:
     while True: # Full interaction
-        LogFile.SendCheck() # Keep log file buffer under control. 
-        line = RPi.Read() # Any input from the Raspberry Pi in the cache? 
-        if len(line) != 0: ProcessInput(line)
+        try:
+            LogFile.SendCheck() # Keep log file buffer under control. Flushes the buffer if it gets too large.
+        except Exception as e:
+            LogFile.Log("Main:Logfile.SendCheck failed.",e)
+            print("Main:Logfile.SendCheck failed.",e)
+            
+        try:
+            line = RPi.Read() # Any input from the Raspberry Pi in the cache? 
+            if len(line) != 0: ProcessInput(line) # Process it.
+        except Exception as e:
+            LogFile.Log("Main:RPi.Read failed.",e)
+            print("Main:RPi.Read failed.",e)
+            print("Main:Failed on",line)
+            
+        try:
+            Session.TrajectorySafety() # If no recent receipt from RPi, assume comms break take precautions... Clear trajectories?
+        except Exception as e:
+            LogFile.Log("Main: SessionTrajectorySafety() failed.",e)
+            print("Main: SessionTrajectorySafety() failed.",e)
+            
         if Session.Quit: break 
-        if SessionTimer.Due(): Session.SendSessionStatus() 
-        if CpuTimer.Due(): MicroControllerLog() 
-        Session.SendMotorStatus('azimuth') 
-        Session.SendMotorStatus('altitude') 
-        RPi.WritePoll() # If no conflicts, write from the outbound buffer to the remote device. 
-        #BoardLed.Toggle()
-        Session.AutoMoveMotors() # Move motors if allowed to. 
-        MemMgr.Poll()
+        
+        try:
+            if SessionTimer.Due(): Session.SendSessionStatus(codes='tmr') # Send session status messages.
+        except Exception as e:
+            LogFile.Log("Main: SessionTimer failed.",e)
+            print("Main: SessionTimer failed.",e)
+            
+        try:
+            if CpuTimer.Due(): MicroControllerLog() # Send microcontroller status message.
+        except Exception as e:
+            LogFile.Log("Main: CpuTimer failed.",e)
+            print("Main: CpuTimer failed.",e)
+            
+        try:
+            Session.SendMotorStatus('azimuth',codes='tmr') # Send azimuth status message.
+        except Exception as e:
+            LogFile.Log("Main: Azimuth status failed.",e)
+            print("Main: Azimuth status failed.",e)
+            
+        try:
+            Session.SendMotorStatus('altitude',codes='tmr') # Send altitude status message.
+        except Exception as e:
+            LogFile.Log("Main: Altitude status failed.",e)
+            print("Main: Altitude status failed.",e)
+            
+        try:
+            RPi.WritePoll() # Send anything in the transmit buffer if it's safe.
+        except Exception as e:
+            LogFile.Log("Main: RPi.WritePoll() failed.",e)
+            print("Main: RPi.WritePoll() failed.",e)
+            
+        try:
+            Session.AutoMoveMotors() # Move motors if allowed to. 
+        except Exception as e:
+            LogFile.Log("Main: AutoMoveMotors failed.",e)
+            print("Main: AutoMoveMotors failed.",e)
+        try:
+            MemMgr.Poll() # Check memory condition.
+        except Exception as e:
+            LogFile.Log("Main: MemMgr.Poll() failed.",e)
+            print("Main:MemMgr.Poll() failed.",e)
+            
 except Exception as e:
-        # This doesn't seem to report error messages very well. Why?
         neatprint('Mainloop failed:', str(e))
         StatusLed.Task('error')
-        #BoardLed.Off()
         neatprint(e.args)
 
 # Shutdown procedure...
@@ -1407,4 +1704,5 @@ while len(RPi.WriteQueue) > 0:
         print ('Flushing incomplete.')
         break
 print ('controller stopped')
+
 
