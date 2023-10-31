@@ -28,9 +28,9 @@ zip pilomar.zip pilomar/src
 zip pilomar.zip pilomar/src/pilomar.py
 zip pilomar.zip pilomar/src/pilomarlogfile.py
 zip pilomar.zip pilomar/src/pilomartimer.py
-zip pilomar.zip pilomar/src/pilomarcpu.py
 zip pilomar.zip pilomar/src/pilomardisc.py
-zip pilomar.zip pilomar/src/pilomarmemory.py
 zip pilomar.zip pilomar/src/pilomaroscommand.py
+zip pilomar.zip pilomar/src/pilomarcelestrak.py
+zip pilomar.zip pilomar/src/pilomarimage.py
 zip pilomar.zip pilomar/src/textcolor.py
 zip pilomar.zip pilomar/src/pilomar
