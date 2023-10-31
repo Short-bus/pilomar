@@ -22,8 +22,9 @@ class logfile(): # 2 references.
     """ An object to maintain a log file recording the activities and events in the program.
         This writes to a disc file and flushes the write buffers as quickly as it can.
         It can also copy ERROR messages to any nominated error window object (which must support a 'Print()' method. )        """
-    def __init__(self,filename : str):
+    def __init__(self,filename : str, clockoffset=None):
         self.FileName = filename
+        self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
         self.PrevLogTime = self.NowUTC()
         self.ErrorWindow = None # Reference to window object for displaying errors. Must offer a 'Print()' method.
         self.ErrorList = [] # Maintain list of any errors raised. These can then be summarised and reported if needed.
@@ -32,14 +33,28 @@ class logfile(): # 2 references.
         self.DetailFilter = ['u','f','d'] # Specify the detail levels that are recorded (user choices, flow, detail).
         self.LevelFilter = ['i','w','e'] # Specify which message types are recorded (info, warning, error).
 
-    def NowUTC(self) -> datetime: # Many references.
+    #def NowUTC(self) -> datetime: # Many references.
+    #    """ Get system clock as UTC (timezone aware) 
+    #        Microcontroller and Skyfield are operated in UTC vales. 
+    #        All clock-times used in this program use the UTC timestamped clock.
+    #        This should be the only reference to datetime.now() method in the entire
+    #        module. All other uses should refer to this NowUTC() function.
+    #        """
+    #    return datetime.now(timezone.utc)
+
+    def NowUTC(self,real=False) -> datetime: # Many references.
         """ Get system clock as UTC (timezone aware) 
             Microcontroller and Skyfield are operated in UTC vales. 
             All clock-times used in this program use the UTC timestamped clock.
             This should be the only reference to datetime.now() method in the entire
-            module. All other uses should refer to this NowUTC() function.
+            program. All other uses should refer to this NowUTC() function.
+            real=True means that no time offset is applied, you get the true realtime clock value.
+            real=False means that any time offset is applied, making the clock run at some other point in time.
             """
-        return datetime.now(timezone.utc)
+        dt = datetime.now(timezone.utc) # Offset supported.
+        if real == False and self.ClockOffset != None: # Can apply time offset.
+            dt = dt + timedelta(seconds=self.ClockOffset)
+        return dt
 
     def Log(self,*args, **kwargs) -> bool:
         """ Record a log message. 
