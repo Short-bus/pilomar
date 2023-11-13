@@ -988,7 +988,7 @@ if Parameters.HomeLat == None or Parameters.HomeLon == None:
     print(textcolor.yellow('    Atlanta, USA  : "HomeLat" : "33.753746 N",'))
     print(textcolor.yellow('                    "HomeLon" : "84.386330 W",'))
     print(' ')
-    print(textcolor.yellow('    Toyko, Japan  : "HomeLat" : "35.652832 N",'))
+    print(textcolor.yellow('    Tokyo, Japan  : "HomeLat" : "35.652832 N",'))
     print(textcolor.yellow('                    "HomeLon" : "139.839478 E",'))
     print(' ')
     textcolor.TextBox('Please edit the HomeLat and HomeLon parameters, then restart this program.',fg=textcolor.WHITE,bg=textcolor.RED)
