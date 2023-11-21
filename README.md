@@ -6,4 +6,4 @@ This combines multiple open modules to handle object location, tracking and imag
 This uses Python3 on the Raspberry Pi and CircuitPython on a connected Pimoroni Tiny2040 microcontroller.
 
 The physical telescope, mechanism and dome is buildable from the Instructables page.
-[https://github.com/Short-bus/pilomar]
+[https://www.instructables.com/Pi-lomar-3D-Printed-Working-Miniature-Observatory-/]
