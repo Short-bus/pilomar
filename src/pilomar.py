@@ -67,7 +67,7 @@
 #     If you are sensitive to flashing images you can slow down the keyboard scanning so that the image is more stable, but it will react to keyboard input more slowly.
 
 VERSION = '0.1.1' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-ACCEPTABLECONTROLLERVERSIONS = ['0.0.0','0.0.1','0.1.0'] # Microcontroller versions that this will work with. 
+ACCEPTABLECONTROLLERVERSIONS = ['0.0.0','0.0.1','0.1.0','0.1.1'] # Microcontroller versions that this will work with. 
 
 # Import required libraries
 from typing import Tuple # For type hinting.
