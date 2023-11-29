@@ -66,8 +66,8 @@
 # *Q* The keyboard scanning routine causes the display to flash sometimes. 
 #     If you are sensitive to flashing images you can slow down the keyboard scanning so that the image is more stable, but it will react to keyboard input more slowly.
 
-VERSION = '0.1.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-ACCEPTABLECONTROLLERVERSIONS = ['0.0.0','0.1.0'] # Microcontroller versions that this will work with. 
+VERSION = '0.1.1' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+ACCEPTABLECONTROLLERVERSIONS = ['0.0.0','0.0.1','0.1.0'] # Microcontroller versions that this will work with. 
 
 # Import required libraries
 from typing import Tuple # For type hinting.
@@ -332,10 +332,10 @@ def HRBytes(bytecount: int) -> str: # Move to textcolor? # 14 references.
     """ Turn a large number into human readable format.
         Turns 1MB etc. (Note: Uses binary definition of 1MB etc.)    """
     try:
-        if bytecount > (1024 ** 4): line = str(round(bytecount / (1024 ** 4),1)) + "Tb"
-        elif bytecount > (1024 ** 3): line = str(round(bytecount / (1024 ** 3),1)) + "Gb"
-        elif bytecount > (1024 ** 2): line = str(round(bytecount / (1024 ** 2),1)) + "Mb"
-        elif bytecount > (1024 ** 1): line = str(round(bytecount / (1024 ** 1),1)) + "Kb"
+        if bytecount >= (1024 ** 4): line = str(round(bytecount / (1024 ** 4),1)) + "Tb"
+        elif bytecount >= (1024 ** 3): line = str(round(bytecount / (1024 ** 3),1)) + "Gb"
+        elif bytecount >= (1024 ** 2): line = str(round(bytecount / (1024 ** 2),1)) + "Mb"
+        elif bytecount >= (1024 ** 1): line = str(round(bytecount / (1024 ** 1),1)) + "Kb"
         else: line = str(bytecount) + "b"
     except Exception as e:
         print(e) # Trap all the exception information in the main log file.
@@ -344,21 +344,21 @@ def HRBytes(bytecount: int) -> str: # Move to textcolor? # 14 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-def HRHertz(hertz: int) -> str: # Move to textcolor? # 1 references.
-    """ Turn a large number into human readable format.
-        returns 1GHz etc. """
-    try:
-        if hertz > (1000 ** 4): line = str(round(hertz / (1000 ** 4),1)) + "THz"
-        elif hertz > (1000 ** 3): line = str(round(hertz / (1000 ** 3),1)) + "GHz"
-        elif hertz > (1000 ** 2): line = str(round(hertz / (1000 ** 2),1)) + "MHz"
-        elif hertz > (1000 ** 1): line = str(round(hertz / (1000 ** 1),1)) + "KHz"
-        else: line = str(hertz) + "Hz"
-    except Exception as e:
-        print(e) # Trap all the exception information in the main log file.
-        raise Exception("HRHertz() failed.") from e # Continue with regular exception stack.
-    return line
-
-# ------------------------------------------------------------------------------------------------------
+#def HRHertz(hertz: int) -> str: # Move to textcolor? # 1 references.
+#    """ Turn a large number into human readable format.
+#        returns 1GHz etc. """
+#    try:
+#        if hertz >= (1000 ** 4): line = str(round(hertz / (1000 ** 4),1)) + "THz"
+#        elif hertz >= (1000 ** 3): line = str(round(hertz / (1000 ** 3),1)) + "GHz"
+#        elif hertz >= (1000 ** 2): line = str(round(hertz / (1000 ** 2),1)) + "MHz"
+#        elif hertz >= (1000 ** 1): line = str(round(hertz / (1000 ** 1),1)) + "KHz"
+#        else: line = str(hertz) + "Hz"
+#    except Exception as e:
+#        print(e) # Trap all the exception information in the main log file.
+#        raise Exception("HRHertz() failed.") from e # Continue with regular exception stack.
+#    return line
+#
+## ------------------------------------------------------------------------------------------------------
 
 def HRInteger(value: int, uom='', scale=1000, powers=['','K','M','G','T','P']) -> str:
     """ Turn a large number into human readable format.
@@ -366,7 +366,7 @@ def HRInteger(value: int, uom='', scale=1000, powers=['','K','M','G','T','P']) -
         UOM is the unit of measure added to T,G,M,K etc.
         scale is 1000 or 1024 depending what scale you're using.
         - Computer scale is usually 1024,
-        - Scientific scale is usuall 1000.
+        - Scientific scale is usually 1000.
         powers = list of the codes for each power. """
     line = str(value) # Don't scale it if the function fails.
     try:
@@ -632,6 +632,7 @@ CamLogFileName = logdir + "/" + ProgramTitle + "_camera_" + UtcTimeStamp() + ".l
 print("Camera log to", CamLogFileName)
 CamLog = logfile(CamLogFileName,clockoffset=ClockOffset) # Create a CAMERA specific log file. (This runs in separate thread, unsure if logging would be thread-safe.)
 
+MainLog.Log("Python version:",sys.version,terminal=False)
 MainLog.Log("Startup parameters:", RunArgs,terminal=False)
 HistoryFile = ProjectRoot + '/data/' + ProgramTitle + '_sessions.txt' # Chosen observation targets and settings are stored in this file.
 
@@ -747,7 +748,6 @@ class parameters(attributemaster): # Common # 1 references.
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
         # Following parameters control which graphics are shown in the dashboard display. Only 1 can be shown at a time.
-        self.ChartEnabled = self.GetParmVal('ChartEnabled',True) # Generate character base chart during observation run?
         
         # The following parameters decide which types of images are stored.
         self.CameraSaveJpg = self.GetParmVal('CameraSaveJpg',True) # Save the jpg image from observations, but will strip out the embedded RAW data.
@@ -765,7 +765,6 @@ class parameters(attributemaster): # Common # 1 references.
         self.TargetInclusionRadius = self.GetParmVal('TargetInclusionRadius',15) # Angle (radius) for inclusion of neighbouring stars when generating target image.
         self.TargetMinMagnitude = self.GetParmVal('TargetMinMagnitude',10.0) # Minimum magnitude for stars to display. At a 2 second exposure, Magnitude 5.0 is a good value, at 5 seconds, Mag 9, over 10 seconds, Mag 10 is about as good as it gets.
         self.UseLiveLocation = self.GetParmVal('UseLiveLocation',True) # Use live target location rather than last reported location for image processing.
-        self.AlignByImage = self.GetParmVal('AlignByImage',True) # Drift calculation finds aligns using IMAGES (True) or STAR LISTS (False)?
         self.DebugMode = self.GetParmVal('DebugMode',True) # In DebugMode ObservationRun does not display the status windows. This makes error messages easier to read.
         self.KeyboardScanDelay = self.GetParmVal('KeyboardScanDelay',2) # How many seconds between keyboard scans when running an observation?
         
@@ -1926,13 +1925,13 @@ class astrocamera(attributemaster): # 1 references.
             result = result.total_seconds()
         return result
 
-    def LastImageAge(self):
-        """ Return a timedelta object with the age of the last image. 
-            Returns None if no image captured yet. """
-        result = None
-        if self.LastImageDateTime != None:
-            result = NowUTC() - self.LastImageDateTime
-        return result
+    #def LastImageAge(self):
+    #    """ Return a timedelta object with the age of the last image. 
+    #        Returns None if no image captured yet. """
+    #    result = None
+    #    if self.LastImageDateTime != None:
+    #        result = NowUTC() - self.LastImageDateTime
+    #    return result
 
     def CameraFault(self):
         """ Return true if it looks like the camera has hung. 
@@ -2614,14 +2613,13 @@ class microcontroller(attributemaster): # 1 references.
 
                 mctl = microcontroller(port='/dev/serial0',resetpin=Parameters.MctlResetPin) # Create communication with microcontroller over uart0 serial port.
                 mctl.Log = MainLog.Log # Tell which Logging function to use for main logfile messages.
-                mctl.CommsLog = CommsLog.Log # Tell which Logging function to use for communication logfile messages.
                 mctl.Initiate() # Initiate communication.
 
         """
     def __init__(self,port='/dev/serial0',resetpin=4):
         self.uart = serial.Serial(port,115200,timeout=0,exclusive=True)
         self.Log = None # Handle to the method/function which will be used for logging messages.
-        self.CommsLog = None # Handle to method/function which records communication traffic.
+        #self.CommsLog = None # Handle to method/function which records communication traffic.
         self.QueueToMctl = Queue() # Use queue mechanism to send commands to the microcontroller communication thread. 
         self.QueueFromMctl = Queue() # Use queue mechanism to receive commands from the microcontroller communication thread. 
         self.ResetPin = resetpin # Earthing this pin will RESET the remote device.
@@ -2899,11 +2897,11 @@ class microcontroller(attributemaster): # 1 references.
                     self.LastRxTime = NowUTC() # Note when last receive activity occurred. 
                     self.ResetAttempts = 0 # We have activity, so clear the restart counter.
                     self.LinesReceived += 1 # Increment count of lines received. 
-                    if self.CommsLog != None: self.CommsLog("UART>RxQueue",self.InputLine,terminal=False)
+                    #if self.CommsLog != None: self.CommsLog("UART>RxQueue",self.InputLine,terminal=False)
                     # If we are not currently running an observation, nothing is reading the queue, so flush anything too old.
                     while len(self.Lines) > Parameters.UartRxQueueLimit:
                         delline = self.Lines.pop(0) # Kill the oldest lines first.
-                        if self.CommsLog != None: self.CommsLog("RxQueue discarded:",delline,terminal=False)
+                        #if self.CommsLog != None: self.CommsLog("RxQueue discarded:",delline,terminal=False)
                 self.InputLine = '' # Start a fresh input line next time anything is received. 
             else: self.InputLine += response # Add the character to the input line we are constructing. 
             Led1.Off()
@@ -2917,7 +2915,7 @@ class microcontroller(attributemaster): # 1 references.
         while len(result) == 0 and len(self.Lines) > 0: # No valid line to return yet, and still lines available in the receive buffer.
             result = self.Lines.pop(0).strip()
             self.Log('RPi received: ' + self.RemoveChecksum(result),terminal=self.PrintComms)
-            if self.CommsLog != None: self.CommsLog('RxQueue>RPi:',result,terminal=False) # Record the conversation separately.
+            #if self.CommsLog != None: self.CommsLog('RxQueue>RPi:',result,terminal=False) # Record the conversation separately.
             MctlRxWindow.Print(self.RemoveChecksum(result))
             if self.ValidateChecksum(result): # Line is good.
                 result = self.RemoveChecksum(result)
@@ -2966,7 +2964,7 @@ class microcontroller(attributemaster): # 1 references.
         self.uart.write(line.encode('utf-8')) # Send data in UTF-8 format. 
         self.LastTxTime = NowUTC() # Note that time of the last data sent. 
         Led2.Off()
-        if self.CommsLog != None: self.CommsLog("TxQueue>UART:",line,terminal=False)
+        #if self.CommsLog != None: self.CommsLog("TxQueue>UART:",line,terminal=False)
 
     def ReadFlush(self):
         """ Clear the input buffer. Don't actually transmit it, because you may never reach the end if 
@@ -3032,7 +3030,7 @@ class microcontroller(attributemaster): # 1 references.
             MctlTxWindow.Print(line)
             self.WriteQueue.append(self.AddChecksum(line)) # Add to send queue with Checksum.
             self.Log('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line,terminal=self.PrintComms)
-            if self.CommsLog != None: self.CommsLog("RPi>TxQueue:",line,terminal=False)
+            #if self.CommsLog != None: self.CommsLog("RPi>TxQueue:",line,terminal=False)
 
     def CommsLoop(self,commandqueue): # Runs as own thread.
         """ This runs in its own thread, it just continually reads/writes
@@ -3041,7 +3039,7 @@ class microcontroller(attributemaster): # 1 references.
             You can send commands to this communication loop itself via the commandqueue queue.
             - Eg : 'stop' to shut down the loop completely. """
         self.Log('microcontroller.CommsLoop(): Start',terminal=False)
-        if self.CommsLog != None: self.CommsLog('microcontroller.CommsLoop(): Start',terminal=False)
+        #if self.CommsLog != None: self.CommsLog('microcontroller.CommsLoop(): Start',terminal=False)
         prevloop = NowUTC()
         while True: # Loop until explicitly told to break.
             # Warn if the loop is running slowly.
@@ -3228,22 +3226,22 @@ class motorcontrol(attributemaster): # 2 references.
         print("RecoveryFileName:",self.RecoveryFileName)
         print("")
 
-    def SetMotorClock(self):
-        """ Prompt user for new clock running time (in hours) 
-            Update the clock time accordingly. """
-        print(textcolor.yellow('Update ' + self.MotorName + ' motor clock'))
-        while True:
-            temp = input('Enter new running hours (x to quit): ')
-            if temp.lower() == 'x': 
-                print('Nothing changed.')
-                break
-            hours = TextToFloat(temp)
-            if hours == None:
-                print(textcolor.red('Invalid, must be a decimal value. Try again.'))
-                continue # Try again.
-            self.MotorRunningSeconds = hours * 3600 # Convert to seconds.
-            print(textcolor.yellow('Clock set to ' + str(self.MotorRunningSeconds) + 'seconds (' + HRSeconds(self.MotorRunningSeconds) + ')'))
-            self.StoreRecoveryAngle(force=True) # Record the new value immediately.
+    #def SetMotorClock(self):
+    #    """ Prompt user for new clock running time (in hours) 
+    #        Update the clock time accordingly. """
+    #    print(textcolor.yellow('Update ' + self.MotorName + ' motor clock'))
+    #    while True:
+    #        temp = input('Enter new running hours (x to quit): ')
+    #        if temp.lower() == 'x': 
+    #            print('Nothing changed.')
+    #            break
+    #        hours = TextToFloat(temp)
+    #        if hours == None:
+    #            print(textcolor.red('Invalid, must be a decimal value. Try again.'))
+    #            continue # Try again.
+    #        self.MotorRunningSeconds = hours * 3600 # Convert to seconds.
+    #        print(textcolor.yellow('Clock set to ' + str(self.MotorRunningSeconds) + 'seconds (' + HRSeconds(self.MotorRunningSeconds) + ')'))
+    #        self.StoreRecoveryAngle(force=True) # Record the new value immediately.
 
     def Restarted(self): 
         """ Call this if the microcontroller restarts. 
@@ -3280,11 +3278,11 @@ class motorcontrol(attributemaster): # 2 references.
             if self.AngleToStep(angle1) == self.AngleToStep(angle2): result = True # Angles equate to the same step position.
         return result
 
-    def MotorHours(self):
-        """ Return number of hours the motor has been running for. 
-            (total lifetime of the motor). """
-        mrh = round(self.MotorRunningSeconds / 3600) # How many HOURS have the motors been running for?
-        return mrh
+    #def MotorHours(self):
+    #    """ Return number of hours the motor has been running for. 
+    #        (total lifetime of the motor). """
+    #    mrh = round(self.MotorRunningSeconds / 3600) # How many HOURS have the motors been running for?
+    #    return mrh
 
     def RestoreAngle(self):
         """ This searches for the last recorded position of the motor and restores that state. 
@@ -3309,20 +3307,20 @@ class motorcontrol(attributemaster): # 2 references.
                 ls = line.split(";") # Format is 'timestamp';'angle';'seconds'
                 if len(ls) > 1: angle = float(ls[1]) # 'timestamp';'angle';'seconds'
                 else: self.Log("Bad recovery entry (" + line + ") angle ignored.",level='warning')
-                if len(ls) > 2: 
-                    self.MotorRunningSeconds = int(ls[2]) # 'timestamp';'angle';'seconds'
-                else: self.Log("Bad recovery entry (" + line + ") running seconds ignored.",level='warning')
+                #if len(ls) > 2: 
+                #    self.MotorRunningSeconds = int(ls[2]) # 'timestamp';'angle';'seconds'
+                #else: self.Log("Bad recovery entry (" + line + ") running seconds ignored.",level='warning')
         self.CurrentAngle = angle
         self.Log(self.MotorName,"motor restored to last known position", self.AngleToStep(self.CurrentAngle), "(", Deg3dp(self.CurrentAngle,DegreeSymbol), ")")
-        # Check the total running time of the motor. They have a design life!
-        self.Log(self.MotorName,"motor has so far been running for", self.MotorHours(), "h, (", self.MotorRunningSeconds, "s).",terminal=True)
-        MotorInitialHours = self.MotorHours()
-        if MotorInitialHours > 10000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
-            if MotorInitialHours > 20000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
-                self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Please replace it.",level='error')
-            else:
-                self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Consider replacing it.",level='warning')
-            self.Log("Motor",self.MotorName,": When you replace it, please reset the running time in the recovery file in",self.RecoveryFolder,level='warning')
+        ## Check the total running time of the motor. They have a design life!
+        #self.Log(self.MotorName,"motor has so far been running for", self.MotorHours(), "h, (", self.MotorRunningSeconds, "s).",terminal=True)
+        #MotorInitialHours = self.MotorHours()
+        #if MotorInitialHours > 10000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
+        #    if MotorInitialHours > 20000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
+        #        self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Please replace it.",level='error')
+        #    else:
+        #        self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Consider replacing it.",level='warning')
+        #    self.Log("Motor",self.MotorName,": When you replace it, please reset the running time in the recovery file in",self.RecoveryFolder,level='warning')
         # Now remove any old recovery files that we don't need. Always keep last 2.
         if len(oldfiles) > 2: # Only tidyup if more than 2 files available.
             oldfiles = sorted(oldfiles)[:-2] # Sort alphabetically. This is equivalent to chronological sequence. Ignore the last 2 files, we want to keep these.
@@ -3351,17 +3349,21 @@ class motorcontrol(attributemaster): # 2 references.
             This data is used to restore the state of the motor when the program next restarts. 
             This is designed to retry if there is a file error, just in case there's an access conflict with any other reader/monitor. 
             force=True: A value is stored even if the motor hasn't moved. """
+        counter = 100 # Only try 100 times, then fail.
         if force or self.CompareAngles(self.CurrentAngle,self.LastRecoveryAngle) == False: # The motor has actually moved! 
             success = False
-            while success == False:
+            while counter > 0:
+                counter -= 1
                 try:
                     with open(self.RecoveryFileName,'ab',0) as f: # Python3: Don't buffer. Note that the O/S may still have to flush buffers itself.
-                        f.write((UtcTimeStamp() + ";" + str(self.CurrentAngle) + ";" + str(int(self.MotorRunningSeconds)) + "\n").encode()) # Convert text to bytes.
+                        f.write((UtcTimeStamp() + ";" + str(self.CurrentAngle) + "\n").encode()) # Convert text to bytes.
                     self.LastRecoveryAngle = self.CurrentAngle
                     success = True
                 except Exception as e:
                     self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") to", self.RecoveryFileName, ". File conflict", str(e), "waiting to retry.",level='warning')
                     time.sleep(0.3)
+            if not success:
+                self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") to", self.RecoveryFileName, ". Failed to write data.",level='error')
 
     def GoToAngle(self,newangle):
         """ Trigger 'goto angle' movement of the motor via the remote microcontroller. 
@@ -4301,23 +4303,23 @@ class imagetracker(attributemaster): # 1 references.
             
         return result # True if successful, False if failed.
 
-    def ScaleStarList(self,inputlist,scalefactor):
-        """ Take a list of star locations and scale the first two terms.
-            Any additional terms are left unmodified. 
-            Each star in the list consists of x,y image position pairs.
-                [xpos,ypos] 
-            Only the xpos and ypos entries are scaled, all other terms remain unchanged. """
-        self.Log("ImageTracker.ScaleStarList: Scale:",scalefactor,"List:",inputlist,terminal=False)
-        newlist = [] # The resulting list.
-        for star in inputlist: # Go through each star in turn.
-            newstar = []
-            for i,term in enumerate(star):
-                if i < 2: newterm = term * scalefactor
-                else: newterm = term
-                newstar.append(int(newterm))
-            newlist.append(newstar)
-        self.Log("ImageTracker.ScaleStarList: Result:",newlist,terminal=False)
-        return newlist
+    #def ScaleStarList(self,inputlist,scalefactor):
+    #    """ Take a list of star locations and scale the first two terms.
+    #        Any additional terms are left unmodified. 
+    #        Each star in the list consists of x,y image position pairs.
+    #            [xpos,ypos] 
+    #        Only the xpos and ypos entries are scaled, all other terms remain unchanged. """
+    #    self.Log("ImageTracker.ScaleStarList: Scale:",scalefactor,"List:",inputlist,terminal=False)
+    #    newlist = [] # The resulting list.
+    #    for star in inputlist: # Go through each star in turn.
+    #        newstar = []
+    #        for i,term in enumerate(star):
+    #            if i < 2: newterm = term * scalefactor
+    #            else: newterm = term
+    #            newstar.append(int(newterm))
+    #        newlist.append(newstar)
+    #    self.Log("ImageTracker.ScaleStarList: Result:",newlist,terminal=False)
+    #    return newlist
         
     def ValidStarValues(self,entry):
         """ Return if 'star' value is valid. Star is an entry from a StarMatchList.
@@ -4662,15 +4664,15 @@ def DimChannel(channel,ratio): # 3 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-def DimColor(color,ratio): # 4 references.
-    """ Simple multiplier for BGR or BGRA color tuples. """
-    if len(color) == 4: # Adjust BGR, but not A.
-        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio),color[3])
-    elif len(color) == 3: # Adjust BGR
-        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio))
-    else: return DimChannel(color,ratio) # Assume single channel.
-
-# ------------------------------------------------------------------------------------------------------
+#def DimColor(color,ratio): # 4 references.
+#    """ Simple multiplier for BGR or BGRA color tuples. """
+#    if len(color) == 4: # Adjust BGR, but not A.
+#        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio),color[3])
+#    elif len(color) == 3: # Adjust BGR
+#        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio))
+#    else: return DimChannel(color,ratio) # Assume single channel.
+#
+## ------------------------------------------------------------------------------------------------------
 
 def hipex_load_dataframe(fobj): # 1 references.
     """ Skyfield has a built in method to extract Hipparcos data and convert it into a Pandas dataframe.
@@ -5230,17 +5232,17 @@ class target(attributemaster): # 28 references.
         self.PrevAlt = None # Previous location
         self.RotationPoint = None # Will hold rotation reference point if activated.
 
-    def TwilightLevel(self,time=None): # 1 references.
-        """ Return the twilight level for the current location.
-            If 'time' parameter given, it's the lightlevel at that time.
-            If 'time' is None, then the current time is used. """
-        az, alt = self.AzAltDegrees(time=time)
-        if alt > 0: result = "daytime"
-        elif alt >= -6: result = "civil twilight"
-        elif alt >= -12: result = "nautical twilight"
-        elif alt >= -18: result = "astronomical twilight"
-        else: result = "nighttime"
-        return result
+    #def TwilightLevel(self,time=None): # 1 references.
+    #    """ Return the twilight level for the current location.
+    #        If 'time' parameter given, it's the lightlevel at that time.
+    #        If 'time' is None, then the current time is used. """
+    #    az, alt = self.AzAltDegrees(time=time)
+    #    if alt > 0: result = "daytime"
+    #    elif alt >= -6: result = "civil twilight"
+    #    elif alt >= -12: result = "nautical twilight"
+    #    elif alt >= -18: result = "astronomical twilight"
+    #    else: result = "nighttime"
+    #    return result
     
     def Datetime2Ts(self,dt): # Referenced by external dependencies.
         """ Convert datetime into TS (skyfield) timestamp. """
@@ -5607,22 +5609,22 @@ class target(attributemaster): # 28 references.
         result = almanac.moon_phase(planets, time)
         return result.degrees
 
-    def MoonFull(self,time=None):
-        """ Return the % of full moon.
-            Used to indicate light pollution from the moon. """
-        moonphase = self.LunarPhase(time=time)
-        # Convert moonphase into an approximate % full. We're interested in light pollution levels.
-        if moonphase > 180: 
-            moonphase = 360 - moonphase
-        moonphase = 100 * moonphase / 180
-        return moonphase
+    #def MoonFull(self,time=None):
+    #    """ Return the % of full moon.
+    #        Used to indicate light pollution from the moon. """
+    #    moonphase = self.LunarPhase(time=time)
+    #    # Convert moonphase into an approximate % full. We're interested in light pollution levels.
+    #    if moonphase > 180: 
+    #        moonphase = 360 - moonphase
+    #    moonphase = 100 * moonphase / 180
+    #    return moonphase
 
-    def MoonWaxing(self):
-        """ Return TRUE if moon is Waxing. 
-            Return FALSE if moon is Waning. """
-        if self.LunarPhase() <= 180: result = True
-        else: result = False
-        return result
+    #def MoonWaxing(self):
+    #    """ Return TRUE if moon is Waxing. 
+    #        Return FALSE if moon is Waning. """
+    #    if self.LunarPhase() <= 180: result = True
+    #    else: result = False
+    #    return result
 
     def ApparentCometMagnitudeGK(self):
         """ Calculate comet apparent magnitude using GK model. 
@@ -6751,7 +6753,10 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
         for i in range(len(tempdf)):
             TempStarParms = tempdf.iloc[i] # Select each row in turn from the Pandas dataframe.
             TempStarName = TempStarParms['name']
-            TempStarName2 = TempStarParms['knownas']
+            try:
+                TempStarName2 = TempStarParms['knownas']
+            except:
+                TempStarName2 = '' # Field not available in this data set.
             TempStar = Star(ra_hours=(TempStarParms['rah'], TempStarParms['ram'], TempStarParms['ras']), 
                             dec_degrees=(TempStarParms['ded'], TempStarParms['dem'], TempStarParms['des'])) # Create star object from RADEC co-ordinates.
             TempStarWidth = int((TempStarParms['widthdeg'] * CameraInUse.PixelsPerFovDegreeWidth) / 2) # Convert from arcseconds to degrees & radius.
@@ -8498,38 +8503,38 @@ def ObservationRun(): # 1 references.
 
 # ----------------------------------------------------------------------------------------------------- 
 
-def AddAngles(angle1,angle2): # 2 references.
-    """ Add 2 angles together.
-        Angles can be decimal values, or skyfield angle objects. """
-    if hasattr(angle1,'_degrees'): a1 = angle1._degrees
-    elif hasattr(angle1,'degrees'): a1 = angle1.degrees
-    else: a1 = angle1
-    if hasattr(angle2,'_degrees'): a2 = angle2._degrees
-    elif hasattr(angle2,'degrees'): a2 = angle2.degrees
-    else: a2 = angle2
-    result = a1 + a2
-    return result
-
-# ----------------------------------------------------------------------------------------------------- 
-
-def SetMotorClock(name): # 2 references.
-    FoundIt = False
-    for i in MotorControls:
-        if i.MotorName == name:
-            FoundIt = True
-            i.SetMotorClock()
-    return FoundIt
-
-# ------------------------------------------------------------------------------------------------
-
-def SetAzimuthClock(): # 1 references. # For menu
-    SetMotorClock('azimuth')
-    
-# ------------------------------------------------------------------------------------------------
-
-def SetAltitudeClock(): # 1 references. # For menu
-    SetMotorClock('altitude')
-
+#def AddAngles(angle1,angle2): # 2 references.
+#    """ Add 2 angles together.
+#        Angles can be decimal values, or skyfield angle objects. """
+#    if hasattr(angle1,'_degrees'): a1 = angle1._degrees
+#    elif hasattr(angle1,'degrees'): a1 = angle1.degrees
+#    else: a1 = angle1
+#    if hasattr(angle2,'_degrees'): a2 = angle2._degrees
+#    elif hasattr(angle2,'degrees'): a2 = angle2.degrees
+#    else: a2 = angle2
+#    result = a1 + a2
+#    return result
+#
+## ----------------------------------------------------------------------------------------------------- 
+#
+#def SetMotorClock(name): # 2 references.
+#    FoundIt = False
+#    for i in MotorControls:
+#        if i.MotorName == name:
+#            FoundIt = True
+#            i.SetMotorClock()
+#    return FoundIt
+#
+## ------------------------------------------------------------------------------------------------
+#
+#def SetAzimuthClock(): # 1 references. # For menu
+#    SetMotorClock('azimuth')
+#    
+## ------------------------------------------------------------------------------------------------
+#
+#def SetAltitudeClock(): # 1 references. # For menu
+#    SetMotorClock('altitude')
+#
 # ------------------------------------------------------------------------------------------------
 
 def DisableCleanup(): # 1 references. # For menu
@@ -8977,8 +8982,6 @@ MctlMenuOptions = {
     'MicrocontrollerLedsOn':   {'label':'Microcontroller LEDs on',         'call':MicrocontrollerLedsOn},
     'MicrocontrollerLedsOff':  {'label':'Microcontroller LEDs off',        'call':MicrocontrollerLedsOff},
     'MicrocontrollerPowerOn':  {'label':'Microcontroller GPIO power ON',   'call':Mctl.PowerOn},
-    'MicrocontrollerPowerOff': {'label':'Microcontroller GPIO power OFF',  'call':Mctl.PowerOff},
-    'MicrocontrollerPowerOn':  {'label':'Microcontroller GPIO power ON',   'call':Mctl.PowerOn},
     'MicrocontrollerPowerOff': {'label':'Microcontroller GPIO power OFF',  'call':Mctl.PowerOff}
 }
 MctlMenu = proceduremenu(MctlMenuOptions,'Microcontroller tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
@@ -8996,12 +8999,6 @@ MiscMenuOptions = {
     'ChooseColor':            {'label':'Choose individual color',   'call':Parameters.ChooseColor}
 }
 MiscMenu = proceduremenu(MiscMenuOptions,'Miscellaneous tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
-
-DevMenuOptions = {
-    'ShowParameters':         {'label':'Show parameters',           'call':ShowParameters},
-    'EditParameters':         {'label':'Edit parameters',           'call':EditParameters}
-}
-DevMenu = proceduremenu(DevMenuOptions,'Development tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
 MainMenuOptions = {
     'SelectTarget':           {'label':'Select target',             'bold':True,  'call':SelectTarget},
@@ -9021,7 +9018,6 @@ MainMenuOptions = {
     'MotorMenu':              {'label':'Motor tools',               'call':MotorMenu},
     'MicrocontrollerMenu':    {'label':'Microcontroller tools',     'call':MctlMenu},
     'CameraMenu':             {'label':'Camera tools',              'call':CameraMenu},
-    'DevMenu':                {'label':'Development tools',         'call':DevMenu},
     'MiscMenu':               {'label':'Miscellaneous tools',       'call':MiscMenu}
 }
 
@@ -9092,3 +9088,4 @@ MainLog.Log("MAIN: PROGRAM COMPLETE",terminal=False)
 #  *) If recording video, you can set the framerate to max 0.005 frames / second-  which results in 200second exposures! See Page 110 of the official guide.
 #  *) Developer is also planning an astroguider - using the camera to keep track of the object.
 #  *) It uses KStars (free) for sky-guiding. Research this.
+
