@@ -13,8 +13,8 @@
 # Tiny2040 doesn't have enough GPIO pins available in CircuitPython to support Microstepping.
 # So if MODE0/1/2 pins are declared as None, Microstepping is disabled.
 
-VERSION = '0.1.0' # Software version reported to the RPi.
-ACCEPTABLERPIVERSIONS = ['0.0.0','0.1.0'] # Which RPi versions are acceptable?
+VERSION = '0.1.1' # Software version reported to the RPi.
+ACCEPTABLERPIVERSIONS = ['0.0.0','0.1.1'] # Which RPi versions are acceptable?
 
 print ('hello')
 CircuitPython = True # Indicates CircuitPython rather than MicroPython.
