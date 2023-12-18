@@ -10,14 +10,32 @@
 #   configure motor 20210409090949 azimuth 180.0
 #   sendstatus 20210409090949 False
 
-# Tiny2040 doesn't have enough GPIO pins available in CircuitPython to support Microstepping.
-# So if MODE0/1/2 pins are declared as None, Microstepping is disabled.
+# If MODE0/1/2 pins are declared as None, Microstepping is disabled.
 
-VERSION = '0.1.1' # Software version reported to the RPi.
-ACCEPTABLERPIVERSIONS = ['0.0.0','0.1.1'] # Which RPi versions are acceptable?
+
+# Version numbering scheme:
+#           aa.bb.cc
+#           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
+#           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
+#           cc = Bugfix, no feature changes. Will not require changes on RPi side.
+VERSION = '0.2.0' # Software version reported to the RPi.
+ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
-CircuitPython = True # Indicates CircuitPython rather than MicroPython.
+# Check we are running CircuitPython.
+bootlines = []
+CircuitPython = False # Indicates CircuitPython rather than MicroPython.
+with open('boot_out.txt','r') as f:
+    while True:
+        line = f.readline()
+        if line == '': break
+        lines = line.split(';')
+        for item in lines:
+            bootlines.append(item.strip())
+            print(item.strip())
+            for elements in item.split(' '):
+                if elements.strip().lower() == 'circuitpython': CircuitPython = True # This is a CircuitPython build.
+print("CircuitPython installation?:",CircuitPython)
 
 import digitalio
 import microcontroller
@@ -26,6 +44,8 @@ import analogio
 import busio
 import time
 import gc # Garbage Collector
+gcmf = gc.mem_free()
+print("At startup gc.mem_free:",gcmf)
 
 def neatprint(*args):
     """ Own 'print' function. Formats neatly in early Python versions and allows
@@ -813,19 +833,18 @@ def VMot():
 class steppermotor():
     """ Handler for a NEMA17 stepper motor with DRV8825 driver chip. """
     def __init__(self,name):
-        # *Q* Motor status timer should be part of this object! Not separate.
         self.MotorName = name
+        self.DriverType = 'drv8825'
         self.Trajectory = trajectory(name)
         self.MotorEnabled = False
         self.CurrentPosition = None
         self.TargetPosition = None
         self.MotorConfigured = False
         self.FaultSensitive = False # Set to TRUE to monitor the 'fault' pin on the DRV8825 chip.
+        self.FaultDetected = False # Latch to indicate we've already reported a fault with the DRV8825. Otherwise we overflow the UART comms buffer with warnings.
         self.SendStatus = True # Set to FALSE to disable status messages while downloading batches of data (eg Trajectories)
         self.StatusTimer = timer(name,10) # Set up an internal timer for sending status messages every 10 seconds. Can we overridden by RPi.
-        # self.FastTime = 0.005 # The fastest pulse time for moving the motor.
         self.FastTime = 0.0005 # The fastest pulse time for moving the motor.
-        #print ('NOTE: Using experimental super-fast pulse time for motor!')
         self.SlowTime = 0.05 # The slowest pulse time for moving the motor.
         self.DeltaTime = 0.003 # The acceleration amount moving from SlowTime to FastTime as the motor gets going.
         self.UseMicrostepping = False
@@ -835,10 +854,6 @@ class steppermotor():
         self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. This may be useful for handling gear backlash. Starts at ZERO (No direction)
         self.BacklashAngle = 0.0 # This is the angle the motor must move to overcome backlash in the gearing when changing direction.
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
-        # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
-        # Officially a NEMA17 motor has 200 (1.8Deg), or 400 steps (0.9deg) steps (each has XX substeps available, but with reduced accuracy/power)
-        # - If using MICROSTEPPING, the precision is increased by 32. Which is 0.056 degrees. The 16mm lens on the HQ Camera has 0.01 degree per pixel. So some gearing is probably needed, but not too strong.
-        # - OR switch back to FULL STEPS and using higher gearing!! Needs to be 1:200 gearing in FULL STEP mode to match pixel resolution...
         self.MotorStepsPerRev = None
         self.MicrostepRatio = None
         self.MotorPower = None
@@ -846,11 +861,10 @@ class steppermotor():
         self.MicrosteppingMode1 = 0
         self.MicrosteppingMode2 = 0
         self.MotorStepsPerAxisDegree = None
-        self.GearRatio = None
+        self.GearRatio = None # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
         self.AxisStepsPerRev = None
         self.MinAngle = None # Max anticlockwise movement.
         self.MaxAngle = None # Max clockwise movement.
-        # In Micropython, the attributes used by StepToAngle() must be defined in __init__() before calling the method.
         self.CurrentAngle = None
         self.TargetAngle = None
         self.MinPosition = None # Min clockwise movement. Location of limit switch in steps (This is self calibrating when in use).
@@ -874,10 +888,6 @@ class steppermotor():
         self.FullStepBoundary = True # True if the motor position is currently on a FULL STEP position. We can make FULL STEP moves if we are. Otherwise we're microstepping.
         self.LatestTuneSteps = 0 # Record details of the last tune command received. So we can see it was handled.
         self.LatestTuneTime = None
-        #LogFile.Log('steppermotor.__init__:', self.MotorName)
-        #LogFile.Log(self.MotorName, 'Step rate range:', int(1/(2 * self.SlowTime)), 'to', int(1/(2 * self.FastTime)), '/s')
-        #LogFile.Log('steppermotor.__init__: WARNING DRV8825 fault pin is not monitored yet!')
-        #print('steppermotor.__init__: WARNING DRV8825 fault pin is not monitored yet!')
         # Latest Start/Stop times for config and status methods.
         self.ConfigStartTime = None
         self.ConfigEndTime = None
@@ -1238,10 +1248,16 @@ class steppermotor():
                 stepsize = 32 = Full step movement.
             If Microstepping is disabled, then this only accepts stepsize = 1 """
         if self.FaultBCM.GetValue() == False: # DRV8825 'fault' pin is triggered.
-            LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault.')
-            if self.FaultSensitive: return
-            #raise Exception ('MoveFullStep: ' + self.MotorName + ' FAULT signal received from motor. (No power, not connected or overheated?)') 
-            # Don't raise exception because it will never get the chance to report the fault in the log file.
+            if self.FaultSensitive: # The fault matters.
+                self.FaultDetected = True
+                LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - terminating.')
+                return
+            else: # The fault does not matter.
+                if not self.FaultDetected: # Only report once.
+                    LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - ignored.')
+                self.FaultDetected = True
+        else: # No DRV8825 fault, clear any previous fault status.
+            self.FaultDetected = False # No fault.
         if abs(self.StepDir) != 1: # self.StepDir must be +1 or -1
             #raise Exception ('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
             LogFile.Log('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
@@ -1381,7 +1397,7 @@ class steppermotor():
             self.StatusEndTime = Clock.Now()
             # Reset the status timer.
             self.StatusTimer.Reset()
-            print(self.MotorName,"status next due in",self.StatusTimer.Remaining(),"s. at",IntToTimeString(self.StatusTimer.NextDue),"Repeat",self.StatusTimer.RepeatSeconds,"s.", codes)
+            #print(self.MotorName,"status next due in",self.StatusTimer.Remaining(),"s. at",IntToTimeString(self.StatusTimer.NextDue),"Repeat",self.StatusTimer.RepeatSeconds,"s.", codes)
 
 # Define pins for motorcontroller chips.
 AzimuthStepBCM = GPIOpin(board.GP29) # Tiny RP2040
@@ -1534,7 +1550,8 @@ def CheckVersionCompatibility(rpiversion):
     """ The Raspberry Pi has sent the version number for pilomar.py
         Check that it's compatible with this code.py program.
         This issues a log file warning. It will not terminate the program. """
-    if not rpiversion in ACCEPTABLERPIVERSIONS:
+    compversion = rpiversion[:rpiversion.rindex('.')]
+    if not compversion in ACCEPTABLERPIVERSIONS:
         LogFile.Log('CheckVersionCompatibility',rpiversion,'not in',str(ACCEPTABLERPIVERSIONS))
 
 Session = picosession() # Instantiate a sesson object.
@@ -1603,13 +1620,15 @@ def ProcessInput(line):
 
 class memorymanager():
     def __init__(self):
-        self.currmem = None
+        self.currmem = None # Current memory free value.
+        self.GCCount = 0 # How often has garbage collector run?
         self.Poll()
 
     def Poll(self): # Check current memory and trigger memory garbage collection early if needed.
         self.currmem = gc.mem_free()
         if self.currmem < 3000:
             gc.collect()
+            self.GCCount += 1 # Increase count of garbagecollector runs.
 
 MemMgr = memorymanager()
 
@@ -1617,7 +1636,9 @@ print ('Starting...')
 for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
 RPi.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
 RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
+RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
 
+# This is the main processing loop.
 try:
     while True: # Full interaction
         try:
@@ -1693,6 +1714,7 @@ RPi.Write('controller stopping')
 print ('controller stopping...')
 # Make sure that the log file buffer is flushed fully to the remote host.
 LogFile.SendCheck(force=True)
+RPi.Write('# GCCount ' + str(MemMgr.GCCount))
 RPi.Write('controller stopped')
 LoopCounter = 0
 print ('Flushing final comms to RPi.')
