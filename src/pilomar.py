@@ -59,15 +59,26 @@
 # *Q* On rare occassions, the camera process can hang completely, it does not complete image capture, requiring a power cycle of the RPi.
 #     The cause is not known, but the camera board stops responding. I have read online that power problems to the camera can cause this.
 #     This is detected and reported, but this does not recover the situation programmatically.
+#     Problem is more rare in builds from 2023 onwards.
 # *Q* Some microcontrollers sometimes randomly reset. The software is relatively reset tolerant and recovers automatically, but the cause of the resets is not yet identified.
 #     Resets are reported, and generally only cause brief delays while the system recovers.
 #     Resets are more common with RPi Pico 2040 and Adafruit Feather 2040.
 #     Resets do not occur with Pimoroni Tiny2040.
-# *Q* The keyboard scanning routine causes the display to flash sometimes. 
+# *Q* The keyboard scanning routine causes the display to blink sometimes. 
 #     If you are sensitive to flashing images you can slow down the keyboard scanning so that the image is more stable, but it will react to keyboard input more slowly.
 
-VERSION = '0.1.1' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-ACCEPTABLECONTROLLERVERSIONS = ['0.0.0','0.0.1','0.1.0','0.1.1'] # Microcontroller versions that this will work with. 
+# Version
+# 0.1.1    29.11.2023 Removed out of date references to MotorRunningSeconds.
+#                     Stopped eternal looping if recoveryfile write had continuous failure.
+#                     MarkupPreview now tolerates older format ngc.json datafile.
+# 0.1.2    29.11.2023 Remaining references to onboard LEDs removed as they are not required in the running system, and simplify the PCB build.
+#          11.12.2023 ProjectRoot is respected across the program, there were some hardcoded /home/pi directory names still in the code. (GitHub Issue #35)
+#          11.12.2023 Min/MaxAltitudeAngle initialisation was wrong. (GitHub Issue #38)
+#          18.12.2023 Version validation only considers first 2 elements.
+#                     SetMotorAngle() now states current motor angle.
+
+VERSION = '0.1.2' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+ACCEPTABLECONTROLLERVERSIONS = ['0.0','0.1','0.2'] # Microcontroller versions that this will work with. Ignore patch level.
 
 # Import required libraries
 from typing import Tuple # For type hinting.
@@ -81,6 +92,7 @@ import math # Math and trig functions.
 import json # json file handling.
 import random # random number generator.
 import cv2 # openCV for image file handling.  
+from pathlib import Path # For navigating folder structure.
 import astroalign # Image alignment routines.
 from datetime import datetime, timedelta, timezone
 from pilomartimer import timer, progresstimer # Pilomar's timer classes.
@@ -194,7 +206,9 @@ if StartupClock != None:
 else:
     print("Using realtime clock.")
 
-ProjectRoot = '/home/pi/pilomar' # Where are all the project's folders sitting?
+#ProjectRoot = '/home/pi/pilomar' # Where are all the project's folders sitting?
+ProjectRoot = str(Path(sys.argv[0]).absolute().parent.parent) # Where are all the project's folders sitting?
+print("Project root",ProjectRoot)
 
 RequiredPythonVersion = 3 # Expect python3 to be used.
 ActualPythonVersion = sys.version_info.major
@@ -740,14 +754,16 @@ class parameters(attributemaster): # Common # 1 references.
         self.MctlResetPin = self.GetParmVal('MctlResetPin',4) # Which RPi4 GPIO pin is used to RESET the microcontroller?
         self.UartRxQueueLimit = self.GetParmVal('UartRxQueueLimit',50) # How many messages can be held in the input queue from the Microcontroller? Kill older entries.
         self.MinAzimuthAngle = self.GetParmVal('MinAzimuthAngle',0)
-        self.MaxAzimuthAngle = self.GetParmVal('MaxAzimuthAngle',360)
-        self.MinAltitudeAngle = self.GetParmVal('MinAzimuthAngle',0)
-        self.MaxAltitudeAngle = self.GetParmVal('MaxAzimuthAngle',90)
+        self.MaxAzimuthAngle = min(self.GetParmVal('MaxAzimuthAngle',360),360)
+        self.MinAltitudeAngle = self.GetParmVal('MinAltitudeAngle',0) # Fixed Issue #38
+        self.MaxAltitudeAngle = min(self.GetParmVal('MaxAltitudeAngle',90),90) # Fixed Issue #38
         self.UseMicrostepping = self.GetParmVal('UseMicrostepping',False) # Do we let the motors use microstepping for fine position control at the cost of lower torque?
         self.MotorStatusDelay = self.GetParmVal('MotorStatusDelay',10) # Microcontroller should send motor status messages every 'xxx' seconds. (Don't overload UART comms!)
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
-        # Following parameters control which graphics are shown in the dashboard display. Only 1 can be shown at a time.
+        # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
+        self.LocalStarsMagnitude = self.GetParmVal('LocalStarsMagnitude',7) # Max magnitude when selecting local stars.
+        self.ConstellationStarsMagnitude = self.GetParmVal('ConstellationStarsMagnitude',7) # Max magnitude when selecting stars in a constellation.
         
         # The following parameters decide which types of images are stored.
         self.CameraSaveJpg = self.GetParmVal('CameraSaveJpg',True) # Save the jpg image from observations, but will strip out the embedded RAW data.
@@ -769,7 +785,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.KeyboardScanDelay = self.GetParmVal('KeyboardScanDelay',2) # How many seconds between keyboard scans when running an observation?
         
         # The following parameters set position and localisation.
-        self.LocalTZ = self.GetParmVal('LocalTZ','Europe/London') # What's the local timezone (pytz values). pytz.all_timezones() lists all available.
+        self.LocalTZ = self.GetParmVal('LocalTZ','Europe/London') # What's the local timezone (pytz values). pytz.all_timezones() lists all available. Info only at present.
         self.HomeLat = self.GetParmVal('HomeLat',None) # Latitude of the observer.
         self.HomeLon = self.GetParmVal('HomeLon',None) # Longitude of the observer.
         self.HomeLatVal = 0.0
@@ -2068,7 +2084,7 @@ class astrocamera(attributemaster): # 1 references.
             cmd = 'raspistill -o ' + outputfile + ' ' + camera_options # Use raspistill to take the photo.
             remoterestarts = Mctl.RemoteRestarts # If this changes during exposure, the microcontroller reset and we should reject the image.
             rejectimage = False # Set to 'true' if there's a reason to reject the image.
-            Led3.On()
+            #Led3.On()
             self.AstrotimeStart = ts.now()
             self.CaptureStart = Ts2Datetime(self.AstrotimeStart)
             if Parameters.CameraEnabled: # Camera is in use. Take real photo.
@@ -2087,7 +2103,7 @@ class astrocamera(attributemaster): # 1 references.
                 self.Log("astrocamera.CaptureSetFull(): Returned from FakePhoto.",terminal=False)
             self.AstrotimeEnd = SkyfieldNow() # Offset supported.
             self.CaptureEnd = Ts2Datetime(self.AstrotimeEnd)
-            Led3.Off()
+            #Led3.Off()
             self.Log("astrocamera.CaptureSetFull(): Capture complete. (",(self.CaptureEnd - self.CaptureStart).total_seconds(), "s).",terminal=False)
             if remoterestarts != Mctl.RemoteRestarts: # Microcontroller reset during exposure.
                 self.Log('astrocamera.CaptureSetFull(): Microcontroller restarted during exposure. Reject',outputfile,level='warning',terminal=False)
@@ -2589,18 +2605,18 @@ class outputpin(): # 4 references.
         self.Enabled = False
         self.Refresh()
 
-Led1 = outputpin(27,'led1') # UART RX traffic.
-Led2 = outputpin(22,'led2') # UART TX traffic.
-Led3 = outputpin(5,'led3') # Camera capturing image.
-Led4 = outputpin(6,'led4') # ReadyToObserve status LED.
+#Led1 = outputpin(27,'led1') # UART RX traffic.
+#Led2 = outputpin(22,'led2') # UART TX traffic.
+#Led3 = outputpin(5,'led3') # Camera capturing image.
+#Led4 = outputpin(6,'led4') # ReadyToObserve status LED.
 
-LedList = [Led1,Led2,Led3,Led4]
+#LedList = [Led1,Led2,Led3,Led4]
 
-def AllLEDsOn():
-    for leds in LedList: leds.On()
-
-def AllLEDsOff():
-    for leds in LedList: leds.Off()
+#def AllLEDsOn():
+#    for leds in LedList: leds.On()
+#
+#def AllLEDsOff():
+#    for leds in LedList: leds.Off()
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -2678,6 +2694,18 @@ class microcontroller(attributemaster): # 1 references.
         self.SendId = 0 # Incremental counter, the message number being sent to the microcontroller. The microcontroller will respond that this message number has been received.
         # Calling program needs to call microcontroller.Initiate() to get things going.
 
+    def StartMonitor(self):
+        """ Start replicating communications to the terminal. """
+        if self.Log != None:
+            self.Log("microcontroller.StartMonitor()",terminal=False)
+        self.PrintComms = True
+
+    def EndMonitor(self):
+        """ Stop replicating communications to the terminal. """
+        if self.Log != None:
+            self.Log("microcontroller.EndMonitor()",terminal=False)
+        self.PrintComms = False
+
     def PowerOn(self):
         """ Overrides all safeties, turns power GPIO power pin on for microcontroller. """
         if self.ResetPin == None:
@@ -2698,35 +2726,35 @@ class microcontroller(attributemaster): # 1 references.
             self.Log("microcontroller.PowerOff(): No safety checks. GPIO POWER PIN turned off for Microcontroller.",terminal=True)
             GPIO.output(self.ResetPin, GPIO.LOW)
 
-    def Led1On(self):
-        self.LedOn(Led1)
-        
-    def Led2On(self):
-        self.LedOn(Led2)
+    #def Led1On(self):
+    #    self.LedOn(Led1)
+    #    
+    #def Led2On(self):
+    #    self.LedOn(Led2)
+    #
+    #def Led3On(self):
+    #    self.LedOn(Led3)
+    #    
+    #def Led4On(self):
+    #    self.LedOn(Led4)
+    #
+    #def LedOn(self,led):
+    #    led.On()
 
-    def Led3On(self):
-        self.LedOn(Led3)
-        
-    def Led4On(self):
-        self.LedOn(Led4)
-
-    def LedOn(self,led):
-        led.On()
-
-    def Led1Off(self):
-        self.LedOff(Led1)
-        
-    def Led2Off(self):
-        self.LedOff(Led2)
-
-    def Led3Off(self):
-        self.LedOff(Led3)
-        
-    def Led4Off(self):
-        self.LedOff(Led4)
-
-    def LedOff(self,led):
-        led.Off()
+    #def Led1Off(self):
+    #    self.LedOff(Led1)
+    #    
+    #def Led2Off(self):
+    #    self.LedOff(Led2)
+    #
+    #def Led3Off(self):
+    #    self.LedOff(Led3)
+    #    
+    #def Led4Off(self):
+    #    self.LedOff(Led4)
+    #
+    #def LedOff(self,led):
+    #    led.Off()
 
     def Initiate(self):
         """ Initiate communication. """
@@ -2879,7 +2907,7 @@ class microcontroller(attributemaster): # 1 references.
                 if self.DeviceFailure:
                     self.Log('uart.ReadPoll(): microcontroller considered permanently unavailable after ' + str(self.ResetAttempts) + ' restart attempts.',level='error',terminal=False)
         while self.uart.in_waiting: # Something in the read queue.
-            Led1.On()
+            #Led1.On()
             try: # Try to get the next available character. 
                 response = self.uart.read(1) # Read single character.
                 response = response.decode('utf-8') # Decode the character.
@@ -2904,7 +2932,7 @@ class microcontroller(attributemaster): # 1 references.
                         #if self.CommsLog != None: self.CommsLog("RxQueue discarded:",delline,terminal=False)
                 self.InputLine = '' # Start a fresh input line next time anything is received. 
             else: self.InputLine += response # Add the character to the input line we are constructing. 
-            Led1.Off()
+            #Led1.Off()
 
     def Read(self):
         """ Return the next input line received (if there is one).
@@ -2960,10 +2988,10 @@ class microcontroller(attributemaster): # 1 references.
         line += terminator
         self.LinesSent += 1
         self.BytesSent += len(line)
-        Led2.On()
+        #Led2.On()
         self.uart.write(line.encode('utf-8')) # Send data in UTF-8 format. 
         self.LastTxTime = NowUTC() # Note that time of the last data sent. 
-        Led2.Off()
+        #Led2.Off()
         #if self.CommsLog != None: self.CommsLog("TxQueue>UART:",line,terminal=False)
 
     def ReadFlush(self):
@@ -3102,11 +3130,11 @@ if Mctl == None: # Microcontroller couldn't start.
 def SetGlobalLedStatus(): # 2 references.
     try:
         Mctl.SetLedStatus(Parameters.MctlLedStatus) # Set the LED status on the microcontroller.
-        for Led in LedList:
-            if Parameters.MctlLedStatus:
-                Led.Enable()
-            else:
-                Led.Disable()
+        #for Led in LedList:
+        #    if Parameters.MctlLedStatus:
+        #        Led.Enable()
+        #    else:
+        #        Led.Disable()
     except Exception as e:
         MainLog.RaiseException(e,comment='SetGlobalLedStatus') # Trap all the exception information in the main log file.
 
@@ -3982,7 +4010,8 @@ class sessionstatus(attributemaster): # 1 references.
         lineitems = line.split(' ')
         if len(lineitems) > 2:
             self.ControllerVersion = lineitems[2]
-            if not self.ControllerVersion in ACCEPTABLECONTROLLERVERSIONS:
+            compversion = self.ControllerVersion[:self.ControllerVersion.rindex('.')] # Ignore patch level. Select "a.b" from "a.b.c" format version numbers.
+            if not compversion in ACCEPTABLECONTROLLERVERSIONS:
                 self.Log('sessionstatus.CheckControllerVersion():',self.ControllerVersion,'is not in',ACCEPTABLECONTROLLERVERSIONS,terminal=True)
                 ErrorWindow.Print(NowHMS() + ' ' + self.ControllerVersion + ' is not in ' + str(ACCEPTABLECONTROLLERVERSIONS))
         else:
@@ -4478,7 +4507,8 @@ MainLog.Log("Home location Latitude " + Parameters.HomeLat + ", Longitude " + Pa
 HomeSiteTopos = Topos(Parameters.HomeLat,Parameters.HomeLon)
 
 # Load dictionary listing star NAMES, CONSTELLATION and Hipparcos catalog number. 
-load = Loader('/home/pi/pilomar/data') # Create own version of Skyfield 'load' object. This version saves cache files in the data directory.
+#load = Loader('/home/pi/pilomar/data') # Create own version of Skyfield 'load' object. This version saves cache files in the data directory.
+load = Loader(ProjectRoot + '/data') # Create own version of Skyfield 'load' object. This version saves cache files in the data directory.
 StarNameUrl = ProjectRoot + '/data/starnames.json'
 MessierDictUrl = ProjectRoot + '/data/messierobjects.json'
 MeteorDictUrl = ProjectRoot + '/data/meteors.json'
@@ -4860,6 +4890,10 @@ else:
         MainLog.Log('Hipparcos data:',list(HipparcosDf.columns),terminal=False)
         MainLog.Log("Saving Hipparcos cache as",HipparcosCacheFile,terminal=True)
         HipparcosDf.to_pickle(HipparcosCacheFile)
+    # GitHub issue #39 workaround.
+    MainLog.Log("Hipparcos catalog successfully built.",terminal=True)
+    print(textcolor.yellow("Please restart the program."))
+    exit() # Quit the program. This is a workaround to a problem where the Python 'input' statements fail after the hipex_load_dataframe() function has executed for a long time.
 
 # These files come from JPL, they list the rules for positions of planets for hundreds of years.
 MainLog.Log("Loading solar system ephemeris from JPL...",terminal=False)
@@ -5152,8 +5186,8 @@ t = SkyfieldNow() # Now. # Offset supported.
 # - LocalStars is a list of stars within the narrow field of view of the camera. These are the ones we expect to see in the images.
 # - ConstellationStars is a list of stars from a wider field of view, but which are part of constellation patterns. These are used to help markup constellation lines in preview images.
 inclusionradius = math.sqrt((CameraInUse.Lens.FovHorizontal ** 2) + (CameraInUse.Lens.FovVertical ** 2)) * 2
-LocalStars = localstars(ra=0.0,dec=0.0,radius=inclusionradius,magnitude=9,maxstars=10000,logger=CamLog.Log) # Narrow field of view, list of all visible stars.
-ConstellationStars = localstars(ra=0.0,dec=0.0,radius=inclusionradius + 5,magnitude=8,maxstars=10000,logger=CamLog.Log) # Wider field of view, but filtered to just key constellation stars.
+LocalStars = localstars(ra=0.0,dec=0.0,radius=inclusionradius,magnitude=Parameters.LocalStarsMagnitude,maxstars=10000,logger=CamLog.Log) # Narrow field of view, list of all visible stars.
+ConstellationStars = localstars(ra=0.0,dec=0.0,radius=inclusionradius + 5,magnitude=Parameters.ConstellationStarsMagnitude,maxstars=10000,logger=CamLog.Log) # Wider field of view, but filtered to just key constellation stars.
 ConstellationStars.SetFilter(ConstellationStarList) # The ConstellationStars list is filtered by this list.
 
 # Construct hint lists for search functions. Lists of stars and messier objects.
@@ -5179,7 +5213,7 @@ MainLog.Log('Meteor shower list:', Meteor_namelist,terminal=False)
 # And ISS position from CelesTrak data (TLE lines).
 celestrakurl = "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle"
 MainLog.Log("Loading CelesTrak station data from",celestrakurl,terminal=False)
-CelesTrak = celestrak(celestrakurl,logger=MainLog)
+CelesTrak = celestrak(celestrakurl,logger=MainLog,projectroot=ProjectRoot)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -6397,12 +6431,12 @@ def HomePosition(): # 2 references.
 def SetMotorAngle(motor_name=None): # 2 references.
     """ Move motor to specific angle. """
     print (textcolor.yellow("SetMotorAngle " + str(motor_name)+ "."))
-    print (textcolor.white("This will physically move the motor to a specific angle.",invert=False))
-    print (textcolor.white("(Theoretical position updated: TRUE            Physical position updated: TRUE)"))
+    print("(The motor will physically move.)")
     c = ""
     for i in MotorControls: # Scan all the motors available.
         if i.MotorName == motor_name: # Select the correct motor.
             while c.lower() != "x": # Loop until user quits.
+                print (i.MotorName,"is currently at",Deg3dp(i.CurrentAngle) + DegreeSymbol)
                 print ("Enter target angle between " + str(i.MinAngle) + DegreeSymbol + " and " + str(i.MaxAngle) + DegreeSymbol)
                 c = input(textcolor.cyan("Enter angle (or 'x' to exit) : ")) # Python3
                 if len(c) < 1: # No valid input.
@@ -6420,6 +6454,7 @@ def SetMotorAngle(motor_name=None): # 2 references.
                     i.GoToAngle(v) # Set the new target position.
                     continue # Restart loop.
                 print ("'" + c + "' is not recognised. Try again.")
+            print (i.MotorName,"is currently at",Deg3dp(i.CurrentAngle) + DegreeSymbol)
     StopMotors() # Reset motor condition to prevent further movement.
     MainLog.Log("SetMotorAngle " + motor_name + " Completed.",terminal=False)
     print (textcolor.yellow("Done.") + textcolor.clearlineforward())
@@ -6450,7 +6485,6 @@ def TunePosition(motor_name=None): # 5 references.
     print (textcolor.white("This will move the motor to match where the computer thinks it is pointing.",invert=True))
     print (textcolor.white("This will finetune the physical position of the motor, but leave its logical position unchanged."))
     print (textcolor.white("You are making the motor physically point to where the computer already THINKS it is pointing."))
-    print (textcolor.white("(Theoretical position updated: FALSE           Physical position updated: TRUE)"))
     lFound = False
     for i in MotorControls:
         if i.MotorName == motor_name:
@@ -8035,7 +8069,7 @@ def ObservationRun(): # 1 references.
     MainLog.ErrorList = [] # Clear out any old error summaries. We only want to report NEW instances.
     CamLog.ErrorList = [] # Clear out any old error summaries. We only want to report NEW instances.
     ReadyToObserve = False # We are not on-target yet.
-    Led4.Off() # ReadyToObserve status LED.
+    #Led4.Off() # ReadyToObserve status LED.
     MainLog.Log('ObservationRun.initial: ReadyToObserve = False',terminal=False)
     temp = GetTerminalSize() # Note the size of the window. If it changes, we'll clear the screen.
     TerminalCols = temp[0] # Current screen columns.
@@ -8428,8 +8462,8 @@ def ObservationRun(): # 1 references.
                 ImageStatusWindow.FieldValue("LAZT",line,fg=OSW_TEXT_GOOD)
             else:
                 ImageStatusWindow.FieldValue("LALT",line,fg=OSW_TEXT_GOOD)
-        if ReadyToObserve: Led4.On() # ReadyToObserve status LED.
-        else: Led4.Off() # ReadyToObserve status LED.
+        #if ReadyToObserve: Led4.On() # ReadyToObserve status LED.
+        #else: Led4.Off() # ReadyToObserve status LED.
         
         if Session.DebugMode: # We're in debug mode, just summary status update.
             if DebugTimer.Due(): # It's time to publish a summary status.
@@ -8481,7 +8515,7 @@ def ObservationRun(): # 1 references.
     # Observation is over at this point.
     print(textcolor.clearforward()) # Clear the screen from the current location forward, makes the following messages easier to read.
     ReadyToObserve = False
-    Led4.Off() # ReadyToObserve light should be OFF now.
+    #Led4.Off() # ReadyToObserve light should be OFF now.
     if True: # Was Parameters.CameraEnabled: # Tell the camera it is all over.
         ControlMessage = {'TimeStamp' : NowUTC(), 'ReadyToObserve' : False}
         CameraControlQueue.put(ControlMessage) # Keep sending the CameraEnabled status to the camera.
@@ -8685,7 +8719,7 @@ def ProgramStartStrings(): # 1 references.
 
 def MicrocontrollerStrings(): # 1 references.
     """ Return a string listing microcontroller status. """
-    PS = " Microcontroller: Rpi>Mctl " + HRBytes(Mctl.BytesSent) + ", Mctl>RPi " + HRBytes(Mctl.BytesReceived) + "."
+    PS = " Microcontroller: RPi>Mctl " + HRBytes(Mctl.BytesSent) + ", Mctl>RPi " + HRBytes(Mctl.BytesReceived) + "."
     return [PS]
     
 # ------------------------------------------------------------------------------------------------------
@@ -8944,6 +8978,28 @@ def ShowFolderList():
     
 # ------------------------------------------------------------------------------------------------------
 
+def ZipCommsLog():
+    """ Extract communication summary from the main log file and zip it. """
+    MainLog.Log("ZipCommsLog",terminal=True)
+    zipfile = MainLog.PackageSearchResult('RPi received|RPi queueing|warning|error',ignorecase=True)
+    MainLog.Log("Generated",zipfile,terminal=True)
+
+# ------------------------------------------------------------------------------------------------------
+
+def MonitorComms():
+    """ For a period mirror microcontroller communication to the terminal. """
+    print(textcolor.yellow("MonitorComms"))
+    print("This will show communication traffic.")
+    print("Press 'x' to return to the menu.")
+    Mctl.StartMonitor()
+    while True:
+        keypress = Keyboard.Check().lower()
+        if keypress == 'x': break
+        time.sleep(0.5)
+    Mctl.EndMonitor()
+
+# ------------------------------------------------------------------------------------------------------
+
 def ShowMotorStatus():
     """ Show the status of all the motors. """
     for i in MotorControls:
@@ -8979,8 +9035,8 @@ MctlMenuOptions = {
     'StartMessage':            {'label':'Start message handler',           'call':MenuStartMessage},
     'ShutdownMessage':         {'label':'Shutdown message handler',        'call':MenuShutdownMessage},
     'FlushCommandQueue':       {'label':'Flush command queue',             'call':FlushCommandQueue},
-    'MicrocontrollerLedsOn':   {'label':'Microcontroller LEDs on',         'call':MicrocontrollerLedsOn},
-    'MicrocontrollerLedsOff':  {'label':'Microcontroller LEDs off',        'call':MicrocontrollerLedsOff},
+    'ZipCommsLog':            {'label':'Zip comms log',             'call':ZipCommsLog},
+    'MonitorComms':           {'label':'Monitor communication',     'call':MonitorComms},
     'MicrocontrollerPowerOn':  {'label':'Microcontroller GPIO power ON',   'call':Mctl.PowerOn},
     'MicrocontrollerPowerOff': {'label':'Microcontroller GPIO power OFF',  'call':Mctl.PowerOff}
 }
