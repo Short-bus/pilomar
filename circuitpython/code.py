@@ -12,30 +12,31 @@
 
 # If MODE0/1/2 pins are declared as None, Microstepping is disabled.
 
-
 # Version numbering scheme:
 #           aa.bb.cc
 #           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
 #           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
 #           cc = Bugfix, no feature changes. Will not require changes on RPi side.
-VERSION = '0.2.0' # Software version reported to the RPi.
+VERSION = '0.2.1' # Software version reported to the RPi.
 ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
 # Check we are running CircuitPython.
-bootlines = []
 CircuitPython = False # Indicates CircuitPython rather than MicroPython.
+Bootline = '' # Make sure the entire boot_out.txt content is available as a single item.
 with open('boot_out.txt','r') as f:
     while True:
         line = f.readline()
         if line == '': break
         lines = line.split(';')
         for item in lines:
-            bootlines.append(item.strip())
-            print(item.strip())
+            cleanitem = item.strip() # Remove unwanted characters.
+            Bootline += cleanitem + ' '
+            print(cleanitem)
             for elements in item.split(' '):
                 if elements.strip().lower() == 'circuitpython': CircuitPython = True # This is a CircuitPython build.
 print("CircuitPython installation?:",CircuitPython)
+print("CircuitPython version:",Bootline)
 
 import digitalio
 import microcontroller
@@ -132,7 +133,7 @@ class statusled():
                          'move': (False,True,False), # green - Flashes when motor is moving (If no specific motor colour).
                          'error': (True,False,False), # Red - Indicates failure/fault.
                          'pulse': (True,False,True), # Pink - Heartbeat signal (if used).
-                         'init': (True,False,True)} # Pink - System is initializing.
+                         'init': (False,True,True)} # cyan - System is initializing.
         # self.Led.brightness = 0.01
         self.Enabled = True # If set to FALSE, the LED is permanently off except for ERROR conditions.
         self.Task('idle')
@@ -166,7 +167,7 @@ class statusled():
 
 StatusLed = statusled()
 StatusLed.Task('init') # System is initializing...
-time.sleep(5)
+time.sleep(3)
 
 button = digitalio.DigitalInOut(board.USER_SW) # Built in button.
 button.switch_to_input(pull=digitalio.Pull.DOWN)
@@ -485,19 +486,20 @@ class uarthost():
             CharCounter += 1
             if CharCounter > 20: break # Max 20 chars read per call.
             try:
-                bchar = self.uart.read(1) # 1 char at a time.
+                bchar = self.uart.read(1) # 1 char at a time. # *Q* This fails in CircuitPython 8.x, use alternative below.
+                #bchar = self.uart.read(nbytes=1) # *Q* This fails in CircuitPython 7.2, use alternative above.
                 cchar = ''
                 self.CharactersRead += 1
                 nchar = int.from_bytes(bchar,'little',False)
                 if nchar <= 127: # Acceptable as 7 bit ascii
                     cchar = bchar.decode('utf-8')
                     if cchar != chr(nchar):
-                        print('FilteredRead: 7bit character conversion cheat would fail.')
+                        print('uarthost.BufferInput: 7bit character conversion cheat would fail.')
                     self.ReceivingLine += cchar
                 else:
-                    LogFile.Log('uart.FilteredRead: warning: ignored bad char (', str(bchar), "/", str(nchar), ')')
+                    LogFile.Log('uarthost.BufferInput: Ignored bad char (', str(bchar), "/", str(nchar), ')')
             except Exception as e:
-                LogFile.Log('uart.FilteredRead: error: failed. ignored. ', str(e))
+                LogFile.Log('uarthost.BufferInput: Error:', str(e))
             if cchar == '\n': # End of line
                 self.LinesRead += 1
                 if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
@@ -534,8 +536,8 @@ class uarthost():
             if self.ValidateChecksum(line): # Checksum is good, trust the line.
                 line = self.RemoveChecksum(line)
             else: # Checksum is bad, reject the line.
-                print ('uart.Read: Rejected checksum : ' + line)
-                LogFile.Log('uart.Read: Rejected checksum : ' + line)
+                print ('uarthost.Read: Rejected checksum : ' + line)
+                LogFile.Log('uarthost.Read: Rejected checksum : ' + line)
                 self.PicoRxErrors += 1
                 line = ''
         return line
@@ -559,7 +561,7 @@ class uarthost():
         else: # Pull the whole remaining line from the queue.
             line = self.WriteQueue.pop(0) + "\n"
         if len(line.strip()) == 0:
-            print ('WritePoll: ignored null line in WriteQueue.')
+            print ('uarthost.WritePoll: ignored null line in WriteQueue.')
         byteline = line.encode('utf-8') # Convert to bytearray.
         self.uart.write(byteline) # Physical write.
         if line[-1] == "\n": self.LinesWritten += 1
@@ -821,13 +823,25 @@ class trajectory():
 
 # Use ADC to read VMOT value. We can detect if motors are actually powered.
 # - Losing power is an easy problem to detect and report.
-print (dir(analogio))
-VMotADC = analogio.AnalogIn(board.A0)
+ADC0_Mode = 'adc' # 'adc' means an analog signal is reported.
+if ADC0_Mode == 'adc':
+    # print (dir(analogio))
+    VMotADC = analogio.AnalogIn(board.A0)
+else:   
+    VMotADC = None
 
 def VMot():
     """ Read the current MotorPower ADC value directly.
-        Don't scale for voltage, let the host deal with that. """
-    result = VMotADC.value
+        Don't scale for voltage, let the host deal with that.
+        If not available or failed, ZERO is returned. """
+    result = 0
+    try:
+        if ADC0_Mode == 'adc':
+            result = VMotADC.value
+        else: 
+            result = 0 # No ADC value supported.
+    except Exception as e:
+        print('VMot() failed:',e)
     return result
 
 class steppermotor():
@@ -1083,10 +1097,10 @@ class steppermotor():
             LogFile.Log("TunePosition(" + self.MotorName + ") set to " + str(self.CurrentPosition))
             self.LatestTuneSteps = delta # Record details of the last tune command received. So we can see it was handled.
             self.LatestTuneTime = Clock.Now()
-            RPi.Write('tune complete ' + self.MotorName + ' ' + str(self.LatestTuneTime) + ' ' + str(delta))
+            RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta))
             self.SendMotorStatus(immediate=True,codes='tup') # Tell RPi latest condition of the motor.
         else:
-            RPi.Write('tune rejected ' + self.MotorName + ' ' + str(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
+            RPi.Write('tune rejected ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
             LogFile.Log("error : TunePosition(" + self.MotorName + ") Rejected, motor is not yet configured.")
 
     def SetPins(self,stepBCM,directionBCM,mode0BCM,mode1BCM,mode2BCM,enableBCM,faultBCM):
@@ -1391,7 +1405,7 @@ class steppermotor():
             line += BoolToString(self.MotorConfigured) + ' ' # MotorConfigured
             line += BoolToString(self.OnTarget) + ' ' # Motor is on target or not.
             line += str(self.WaitTime * 2) + ' ' # The pulse period (indicates speed) of the motor.
-            line += str(VMot()) + ' ' # Measure the motor power voltage from ADC0
+            line += str(VMot()) + ' ' # Measure the motor power voltage from ADC0. Will return '0' if adc0 is not configured as an 'adc' input.
             line += str(codes) + ' ' # Optional codes added to status message.
             RPi.Write(line) # Send over UART to RPi.
             self.StatusEndTime = Clock.Now()
@@ -1636,6 +1650,7 @@ print ('Starting...')
 for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
 RPi.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
 RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
+RPi.Write('# circuitpython ' + Bootline) # Tell what version of circuitpython is in use.
 RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
 
 # This is the main processing loop.
