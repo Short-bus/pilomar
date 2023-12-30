@@ -2368,6 +2368,9 @@ class proceduremenu():
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
             if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
+            if answer == '?': # Refresh the menu.
+                self.Draw() # Refresh the menu.
+                continue
             if '?' in answer: # User wants help about an option.
                 self.ProcessHelpRequest(answer)
                 continue # Prompt again.
@@ -2546,6 +2549,9 @@ class optionmenu():
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
             if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
+            if answer == '?': # Refresh the menu.
+                self.Draw() # Refresh the menu.
+                continue
             if '?' in answer: # User wants help about an option.
                 self.ProcessHelpRequest(answer)
                 continue # Prompt again.

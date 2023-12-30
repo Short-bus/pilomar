@@ -1081,6 +1081,9 @@ class pilomarimage():
         self.StarList = None
         self.StarCount = 0
         self.StarMatchList = None
+        self.HorizontalSpread = 0 # % of horizonal spread of stars.
+        self.VerticalSpread = 0 # % of vertical spread of stars.
+        self.AreaSpread = 0 # % of area spread of stars.
         self.PenColor = None # Default color for drawing.
         self.PenThickness = 1 # Default pen thickness for drawing.
         self.LineType = cv2.LINE_AA # Default line_type for drawing.
@@ -1095,6 +1098,30 @@ class pilomarimage():
         self.NextTextX = None # When text is printed, this holds the 'x' position of the next line of text if you want to print a block of text.
         self.PrevTextY = None # When text is printed, this holds the 'y' position of the next line of text if you want to print a block of text going UPWARDS.
         self.PrevTextX = None # When text is printed, this holds the 'x' position of the next line of text if you want to print a block of text goind UPWARDS.
+
+    def CalculateStarSpread(self):
+        """ Calculate an approximation for the % of the frame that contains stars. 
+            LOW values mean that the stars are not spread out evenly across the frame. 
+            HIGH values mean that the stars are spread out more evenly across the frame.
+            Sets % value for each axis and the total image. """
+        if self.ImageExists(): # There's an image loaded.
+            HMin = None # Lowest 'X' position of a star.
+            HMax = None # Highest 'X' position of a star.
+            VMin = None # Lowest 'Y' position of a star.
+            VMax = None # Highest 'Y' position of a star.
+            for star in self.StarList: # Each star is a list of [x, y, radius]
+                if HMin == None or HMin > star[0]: HMin = star[0]
+                if HMax == None or HMax < star[0]: HMax = star[0]
+                if VMin == None or VMin > star[1]: VMin = star[1]
+                if VMax == None or VMax < star[1]: VMax = star[1]
+            self.HorizontalSpread = 100 * (HMax - HMin) / self.GetWidth()
+            self.VerticalSpread = 100 * (VMax - VMin) / self.GetHeight()
+            self.ImageSpread = 100 * ((self.HorizontalSpread / 100) * (self.VerticalSpread / 100))
+            result = True
+        else: # There's no image.
+            self.HorizontalSpread = self.VerticalSpread = self.ImageSpread = 0 # No spread to measure.
+            result = False
+        return result
 
     def NextInterpolation(self):
         """ Move on to the next available sampling method. """
@@ -1791,6 +1818,7 @@ class pilomarimage():
                 break
         self.StarList = starlist
         self.StarCount = starcount
+        self.CalculateStarSpread() # How widely spread are the stars across the image? Indicates good/bad tracking tuning.
         if self.Log != None: self.Log("pilomarimage",self.Name,".CountStars: End. Counted",starcount,terminal=False)
         return starcount, starlist
 

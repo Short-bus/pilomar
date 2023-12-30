@@ -13,6 +13,8 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+# 11.Dec.2023 / projectroot is now received from calling program and respected.
+
 import os
 from datetime import datetime, timedelta
 from textcolor import textcolor
@@ -23,11 +25,14 @@ from requests.exceptions import HTTPError # Error handling.
 class celestrak():
     """ Download celestrak TLE data. 
         Data is cached on disc and only updated once the disc cache is > 30 days old. """
-    def __init__(self,url,logger=None):
+    def __init__(self,url,logger=None,projectroot=None):
         self.SetLogger(logger) # Define which logging stream to use.
         self.URL = url # "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle" # Where to find the latest TLE data
         self.TLEDict = {} # TLE data converted into a dictionary for easy searching.
-        self.CelestrakCacheFileName = '/home/pi/pilomar/data/celestrakcache.json' # The disc cache filename used to store the data locally.
+        if projectroot == None:
+            self.CelestrakCacheFileName = '/home/pi/pilomar/data/celestrakcache.json' # The disc cache filename used to store the data locally.
+        else: # ProjectRoot = '/home/pi/pilomar'
+            self.CelestrakCacheFileName = projectroot + '/data/celestrakcache.json' # The disc cache filename used to store the data locally.
         self.SatelliteList = [] # List of satellite names, use for selecting objects.
         self.Refresh() # Refresh the data, load from CelesTrak if needed else use the disc cache.
 

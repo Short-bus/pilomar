@@ -13,6 +13,8 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+# 09.Dec.2023 Added PackageSearchResult() function to help with analysing functionality.
+
 from datetime import datetime, timedelta, timezone
 from textcolor import textcolor
 import os # OS Command execution
@@ -175,3 +177,27 @@ class logfile(): # 2 references.
         b = a.split('\n')
         for c in b:
             self.Log("logfile.RecordTraceback():",c,terminal=terminal)
+
+    def PackageSearchResult(self,searchterms,ignorecase=False):
+        """ Generate a ZIP file with a selection of entries from the current log file. 
+            searchterms = the selection phrase for grep.
+                Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
+            Returns a ZIP filename. """
+        path = os.path.dirname(self.FileName)
+        timestamp = str(NowUTC())
+        for c in ['-',':','.',' ']:
+            timestamp = timestamp.replace(c,'')
+        resultfile = os.path.join(path,'result_' + timestamp + '.log')
+        zipfile = os.path.join(path,'result_' + timestamp + '.zip')
+        self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
+        if ignorecase:
+            cmd = 'egrep -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
+        else:
+            cmd = 'egrep "' + searchterms + '" ' + self.FileName + '>' + resultfile
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+        os.system(cmd)
+        cmd = 'zip ' + zipfile + ' ' + resultfile
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+        os.system(cmd)
+        return zipfile
+        
