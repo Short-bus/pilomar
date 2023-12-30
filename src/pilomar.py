@@ -762,8 +762,8 @@ class parameters(attributemaster): # Common # 1 references.
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
         # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
-        self.LocalStarsMagnitude = self.GetParmVal('LocalStarsMagnitude',7) # Max magnitude when selecting local stars.
-        self.ConstellationStarsMagnitude = self.GetParmVal('ConstellationStarsMagnitude',7) # Max magnitude when selecting stars in a constellation.
+        self.LocalStarsMagnitude = self.GetParmVal('LocalStarsMagnitude',7.0) # Max magnitude when selecting local stars.
+        self.ConstellationStarsMagnitude = self.GetParmVal('ConstellationStarsMagnitude',7.0) # Max magnitude when selecting stars in a constellation.
         
         # The following parameters decide which types of images are stored.
         self.CameraSaveJpg = self.GetParmVal('CameraSaveJpg',True) # Save the jpg image from observations, but will strip out the embedded RAW data.
@@ -779,7 +779,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.PrepImagesForTracking = self.GetParmVal('PrepImagesForTracking',False) # TRUE = latest image is simplified. FALSE = latest image is used as is.
         self.InitialGoTo = self.GetParmVal('InitialGoTo',True) # Perform initial GOTO before downloading the trajectory. (Eases comms with microcontroller.)
         self.TargetInclusionRadius = self.GetParmVal('TargetInclusionRadius',15) # Angle (radius) for inclusion of neighbouring stars when generating target image.
-        self.TargetMinMagnitude = self.GetParmVal('TargetMinMagnitude',10.0) # Minimum magnitude for stars to display. At a 2 second exposure, Magnitude 5.0 is a good value, at 5 seconds, Mag 9, over 10 seconds, Mag 10 is about as good as it gets.
+        self.TargetMinMagnitude = self.GetParmVal('TargetMinMagnitude',7.0) # Minimum magnitude for stars to display. At a 2 second exposure, Magnitude 5.0 is a good value, at 5 seconds, Mag 9, over 10 seconds, Mag 10 is about as good as it gets.
         self.UseLiveLocation = self.GetParmVal('UseLiveLocation',True) # Use live target location rather than last reported location for image processing.
         self.DebugMode = self.GetParmVal('DebugMode',True) # In DebugMode ObservationRun does not display the status windows. This makes error messages easier to read.
         self.KeyboardScanDelay = self.GetParmVal('KeyboardScanDelay',2) # How many seconds between keyboard scans when running an observation?
@@ -3334,7 +3334,7 @@ class motorcontrol(attributemaster): # 2 references.
                 line = line.strip() # Trim unwanted characters from line.
                 ls = line.split(";") # Format is 'timestamp';'angle';'seconds'
                 if len(ls) > 1: angle = float(ls[1]) # 'timestamp';'angle';'seconds'
-                else: self.Log("Bad recovery entry (" + line + ") angle ignored.",level='warning')
+                else: self.Log("Bad recovery entry (" + line + "), angle ignored.",level='warning')
                 #if len(ls) > 2: 
                 #    self.MotorRunningSeconds = int(ls[2]) # 'timestamp';'angle';'seconds'
                 #else: self.Log("Bad recovery entry (" + line + ") running seconds ignored.",level='warning')
@@ -5976,6 +5976,41 @@ def ChooseSolar(prechosen=None): # 8 references.
     MainLog.Log("ChooseSolar: End " + obstarget.Name,terminal=False)
     return obstarget
 
+# ------------------------------------------------------------------------------------------------------
+
+def ChooseLocalTZ(default=None):
+    """ Allow the user to choose the local timezone from the available list. """
+    Result = ''
+    MainLog.Log('ChooseLocalTZ: Begin',terminal=False)
+    TZChooser = listchooser(pytz.all_timezones,compress=False) # Always show the full list.
+    while Result == '':
+        Result = TZChooser.Prompt()
+        if Result == None:
+            return default
+        if not Result in pytz.all_timezones:
+            print(textcolor.red("'" + Result + "' is not recognised. Try again."))
+            Result = ''
+    return Result
+
+# ------------------------------------------------------------------------------------------------------
+
+def DefineLocalTZ():
+    """ Allow the user to set the local timezone in the Parameter file. """
+    MainLog.Log('DefineLocalTZ: Begin',terminal=False)
+    print(textcolor.yellow('Define local Timezone'))
+    print('Pi-lomar operates in UTC time, you can define a local timezone here')
+    print('however beware that this is currently for information only.')
+    print('Most of the displays will continue to show UTC values.')
+    Result = ChooseLocalTZ(Parameters.LocalTZ)
+    if Result != None:
+        MainLog.Log('DefineLocalTZ: Setting',Result,terminal=False)
+        Parameters.LocalTZ = Result
+        print("Local Timezone set to",Parameters.LocalTZ)
+        nutc = NowUTC()
+        print("UTC time is",nutc)
+        print("Local time is",UTCtoLocal(nutc))
+    MainLog.Log('DefineLocalTZ: End',terminal=False)
+    
 # ------------------------------------------------------------------------------------------------------
 
 def ChooseSatellite(prechosen=None): # 8 references.
@@ -9005,6 +9040,128 @@ def ShowMotorStatus():
     for i in MotorControls:
         i.ShowMotorStatus()
 
+# ------------------------------------------------------------------------------------------------------
+
+def CalculateStarSpread(image): # *Q* Also available in pilomarimage.py
+    """ Given an image handle, calculate an approximation for the % of the frame that contains stars. 
+        LOW values mean that the stars are not spread out evenly across the frame. 
+        HIGH values mean that the stars are spread out more evenly across the frame.
+        image is a pilomarimage object.
+        Returns a % value for each axis and the total image. """
+    if image.ImageExists(): # There's an image loaded.
+        HMin = None # Lowest 'X' position of a star.
+        HMax = None # Highest 'X' position of a star.
+        VMin = None # Lowest 'Y' position of a star.
+        VMax = None # Highest 'Y' position of a star.
+        for star in image.StarList: # Each star is a list of [x, y, radius]
+            if HMin == None or HMin > star[0]: HMin = star[0]
+            if HMax == None or HMax < star[0]: HMax = star[0]
+            if VMin == None or VMin > star[1]: VMin = star[1]
+            if VMax == None or VMax < star[1]: VMax = star[1]
+        HorizontalSpread = 100 * (HMax - HMin) / image.GetWidth()
+        VerticalSpread = 100 * (VMax - VMin) / image.GetHeight()
+        ImageSpread = 100 * ((HorizontalSpread / 100) * (VerticalSpread / 100))
+    else: # There's no image.
+        HorizontalSpread = VerticalSpread = ImageSpread = 0 # No spread to measure.
+    HorizontalSpread = round(HorizontalSpread,0) # Integer values only.        
+    VerticalSpread = round(VerticalSpread,0) # Integer values only.        
+    ImageSpread = round(ImageSpread,0) # Integer values only.        
+    return HorizontalSpread, VerticalSpread, ImageSpread
+    
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingStatus():
+    """ Show tracking parameters and results.
+        This is to help tuning the tracking parameters.
+        It is highly likely that every instance of the telescope will need
+        different parameter settings to optimise the tracking depending upon
+        the camera/lens in use and the quality of the sky visible.
+        This shows the key parameters that affect the way tracking works to 
+        help you tune the values.                                                   """
+    print(textcolor.yellow("Tracking status"))
+    print("This shows tracking system parameters and any recent tracking results.")
+    print("Use this information to finetune tracking performance.")
+    print("")
+    print(textcolor.white("Camera"))
+    print("      Image size:",CameraInUse.Sensor.PixelHeight,"h","*",CameraInUse.Sensor.PixelWidth,"w","pixels")
+    print("            Lens:",CameraInUse.Lens.Length,"mm","(35mm equiv:",CameraInUse.Lens.EquivLength,"mm)")
+    print("   Field of View:","Horizontal",Deg3dp(CameraInUse.Lens.FovHorizontal,DegreeSymbol),
+                              "Vertical",Deg3dp(CameraInUse.Lens.FovVertical,DegreeSymbol))
+    print(textcolor.white("Target parameters (calculated image)"))
+    if Parameters.LocalStarsMagnitude < Parameters.TargetMinMagnitude:
+        bNote = textcolor.red("Clipped to mag",Parameters.LocalStarsMagnitude,"in Hipparcos selection.")
+    else:
+        bNote = ""
+    print("      Brightness: mag",Parameters.TargetMinMagnitude,bNote)
+    print("                  mag",Parameters.TargetMinMagnitude - 0.2,"would generate fewer stars.")
+    print("                  mag",Parameters.TargetMinMagnitude + 0.2,"would generate more stars.")
+    print(textcolor.blue("                     (TargetMinMagnitude parameter)"))
+    print(" Hipparcos limit: mag",Parameters.LocalStarsMagnitude) # Cannot exceed this value without reloading LocalStars list.
+    print(textcolor.blue("                     (LocalStarsMagnitude parameter)"))
+    print(textcolor.white("Latest parameters (captured image)"))
+    print("   Exposure time:",Parameters.TrackingExposureSeconds,"s")
+    print("                 ",round(Parameters.TrackingExposureSeconds / 2,1),"s would capture fewer stars.")
+    print("                 ",round(Parameters.TrackingExposureSeconds * 2,1),"s would capture more stars.")
+    print(textcolor.blue("                     (TrackingExposureSeconds parameter)"))
+    print(textcolor.white("Drift calculation"))
+    sm_fg = OSW_TEXT_GOOD
+    ltemp = len(DriftTracker.TargetStarMatchList)
+    if ltemp < 1: sm_fg = OSW_TEXT_BAD
+    elif ltemp < 10: sm_fg = OSW_TEXT_POOR
+    print("     Star matches:",textcolor.fgbgcolor(sm_fg,textcolor.BLACK,str(ltemp)))
+    print("     Target image: Loaded",DriftTracker.TargetImage.ImageExists(),DriftTracker.TargetTimeStamp)
+    BadThreshold = 50
+    PoorThreshold = 70
+    hs,vs,imgs = CalculateStarSpread(DriftTracker.TargetImage) # Calculate the spread of stars in the target image.
+    hs_fg = vs_fg = imgs_fg = OSW_TEXT_GOOD # What color to show for GOOD star spread percentages?
+    if hs < BadThreshold: hs_fg = OSW_TEXT_BAD # Horizontal star spread is BAD.
+    elif hs < PoorThreshold: hs_fg = OSW_TEXT_POOR # Horizontal star spread is POOR.
+    if vs < BadThreshold: vs_fg = OSW_TEXT_BAD # Vertical star spread is BAD.
+    elif vs < PoorThreshold: vs_fg = OSW_TEXT_POOR # Vertical star spread is POOR.
+    if imgs < BadThreshold: imgs_fg = OSW_TEXT_BAD # Area star spread is BAD.
+    elif imgs < PoorThreshold: imgs_fg = OSW_TEXT_POOR # Area star spread is POOR.
+    print("       Star count:",DriftTracker.TargetImage.StarCount,"Spread:",
+          "Horiz",textcolor.fgbgcolor(hs_fg,textcolor.BLACK,str(hs)),
+          "%, Vert",textcolor.fgbgcolor(vs_fg,textcolor.BLACK,str(vs)),
+          "%, Area",textcolor.fgbgcolor(imgs_fg,textcolor.BLACK,str(imgs)),"%")
+    print("     Latest image: Loaded",DriftTracker.LatestImage.ImageExists(),DriftTracker.LatestTimeStamp)
+    hs,vs,imgs = CalculateStarSpread(DriftTracker.LatestImage) # Calculate the spread of stars in the latest image.
+    hs_fg = vs_fg = imgs_fg = OSW_TEXT_GOOD # What color to show for GOOD star spread percentages?
+    if hs < BadThreshold: hs_fg = OSW_TEXT_BAD # Horizontal star spread is BAD.
+    elif hs < PoorThreshold: hs_fg = OSW_TEXT_POOR # Horizontal star spread is POOR.
+    if vs < BadThreshold: vs_fg = OSW_TEXT_BAD # Vertical star spread is BAD.
+    elif vs < PoorThreshold: vs_fg = OSW_TEXT_POOR # Vertical star spread is POOR.
+    if imgs < BadThreshold: imgs_fg = OSW_TEXT_BAD # Area star spread is BAD.
+    elif imgs < PoorThreshold: imgs_fg = OSW_TEXT_POOR # Area star spread is POOR.
+    print("       Star count:",DriftTracker.TargetImage.StarCount,"Spread:",
+          "Horiz",textcolor.fgbgcolor(hs_fg,textcolor.BLACK,str(hs)),
+          "%, Vert",textcolor.fgbgcolor(vs_fg,textcolor.BLACK,str(vs)),
+          "%, Area",textcolor.fgbgcolor(imgs_fg,textcolor.BLACK,str(imgs)),"%")
+
+# ------------------------------------------------------------------------------------------------------
+
+def About():
+    """ Display version information. """
+    print(textcolor.yellow("About",sys.argv[0]))
+    # Print timestamp.
+    MainLog.Log("Now:",NowUTC(),"UTC",terminal=True)
+    # Print program ID
+    MainLog.Log("Program:",sys.argv[0],terminal=True) # What program name is running?
+    MainLog.Log("Program version:",VERSION,terminal=True) # Print RPi software version.
+    MainLog.Log("Project root:",ProjectRoot,terminal=True) # What is the project root?
+    MainLog.Log("Microcontroller program version:",Session.ControllerVersion,terminal=True) # What microcontroller software version is running?
+    MainLog.Log("Acceptable microcontroller versions:",ACCEPTABLECONTROLLERVERSIONS,terminal=True) # What microcontroller versions are acceptable?
+    # Print O/S version.
+    MainLog.Log("Python version:",sys.version_info,terminal=True) # What version of Python is this?
+    # Print any package versions available. 
+    MainLog.Log("Skyfield version:",SkyfieldVersion,terminal=True) # What version of Skyfield is in use?
+    MainLog.Log("Astroalign version:",astroalign.__version__,terminal=True) # What version of Astroalign is in use?
+    MainLog.Log("Numpy version:",np.__version__,terminal=True) # What version of Numpy is in use?
+    MainLog.Log("Pandas version:",pandas.__version__,terminal=True) # What version of pandas is in use?
+    MainLog.Log("PiDNG version:","Unknown",terminal=True) # What version of piDNG is in use?
+    
+# ------------------------------------------------------------------------------------------------------
+
 # Create menu structure.
 
 MotorMenuOptions = {
@@ -9043,9 +9200,12 @@ MctlMenuOptions = {
 MctlMenu = proceduremenu(MctlMenuOptions,'Microcontroller tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
 MiscMenuOptions = {
+    'About':                  {'label':'About',                     'call':About},
     'ShowParameters':         {'label':'Show parameters',           'call':ShowParameters},
     'EditParameters':         {'label':'Edit parameters',           'call':EditParameters},
     'ReloadParameters':       {'label':'Reload parameters',         'call':ReloadParameters},
+    'SetLocalTZ':             {'label':'Set local timezone',        'call':DefineLocalTZ},
+    'TrackingStatus':         {'label':'Tracking status',           'call':TrackingStatus},
     'ShowFolderList':         {'label':'Show folder list',          'call':ShowFolderList},
     'EditTargetHistory':      {'label':'Edit target history',       'call':EditTargetHistory},
     'DebugModeOn':            {'label':'Debug mode on',             'call':DebugModeOn},
