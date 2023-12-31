@@ -184,7 +184,7 @@ class logfile(): # 2 references.
                 Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
             Returns a ZIP filename. """
         path = os.path.dirname(self.FileName)
-        timestamp = str(NowUTC())
+        timestamp = str(self.NowUTC())
         for c in ['-',':','.',' ']:
             timestamp = timestamp.replace(c,'')
         resultfile = os.path.join(path,'result_' + timestamp + '.log')
