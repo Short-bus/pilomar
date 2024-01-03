@@ -5,6 +5,9 @@ Eg:
   cd gerber/PCB-2023-12-14
   zip PCB-2023-12-14.zip *
 
+Please order the board UNPOPULATED, the GERBER files do not specify the components, you need to add those manually when you 
+have received the unpopulated PCBs.
+
 PCB designs ----------------------------------------------------------------------------------------------------------------
 
 PCB-2023-12-14 
