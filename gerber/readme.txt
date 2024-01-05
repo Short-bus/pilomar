@@ -1,4 +1,4 @@
-Each folder in the gerber directory is a complete GerberFile for a single PCB.
+Each folder in the gerber directory is a complete Gerber file set for a single PCB design.
 
 To send the Gerber files for manufacturing you should select the PCB version you want and ZIP all the files in that folder.
 Eg:
@@ -7,6 +7,9 @@ Eg:
 
 Please order the board UNPOPULATED, the GERBER files do not specify the components, you need to add those manually when you 
 have received the unpopulated PCBs.
+
+These designs are made in good faith and are best efforts, but no guarantees are provided. 
+Please be sure you are happy with their function and safety before using in your project.
 
 PCB designs ----------------------------------------------------------------------------------------------------------------
 
