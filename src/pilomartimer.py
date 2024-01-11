@@ -14,6 +14,7 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from datetime import datetime, timedelta, timezone
+import threading # To use the Event.wait() method as a non-blocking wait function.
 
 class progresstimer():
     """ Simple progress timer, provide a target count, a starting point and a current count.
@@ -141,8 +142,20 @@ class timer(): # 14 references.
         while self.Due() == False:
             t = self.Remaining()
             if t > 0:
-                time.sleep(t)
+                # RPi5B - Non-blocking wait function.
+                event = threading.Event()
+                event.wait(t)
+                # time.sleep(t) # RPi4B - Blocking wait!
         return True
+        
+    #def Wait(self) -> bool:
+    #    """ Wait for timer to expire. 
+    #        The thread cannot do anything else while waiting for this. """
+    #    while self.Due() == False:
+    #        t = self.Remaining()
+    #        if t > 0:
+    #            time.sleep(t)
+    #    return True
 
     def Restart(self) -> bool:
         """ Use this to reset the timer clock.

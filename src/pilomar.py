@@ -658,6 +658,52 @@ osCmdCode = OSCommand.ExecuteCode # Shortcut point to the execution method which
 
 # ------------------------------------------------------------------------------------------------------
 
+
+def OSVersion():
+    """ Return the version of operating system.
+        Returns 
+            versionid       eg  10
+            versioncodename eg  buster
+            ostype          eg  debian
+            """
+    versionid = None
+    versioncodename = None
+    ostype = None
+    for line in osCmd('cat /etc/os-release'):
+        if len(line) > 0:
+            elements = line.split('=')
+            if elements[0] == 'VERSION_ID': versionid = elements[1].replace('"','')
+            elif elements[0] == 'VERSION_CODENAME': versioncodename = elements[1]
+            elif elements[0] == 'ID': ostype = elements[1]
+    return versionid, versioncodename, ostype
+            
+# ------------------------------------------------------------------------------------------------------
+
+def RPiModel():
+    """ Calculate a label for the model of RPI in use. """
+    lines = osCmd('cat /sys/firmware/devicetree/base/model')
+    rpimodel = 'Raspberry Pi'
+    for line in lines:
+        if len(line) > 0: rpimodel = line
+    rpimodel = rpimodel.replace('Raspberry Pi ','RPi ')
+    rpimodel = rpimodel.replace('Model ','')
+    rpimodel = rpimodel.replace('Rev ','')
+    # Remove non printing characters.
+    temp = ''
+    for char in rpimodel:
+        if char >= ' ': temp += char
+    rpimodel = temp 
+    return rpimodel
+
+RPIMODEL = RPiModel()
+MainLog.Log("RPi model:",RPIMODEL,terminal=True)
+OS_id, OS_name, OS_type = OSVersion()
+MainLog.Log("RPi o/s:",OS_type,OS_id,OS_name,terminal=True)
+if OS_name != 'buster':
+    MainLog.Log(sys.argv[0],"is only designed to run under 'buster', not",OS_name,level='warning',terminal=True)
+    
+# ------------------------------------------------------------------------------------------------------
+
 # Remove out of date log files to preserve disc space.
 print (textcolor.yellow('Removing out of date log files to preserve disc space...'))
 # Show what will be deleted.
@@ -2695,16 +2741,18 @@ class microcontroller(attributemaster): # 1 references.
         # Calling program needs to call microcontroller.Initiate() to get things going.
 
     def StartMonitor(self):
-        """ Start replicating communications to the terminal. """
+        """ Start replicating communications to the terminal. 
+            The messages are still logged. """
         if self.Log != None:
             self.Log("microcontroller.StartMonitor()",terminal=False)
-        self.PrintComms = True
+        self.PrintComms = True # UART comms will be echoed to the terminal.
 
     def EndMonitor(self):
-        """ Stop replicating communications to the terminal. """
+        """ Stop replicating communications to the terminal. 
+            The messages are still logged. """
         if self.Log != None:
             self.Log("microcontroller.EndMonitor()",terminal=False)
-        self.PrintComms = False
+        self.PrintComms = False # UART comms will not be echoed to the terminal.
 
     def PowerOn(self):
         """ Overrides all safeties, turns power GPIO power pin on for microcontroller. """
@@ -2725,6 +2773,12 @@ class microcontroller(attributemaster): # 1 references.
         if authority:
             self.Log("microcontroller.PowerOff(): No safety checks. GPIO POWER PIN turned off for Microcontroller.",terminal=True)
             GPIO.output(self.ResetPin, GPIO.LOW)
+
+    def PowerIsOn(self):
+        """ Return TRUE if power is on, FALSE otherwise. 
+            This uses GPIO.input(self.ResetPin) even though the pin is defined as an output,
+            it still works and returns the state of the pin. """
+        return GPIO.input(self.ResetPin)
 
     #def Led1On(self):
     #    self.LedOn(Led1)
@@ -2942,7 +2996,12 @@ class microcontroller(attributemaster): # 1 references.
         result = ''
         while len(result) == 0 and len(self.Lines) > 0: # No valid line to return yet, and still lines available in the receive buffer.
             result = self.Lines.pop(0).strip()
-            self.Log('RPi received: ' + self.RemoveChecksum(result),terminal=self.PrintComms)
+            if self.ValidateChecksum(result): # Line is good, remove the checksum.
+                cleanresult = self.RemoveChecksum(result)
+            else: # Line is bad. Don't clean it.
+                cleanresult = result
+            self.Log('RPi received: ' + cleanresult,terminal=False)
+            if self.PrintComms: print(textcolor.cyan('RPi received: ' + cleanresult))
             #if self.CommsLog != None: self.CommsLog('RxQueue>RPi:',result,terminal=False) # Record the conversation separately.
             MctlRxWindow.Print(self.RemoveChecksum(result))
             if self.ValidateChecksum(result): # Line is good.
@@ -3057,7 +3116,8 @@ class microcontroller(attributemaster): # 1 references.
             line += '[' + str(self.SendId) + ']' # Append sequential message ID. microcontroller will respond with this ID when it has received OK.
             MctlTxWindow.Print(line)
             self.WriteQueue.append(self.AddChecksum(line)) # Add to send queue with Checksum.
-            self.Log('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line,terminal=self.PrintComms)
+            self.Log('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line,terminal=False)
+            if self.PrintComms: print(textcolor.yellow('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line))
             #if self.CommsLog != None: self.CommsLog("RPi>TxQueue:",line,terminal=False)
 
     def CommsLoop(self,commandqueue): # Runs as own thread.
@@ -3194,7 +3254,7 @@ class motorcontrol(attributemaster): # 2 references.
         self.MotorStepsPerAxisDegree = self.MicrostepRatio * self.MotorStepsPerRev / 360.0
         self.AxisStepsPerRev = self.MicrostepRatio * self.MotorStepsPerRev * self.GearRatio 
         self.MotorConfigured = False
-        self.FastTime = 0.001 # Was 0.0005
+        self.FastTime = 0.002 # Was 0.0005
         self.SlowTime = 0.05
         self.TimeDelta = 0.003
         self.TrajectorySegmentSize = 60 # Seconds.
@@ -3714,11 +3774,11 @@ class motorcontrol(attributemaster): # 2 references.
         line += str(endangle) + ' '
         self.Log('motorcontroller.ExtendTrajectory(',self.MotorName,') Segment',(endutc - startutc).total_seconds(),'seconds',startutc,round(startangle,4),'deg -',endutc,round(endangle,4),'deg',terminal=False)
         # *Q* Could add a 'please acknowledge' flag to the line, so that we know we can calculate the next segment when needed.
-        # line += 'y ' # Please acknowledge.
+        # line += 'y ' # Please acknowledge. The 'optimistic configuration' idea would eliminate the need for this flag.
         if endangle >= self.MinAngle and endangle <= self.MaxAngle: # We're still within range.
             Mctl.Write(line)
             self.LastSentTrajectoryKey = self.TrajectoryValidUntil # Cache the trajectory calculation, if the same calculation is triggered, we can re-use the earlier copy for speed.
-            self.LastSentTrajectoryData = line[26:] # Store the data sent (without the leading timestamp, that needs recreating if resent). 
+            self.LastSentTrajectoryData = line[26:] # Store the data sent (without the leading timestamp, a fresh timestamp will be used if resent). 
             self.Log('motorcontroller.ExtendTrajectory(', self.MotorName, '): Cached trajectory calculation:', "'" + self.LastSentTrajectoryData + "'",terminal=False)
         else:
             self.Log('motorcontroller.ExtendTrajectory(' + self.MotorName + '): Trajectory is now complete.',terminal=False)
@@ -4394,7 +4454,7 @@ class imagetracker(attributemaster): # 1 references.
         NewImageBuffer.New(height,width,imagetype='bgr',datatype=np.uint8)
         NewImageBuffer.FillColor(BGRBlack)
         # Match lists must be the same length.
-        if len(self.LatestStarMatchList) == len(self.TargetStarMatchList):
+        if len(self.LatestStarMatchList) == len(self.TargetStarMatchList) and self.LatestStarMatchList != None and self.TargetStarMatchList != None:
             # Mark the matched stars first, and an arrow linking the TARGET and LATEST locations.
             for i, lstar in enumerate(self.LatestStarMatchList): 
                 tstar = self.TargetStarMatchList[i]
@@ -4410,26 +4470,28 @@ class imagetracker(attributemaster): # 1 references.
                     NewImageBuffer.DrawLine((lx,ly),(tx,ty),color=BGRWhite,arrowpixels=20) # Green circle around matched Target stars.
                 NewImageBuffer.DrawDumbbell((lx,ly),(tx,ty),20,BGRRed,BGRGreen,BGRYellow,arrow=True)
         else: # Lists don't agree, so don't try to map them.
-            self.Log("imagetracker.SaveTrackingAnalysis: Conflicting length of star lists: Target", len(self.TargetStarMatchList), "vs Latest", len(self.LatestStarMatchList),terminal=False)
+            self.Log("imagetracker.SaveTrackingAnalysis: Conflicting length of star lists: Target", type(self.TargetStarMatchList), len(self.TargetStarMatchList), "vs Latest", type(self.LatestStarMatchList), len(self.LatestStarMatchList),terminal=False)
             DriftWindow.Print(NowHMS() + " drift analysis image not done.") # Note analysis not done.
         # Superimpose all the TARGET stars. (Stars we expect to see)
-        for i,star in enumerate(self.TargetImage.StarList): 
-            if self.ValidStarValues(star): 
-                starx = int(star[0])
-                stary = int(star[1])
-                magtext = "(" + str(starx) + "," + str(stary) + ")"
-                NewImageBuffer.DrawCircle(starx,stary,5,color=BGRGreen) # Green dot for Target stars.
-                self.MarkLocation(NewImageBuffer,starx,stary,BGRGreen,"[" + str(i) + "]",magtext) # Mark location, brightness ranking (Brightest -> Dimmest) and magnitude if known.
-            else: self.Log("imagetracker.SaveTrackingAnalysis: TargetImage.StarList. star",star,"bad values.",terminal=True)
+        if self.TargetImage.StarList != None:
+            for i,star in enumerate(self.TargetImage.StarList): 
+                if self.ValidStarValues(star): 
+                    starx = int(star[0])
+                    stary = int(star[1])
+                    magtext = "(" + str(starx) + "," + str(stary) + ")"
+                    NewImageBuffer.DrawCircle(starx,stary,5,color=BGRGreen) # Green dot for Target stars.
+                    self.MarkLocation(NewImageBuffer,starx,stary,BGRGreen,"[" + str(i) + "]",magtext) # Mark location, brightness ranking (Brightest -> Dimmest) and magnitude if known.
+                else: self.Log("imagetracker.SaveTrackingAnalysis: TargetImage.StarList. star",star,"bad values.",terminal=True)
         # Superimpose all the LATEST stars. (Stars we actually see)
-        for i,star in enumerate(self.LatestImage.StarList): 
-            if self.ValidStarValues(star): 
-                starx = int(star[0])
-                stary = int(star[1])
-                NewImageBuffer.DrawCircle(starx,stary,5,color=BGRRed) # Red dot for Latest stars.
-                magtext = "(" + str(starx) + "," + str(stary) + ")"
-                self.MarkLocation(NewImageBuffer,starx,stary,BGRRed,"[" + str(i) + "]",magtext)
-            else: self.Log("imagetracker.SaveTrackingAnalysis: LatestImage.StarList. star",star,"bad values.",terminal=True)
+        if self.LatestImage.StarList != None:
+            for i,star in enumerate(self.LatestImage.StarList): 
+                if self.ValidStarValues(star): 
+                    starx = int(star[0])
+                    stary = int(star[1])
+                    NewImageBuffer.DrawCircle(starx,stary,5,color=BGRRed) # Red dot for Latest stars.
+                    magtext = "(" + str(starx) + "," + str(stary) + ")"
+                    self.MarkLocation(NewImageBuffer,starx,stary,BGRRed,"[" + str(i) + "]",magtext)
+                else: self.Log("imagetracker.SaveTrackingAnalysis: LatestImage.StarList. star",star,"bad values.",terminal=True)
         # Add key.
         timestamp = str(NowUTC()).split('.')[0] + " UTC"
         NewImageBuffer.AddText("Tracking Analysis " + timestamp,1300,100,size=2,color=BGRWhite,bgcolor=BGRBlack,thickness=2)
@@ -4522,7 +4584,7 @@ def DictionaryLoader(filename): # 4 references.
         with open(filename,'r') as f:
             dictionary = json.load(f)
     else:
-        MainLog.Log('DictionaryLoader(',filename,') does not exist. Empty dictionary returned.')
+        MainLog.Log('DictionaryLoader(',filename,') does not exist. Empty dictionary returned.',level='error')
         dictionary = {}
     return dictionary
 
@@ -9017,7 +9079,14 @@ def ZipCommsLog():
     """ Extract communication summary from the main log file and zip it. """
     MainLog.Log("ZipCommsLog",terminal=True)
     zipfile = MainLog.PackageSearchResult('RPi received|RPi queueing|warning|error',ignorecase=True)
-    MainLog.Log("Generated",zipfile,terminal=True)
+    MainLog.Log("ZipCommsLog: Generated",zipfile,terminal=True)
+
+# ------------------------------------------------------------------------------------------------------
+
+def ZipTrajectoryLog():
+    MainLog.Log("ZipTrajectoryLog",terminal=True)
+    zipfile = MainLog.PackageSearchResult('RPi queueing.*): trajectory ',ignorecase=True)
+    MainLog.Log("ZipTrajectoryLog: Generated",zipfile,terminal=True)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9026,6 +9095,10 @@ def MonitorComms():
     print(textcolor.yellow("MonitorComms"))
     print("This will show communication traffic.")
     print("Press 'x' to return to the menu.")
+    if Mctl.PowerIsOn(): # Warn if the microcontroller is not powered. 
+        print(textcolor.green("The microcontroller power is ON."))
+    else:
+        print(textcolor.red("The microcontroller is OFF."))
     Mctl.StartMonitor()
     while True:
         keypress = Keyboard.Check().lower()
@@ -9083,7 +9156,7 @@ def TrackingStatus():
     print("Use this information to finetune tracking performance.")
     print("")
     print(textcolor.white("Camera"))
-    print("      Image size:",CameraInUse.Sensor.PixelHeight,"h","*",CameraInUse.Sensor.PixelWidth,"w","pixels")
+    print("      Image size:",CameraInUse.Sensor.PixelWidth,"w","*",CameraInUse.Sensor.PixelHeight,"h","pixels")
     print("            Lens:",CameraInUse.Lens.Length,"mm","(35mm equiv:",CameraInUse.Lens.EquivLength,"mm)")
     print("   Field of View:","Horizontal",Deg3dp(CameraInUse.Lens.FovHorizontal,DegreeSymbol),
                               "Vertical",Deg3dp(CameraInUse.Lens.FovVertical,DegreeSymbol))
@@ -9109,6 +9182,14 @@ def TrackingStatus():
     if ltemp < 1: sm_fg = OSW_TEXT_BAD
     elif ltemp < 10: sm_fg = OSW_TEXT_POOR
     print("     Star matches:",textcolor.fgbgcolor(sm_fg,textcolor.BLACK,str(ltemp)))
+    if DriftTracker.dx != None:
+        print("  Drift dx,dy,rot:",round(DriftTracker.dx,0),",",round(DriftTracker.dy,0),",",Deg3dp(DriftTracker.rotation,DegreeSymbol))
+    else:
+        print("  Drift dx,dy,rot: NOT CALCULATED YET.")
+    print(textcolor.white("Star generation/detection"))
+    # Star detection.
+    print("  Enhance images:",Parameters.PrepImagesForTracking)
+    print(textcolor.blue("                     (PrepImagesForTracking parameter)"))
     print("     Target image: Loaded",DriftTracker.TargetImage.ImageExists(),DriftTracker.TargetTimeStamp)
     BadThreshold = 50
     PoorThreshold = 70
@@ -9145,13 +9226,28 @@ def About():
     print(textcolor.yellow("About",sys.argv[0]))
     # Print timestamp.
     MainLog.Log("Now:",NowUTC(),"UTC",terminal=True)
+    # Print O/S and hardware
+    MainLog.Log("RPi model:",RPIMODEL,terminal=True)
+    for line in osCmd('cat /sys/firmware/devicetree/base/model'):
+        if len(line) > 0: MainLog.Log("Firmware:",line,terminal=True)
+    for line in osCmd('cat /etc/os-release'):
+        if len(line) > 0: MainLog.Log("OS release:",line,terminal=True)
+    for line in osCmd('cat /proc/version'):
+        if len(line) > 0: MainLog.Log("OS version:",line,terminal=True)
+    for line in osCmd('cat /proc/cpuinfo'):
+        if len(line) > 0: MainLog.Log("CPU info:",line,terminal=True)
+    for line in osCmd('vcgencmd get_mem arm'):
+        if len(line) > 0: MainLog.Log("CPU memory allocation:",line,terminal=True)
+    for line in osCmd('vcgencmd get_mem gpu'):
+        if len(line) > 0: MainLog.Log("GPU memory allocation:",line,terminal=True)
+    for line in osCmd('uptime'):
+        if len(line) > 0: MainLog.Log("Uptime:",line,terminal=True)
     # Print program ID
     MainLog.Log("Program:",sys.argv[0],terminal=True) # What program name is running?
     MainLog.Log("Program version:",VERSION,terminal=True) # Print RPi software version.
     MainLog.Log("Project root:",ProjectRoot,terminal=True) # What is the project root?
     MainLog.Log("Microcontroller program version:",Session.ControllerVersion,terminal=True) # What microcontroller software version is running?
     MainLog.Log("Acceptable microcontroller versions:",ACCEPTABLECONTROLLERVERSIONS,terminal=True) # What microcontroller versions are acceptable?
-    # Print O/S version.
     MainLog.Log("Python version:",sys.version_info,terminal=True) # What version of Python is this?
     # Print any package versions available. 
     MainLog.Log("Skyfield version:",SkyfieldVersion,terminal=True) # What version of Skyfield is in use?
@@ -9192,8 +9288,8 @@ MctlMenuOptions = {
     'StartMessage':            {'label':'Start message handler',           'call':MenuStartMessage},
     'ShutdownMessage':         {'label':'Shutdown message handler',        'call':MenuShutdownMessage},
     'FlushCommandQueue':       {'label':'Flush command queue',             'call':FlushCommandQueue},
-    'ZipCommsLog':            {'label':'Zip comms log',             'call':ZipCommsLog},
-    'MonitorComms':           {'label':'Monitor communication',     'call':MonitorComms},
+    'ZipCommsLog':             {'label':'Zip comms log',             'call':ZipCommsLog},
+    'MonitorComms':            {'label':'Monitor communication',     'call':MonitorComms},
     'MicrocontrollerPowerOn':  {'label':'Microcontroller GPIO power ON',   'call':Mctl.PowerOn},
     'MicrocontrollerPowerOff': {'label':'Microcontroller GPIO power OFF',  'call':Mctl.PowerOff}
 }
@@ -9206,6 +9302,7 @@ MiscMenuOptions = {
     'ReloadParameters':       {'label':'Reload parameters',         'call':ReloadParameters},
     'SetLocalTZ':             {'label':'Set local timezone',        'call':DefineLocalTZ},
     'TrackingStatus':         {'label':'Tracking status',           'call':TrackingStatus},
+    'ZipTrajectories':        {'label':'Zip trajectory log',        'call':ZipTrajectoryLog},
     'ShowFolderList':         {'label':'Show folder list',          'call':ShowFolderList},
     'EditTargetHistory':      {'label':'Edit target history',       'call':EditTargetHistory},
     'DebugModeOn':            {'label':'Debug mode on',             'call':DebugModeOn},

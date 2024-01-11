@@ -187,17 +187,22 @@ class logfile(): # 2 references.
         timestamp = str(self.NowUTC())
         for c in ['-',':','.',' ']:
             timestamp = timestamp.replace(c,'')
+        timestamp = timestamp.split('+')[0]
         resultfile = os.path.join(path,'result_' + timestamp + '.log')
         zipfile = os.path.join(path,'result_' + timestamp + '.zip')
         self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
         if ignorecase:
-            cmd = 'egrep -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
+            # -a : Treat file as text.
+            # -i : ignore case.
+            cmd = 'egrep -a -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
         else:
-            cmd = 'egrep "' + searchterms + '" ' + self.FileName + '>' + resultfile
-        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+            cmd = 'egrep -a "' + searchterms + '" ' + self.FileName + '>' + resultfile
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
         os.system(cmd)
         cmd = 'zip ' + zipfile + ' ' + resultfile
-        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
         os.system(cmd)
         return zipfile
+
+#
         

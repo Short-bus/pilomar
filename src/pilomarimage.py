@@ -1078,7 +1078,7 @@ class pilomarimage():
         self.ActionList = [] # List of actions performed on the image.
         self.CreatedTimestamp = self.Now()
         self.ModifiedTimestamp = None
-        self.StarList = None
+        self.StarList = [] # Was None
         self.StarCount = 0
         self.StarMatchList = None
         self.HorizontalSpread = 0 # % of horizonal spread of stars.
