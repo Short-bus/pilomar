@@ -17,7 +17,7 @@
 #           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
 #           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
 #           cc = Bugfix, no feature changes. Will not require changes on RPi side.
-VERSION = '0.2.1' # Software version reported to the RPi.
+VERSION = '0.3.0' # Software version reported to the RPi.
 ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
@@ -335,6 +335,7 @@ class logfile():
     def __init__(self):
         self.Lines = []
         self.BufferSize = 0
+        self.MaxLines = 20 # Do not store more than 20 lines due to memory constraints.
         self.Clock = None
 
     def Log(self,line,*args):
@@ -347,8 +348,11 @@ class logfile():
             line = IntToTimeString(time.time()) + ":" + line + '\n'
         else:
             line = IntToTimeString(self.Clock.Now()) + ":" + line + '\n'
-        self.Lines.append(line)
-        self.BufferSize += len(line)
+        if len(self.Lines) < 20:
+            self.Lines.append(line)
+            self.BufferSize += len(line)
+        else:
+            print("logfile.Log: Buffer is full. log message ignored until cleared.")
 
     def SendAll(self):
         """ Call this to send ALL the outstanding log entries. """
@@ -1263,15 +1267,20 @@ class steppermotor():
             If Microstepping is disabled, then this only accepts stepsize = 1 """
         if self.FaultBCM.GetValue() == False: # DRV8825 'fault' pin is triggered.
             if self.FaultSensitive: # The fault matters.
-                self.FaultDetected = True
-                LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - terminating.')
+                if not self.FaultDetected:
+                    print("Setting FAULT status.")
+                    self.FaultDetected = True
+                    LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - terminating.')
                 return
             else: # The fault does not matter.
                 if not self.FaultDetected: # Only report once.
                     LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - ignored.')
-                self.FaultDetected = True
+                    print("Setting FAULT status.")
+                    self.FaultDetected = True
         else: # No DRV8825 fault, clear any previous fault status.
-            self.FaultDetected = False # No fault.
+            if self.FaultDetected: 
+                LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - cleared.')
+                self.FaultDetected = False # No fault.
         if abs(self.StepDir) != 1: # self.StepDir must be +1 or -1
             #raise Exception ('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
             LogFile.Log('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
@@ -1316,7 +1325,74 @@ class steppermotor():
         if self.WaitTime > self.FastTime: # We can still accelerate
             self.WaitTime = max(self.WaitTime - self.DeltaTime, self.FastTime)
 
+    def InvertSteps(self,motorsteps):
+        """ Given a number of steps to move, return the inverse move. """
+        if motorsteps > 0: # Instead of going forward, go backward.
+            inversemove = motorsteps - self.AxisStepsPerRev
+        else: # Instead of going backward, go forward.
+            inversemove = motorsteps + self.AxisStepsPerRev
+        return inversemove
+    
+    def EfficiencyCheck(self,motorsteps):
+        """ Check motorsteps are efficient. 
+            If the motor is taking the long route to the new position, revise it. """
+        inversemove = motorsteps
+        if abs(motorsteps) > int(self.AxisStepsPerRev / 2): # We're going the long way round.
+            inversemove = self.InvertSteps(motorsteps)
+            LogFile.Log("steppermotor.EfficiencyCheck(): Inefficient move:",self.CurrentPosition,"to",self.TargetPosition,motorsteps,"steps, suggest",inversemove)
+        return inversemove
+
     def MoveMotor(self):
+        """ Move the motor to the new target position. Target must be defined before calling this.
+            If this is handling a very large move, it may take some time, so it can also trigger
+            sending MotorStatus messages back to the RPi. Because some moves are quite long, this 
+            also processes UART communication periodically too. """
+        # *Q* Choosing MotorSteps should take into account that it may be faster to go from 359Deg to 1Deg directly instead of winding backwards 358 degrees.
+        #     Decide which direction to move.
+        #     Make sure that the motor position counter handles wrapping around in both directions.
+        #     Respect an arbitrary 'turn back' point to avoid cables becoming tangled.
+        #     Does minangle/maxangle become redundant?
+        #     Find any/all checks against MinAngle and MaxAngle too.
+        MotorSteps = self.TargetPosition - self.CurrentPosition # How many steps to take?
+        _ = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
+        self.WaitTime = self.SlowTime # Start with slow move pulses. This reduces each time we call MoveFullStep().
+        #FullStepCount = 0
+        #MicroStepCount = 0
+        if MotorSteps != 0:
+            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
+            if abs(MotorSteps) > 100: # Large moves will reset the 'OnTarget' flag.
+                #LogFile.Log('steppermotor.MoveMotor: Large move (',MotorSteps,'). OnTarget=False')
+                self.OnTarget = False
+        while MotorSteps != 0:
+            # If supporting microstepping. If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
+            # We can make a FULL step.
+            if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
+                if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary:
+                    # We have a long way to go, and we are at a safe point, so move a FULL STEP.
+                    # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
+                    MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
+                    self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
+                    #FullStepCount += 1
+                else:
+                    # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
+                    MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
+                    self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
+                    #MicroStepCount += 1
+            else: # We're not using microstepping, so we're just moving full steps.
+                MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
+                self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
+                #FullStepCount += 1
+            self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
+            for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
+                RPi.BufferInput() # Keep polling for input from the RPi.
+                RPi.WritePoll() # Keep sending data to RPi.
+            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
+        self.CheckOnTarget() # Are we actually pointing at the target?
+        if self.CurrentPosition != self.TargetPosition: # Did the motor reach intended position? (May not be the requested target if movement limits reached)
+            LogFile.Log("MoveMotor(" + self.MotorName + "): End. CurrentPosition (" + str(self.CurrentPosition) + ") is NOT TargetPosition (" + str(self.TargetPosition) + ")!")
+        StatusLed.Task('idle')
+
+    def MoveMotor_xxx(self):
         """ Move the motor to the new target position. Target must be defined before calling this.
             If this is handling a very large move, it may take some time, so it can also trigger
             sending MotorStatus messages back to the RPi. """
@@ -1348,10 +1424,6 @@ class steppermotor():
                 MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
                 self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
                 FullStepCount += 1
-            #if self.MotorName == 'azimuth': # *Q* Could be made an internal reference to 'self.StatusTimer.Due()'
-            #    self.SendMotorStatus() # Long slow moves would cause RPi to trigger a reset otherwise.
-            #elif self.MotorName == 'altitude':
-            #    self.SendMotorStatus() # Long slow moves would cause RPi to trigger a reset otherwise.
             self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
             for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
                 RPi.BufferInput() # Keep polling for input from the RPi.
@@ -1449,11 +1521,6 @@ Altitude = steppermotor('altitude')
 Altitude.SetPins(stepBCM=AltitudeStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AltitudeFaultBCM) # Direct control over Altitude motor.
 Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
 Motors = [Azimuth, Altitude] # Control over 'all' motors.
-# Report back which motors are configured.
-line = "defined motors "
-for i in Motors:
-    line += i.MotorName + ' '
-RPi.Write(line)
 
 class picosession():
     def __init__(self):
@@ -1647,11 +1714,17 @@ class memorymanager():
 MemMgr = memorymanager()
 
 print ('Starting...')
+# *Q* Following code could be merged/replaced by RPi.Reset() ?
 for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
 RPi.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
 RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
 RPi.Write('# circuitpython ' + Bootline) # Tell what version of circuitpython is in use.
 RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
+# Report back which motors are configured.
+line = "defined motors "
+for i in Motors:
+    line += i.MotorName + ' '
+RPi.Write(line)
 
 # This is the main processing loop.
 try:
