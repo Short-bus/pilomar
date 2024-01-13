@@ -76,9 +76,16 @@
 #          11.12.2023 Min/MaxAltitudeAngle initialisation was wrong. (GitHub Issue #38)
 #          18.12.2023 Version validation only considers first 2 elements.
 #                     SetMotorAngle() now states current motor angle.
+# 0.2.0    13.01.2024 GoToAngle, GoToTarget show progress during large moves.
+#                      
 
-VERSION = '0.1.2' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-ACCEPTABLECONTROLLERVERSIONS = ['0.0','0.1','0.2'] # Microcontroller versions that this will work with. Ignore patch level.
+# Version numbering scheme:
+#           aa.bb.cc
+#           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
+#           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
+#           cc = Bugfix, no feature changes. Will not require changes on RPi side.
+VERSION = '0.2.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+ACCEPTABLECONTROLLERVERSIONS = ['0.0','0.1','0.2','0.3'] # Microcontroller versions that this will work with. Ignore patch level.
 
 # Import required libraries
 from typing import Tuple # For type hinting.
@@ -1057,9 +1064,10 @@ if Parameters.HomeLat == None or Parameters.HomeLon == None:
     
 if Parameters.HomeLatVal < 0: # We're in the Southern Hemisphere. The software isn't tested for that.
     linelist = ["Home Latitude (" + str(Parameters.HomeLatVal) + ") is in the Southern Hemisphere.",
-                "Sorry, but the Pilomar software has not been validated for southern latitudes."]
-    textcolor.TextBox(linelist,fg=textcolor.WHITE,bg=textcolor.RED)
-    exit() # Quit the program.
+                "NOTE: Pi-lomar may perform an unwinding manoeuvre as targets pass through due North.",
+                "      This is normal behaviour, but will pause image capture while it happens."]
+    textcolor.TextBox(linelist,fg=textcolor.YELLOW,bg=textcolor.BLACK)
+    # exit() # Quit the program.
 if Parameters.HomeLatVal >= 90.0: # Things break down at the poles.
     linelist = ["Home Latitude (" + str(Parameters.HomeLatVal) + ") is the North Pole.",
                 "Please use the 0deg longitude line as due South."]
@@ -3276,6 +3284,7 @@ class motorcontrol(attributemaster): # 2 references.
         self.StatusMctlTimestamp = None # When did the Microcontroller send the latest status message?
         self.StatusLocalTimestamp = None # When did the RPi process the latest status message?
         self.MotorSpeed = None # Currently calculated motor speed (degrees/second).
+        self.MonitorMove = False # Set to True to enable text updates as moves are performed. False to suppress. GoToAngle(), HomePosition(), SetMotorAngle respect this.
         self.Restarted() # Make sure that status flags are reset for a 'new' unconfigured motor.
 
     def __del__(self):
@@ -3520,10 +3529,14 @@ class motorcontrol(attributemaster): # 2 references.
             prevangle = None # Monitor changes in angle. If it doesn't change for a while, consider something went wrong.
             prevangletime = NowUTC()
             # 3rd task is to wait for the motor to complete.
+            if self.MonitorMove: # Display movement progress.
+                print(NowHMS(),self.MotorName,Deg3dp(self.CurrentAngle,DegreeSymbol),textcolor.clearlineforward())
             while True:
                 if prevangle != self.CurrentAngle: # The motor has moved.
                     prevangle = self.CurrentAngle
                     prevangletime = NowUTC()
+                    if self.MonitorMove: # Display movement progress.
+                        print(textcolor.cursorup(),NowHMS(),self.MotorName,Deg3dp(self.CurrentAngle,DegreeSymbol),textcolor.clearlineforward())
                 if self.CompareAngles(self.CurrentAngle,newangle,ptolerance=2): # Sometimes there's a mathematical disagreement between microcontroller and this software. So allow a small tolerance when comparing angles.
                     # Move complete.
                     self.Log('motorcontrol.GoToAngle(', self.MotorName, '): CompareAngles considers position is within tolerance, move considered complete.',terminal=False)
@@ -4454,7 +4467,7 @@ class imagetracker(attributemaster): # 1 references.
         NewImageBuffer.New(height,width,imagetype='bgr',datatype=np.uint8)
         NewImageBuffer.FillColor(BGRBlack)
         # Match lists must be the same length.
-        if len(self.LatestStarMatchList) == len(self.TargetStarMatchList) and self.LatestStarMatchList != None and self.TargetStarMatchList != None:
+        if len(self.LatestStarMatchList) == len(self.TargetStarMatchList) and type(self.LatestStarMatchList) != type(None) and type(self.TargetStarMatchList) != type(None):
             # Mark the matched stars first, and an arrow linking the TARGET and LATEST locations.
             for i, lstar in enumerate(self.LatestStarMatchList): 
                 tstar = self.TargetStarMatchList[i]
@@ -6511,6 +6524,7 @@ def HomePosition(): # 2 references.
     looplimit = 50
     for i in MotorControls: # Handle each motor in turn.
         MainLog.Log("HomePosition: Homing ", i.MotorName, 'motor.',terminal=False)
+        i.MonitorMove = True # Display movement progress on the terminal.
         while i.CompareAngles(i.CurrentAngle,i.RestAngle) == False: # Repeat until the motor is in position.
             MainLog.Log("HomePosition:", i.MotorName, "motor from", Deg3dp(i.CurrentAngle) + DegreeSymbol, "to home", Deg3dp(i.RestAngle) + DegreeSymbol,terminal=True)
             i.GoToAngle(i.RestAngle)
@@ -6519,6 +6533,7 @@ def HomePosition(): # 2 references.
             if loopcounter >= looplimit: 
                 MainLog.Log("HomePosition:", i.MotorName, "After", looplimit, "attempts, motor still not homed. Abandoning the move at", Deg3dp(i.CurrentAngle) + DegreeSymbol, ".",level='error')
                 break
+        i.MonitorMove = False # Suppress movement progress on the terminal.
     print (textcolor.yellow("Done.") + textcolor.clearlineforward())
     MainLog.Log("HomePosition end",terminal=False)
     return True
@@ -6548,7 +6563,9 @@ def SetMotorAngle(motor_name=None): # 2 references.
                         print ("Out of range. Try again.")
                         continue # Restart loop.
                     # Value is acceptable, let's move the motor.
+                    i.MonitorMove = True
                     i.GoToAngle(v) # Set the new target position.
+                    i.MonitorMove = False
                     continue # Restart loop.
                 print ("'" + c + "' is not recognised. Try again.")
             print (i.MotorName,"is currently at",Deg3dp(i.CurrentAngle) + DegreeSymbol)
@@ -7910,11 +7927,14 @@ def GoToTarget(target_object): # 3 references.
                         targetangle = alt - i.BacklashAngle # Position the motor PAST the target so that the observation has to recover the situation, this will take up the slack in the gears.
                 if i.CompareAngles(i.CurrentAngle,targetangle) == False:
                     MainLog.Log("GoToTarget: Pre alignment of " + i.MotorName + " motor to allow for gear backlash. Moving to " + Deg3dp(targetangle,DegreeSymbol))
+                    i.MonitorMove = True # Display movement progress on the terminal.
                     temp = i.GoToAngle(targetangle) # Move the motor PAST the target position, so that it will have to reverse to get on target. This will take up the slack in the gears.
+                    i.MonitorMove = False # Do not display movement progress on the terminal.
                     if not temp: # Move failed.
                         MainLog.Log('GoToTarget: GoToAngle() call failed. Pre alignment of ' + i.MotorName + ' failed.',level='error')
                         return False # Failed!
             else: MainLog.Log('GoToTarget: No backlash adjustment required for ' + i.MotorName)
+
     # GoTo the target. 
     az, alt = Session.Target.AzAltDegrees() # What is the current position of the target?
     currentalt, currentaz = LastReportedAltAz() # What is the current position of the camera?
@@ -7927,7 +7947,9 @@ def GoToTarget(target_object): # 3 references.
             targetangle = alt # Position the motor ON the target.
         if i.CompareAngles(i.CurrentAngle,targetangle) == False: # There's a big enough position difference that it's worth moving the camera.
             MainLog.Log("GoToTarget: Target", i.MotorName, "from", Deg3dp(i.CurrentAngle,DegreeSymbol),"to",Deg3dp(targetangle,DegreeSymbol))
+            i.MonitorMove = True # Display movement progress on the terminal.
             temp = i.GoToAngle(targetangle) # Move the motor now.
+            i.MonitorMove = False # Do not display movement progress on the terminal.
             if not temp: # Move failed.
                 MainLog.Log('GoToTarget: GoToAngle() call failed. Alignment of ' + i.MotorName + ' failed (From angle',i.CurrentAngle,'to',Deg3dp(targetangle,DegreeSymbol),').',level='error')
                 MainLog.Log('GoToTarget: GoToAngle() call failed. Alignment of ' + i.MotorName + ' failed (From position',i.AngleToStep(i.CurrentAngle),'to',i.AngleToStep(targetangle),').',level='error')
@@ -9176,6 +9198,8 @@ def TrackingStatus():
     print("                 ",round(Parameters.TrackingExposureSeconds / 2,1),"s would capture fewer stars.")
     print("                 ",round(Parameters.TrackingExposureSeconds * 2,1),"s would capture more stars.")
     print(textcolor.blue("                     (TrackingExposureSeconds parameter)"))
+    
+    # Results of latest drift calculation.
     print(textcolor.white("Drift calculation"))
     sm_fg = OSW_TEXT_GOOD
     ltemp = len(DriftTracker.TargetStarMatchList)
@@ -9187,9 +9211,12 @@ def TrackingStatus():
     else:
         print("  Drift dx,dy,rot: NOT CALCULATED YET.")
     print(textcolor.white("Star generation/detection"))
+    
     # Star detection.
     print("  Enhance images:",Parameters.PrepImagesForTracking)
     print(textcolor.blue("                     (PrepImagesForTracking parameter)"))
+    
+    # Processing of the TARGET image.
     print("     Target image: Loaded",DriftTracker.TargetImage.ImageExists(),DriftTracker.TargetTimeStamp)
     BadThreshold = 50
     PoorThreshold = 70
@@ -9205,6 +9232,8 @@ def TrackingStatus():
           "Horiz",textcolor.fgbgcolor(hs_fg,textcolor.BLACK,str(hs)),
           "%, Vert",textcolor.fgbgcolor(vs_fg,textcolor.BLACK,str(vs)),
           "%, Area",textcolor.fgbgcolor(imgs_fg,textcolor.BLACK,str(imgs)),"%")
+          
+    # Processing of the LATEST image.          
     print("     Latest image: Loaded",DriftTracker.LatestImage.ImageExists(),DriftTracker.LatestTimeStamp)
     hs,vs,imgs = CalculateStarSpread(DriftTracker.LatestImage) # Calculate the spread of stars in the latest image.
     hs_fg = vs_fg = imgs_fg = OSW_TEXT_GOOD # What color to show for GOOD star spread percentages?
@@ -9214,7 +9243,7 @@ def TrackingStatus():
     elif vs < PoorThreshold: vs_fg = OSW_TEXT_POOR # Vertical star spread is POOR.
     if imgs < BadThreshold: imgs_fg = OSW_TEXT_BAD # Area star spread is BAD.
     elif imgs < PoorThreshold: imgs_fg = OSW_TEXT_POOR # Area star spread is POOR.
-    print("       Star count:",DriftTracker.TargetImage.StarCount,"Spread:",
+    print("       Star count:",DriftTracker.LatestImage.StarCount,"Spread:",
           "Horiz",textcolor.fgbgcolor(hs_fg,textcolor.BLACK,str(hs)),
           "%, Vert",textcolor.fgbgcolor(vs_fg,textcolor.BLACK,str(vs)),
           "%, Area",textcolor.fgbgcolor(imgs_fg,textcolor.BLACK,str(imgs)),"%")

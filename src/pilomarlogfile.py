@@ -178,18 +178,57 @@ class logfile(): # 2 references.
         for c in b:
             self.Log("logfile.RecordTraceback():",c,terminal=terminal)
 
+    def UniqueFilename(self,filename):
+        """ Given a filename, create a unique version of it. 
+            This appends '.1', '.2', '.3' etc to the filename until it finds
+            an unused name. """
+        fileelements = filename.split('.')
+        uniquefilename = filename + ".err" # Something's gone wrong if this makes it through!
+        available = False
+        counter = 0
+        while True:
+            counter += 1 # Try next available filename. 
+            if counter > 100:
+                self.Log("logfile.UniqueFilename(",filename,"). Exhausted allowed range of names.",level='error')
+                break
+            uniquefilename = fileelements[0] + "_" + str(counter) + '.' + fileelements[1] # bla/bla/bla/bla/filename_{count}.filetype
+            if os.path.exists(uniquefilename) == False: # The name is unused.
+                break
+        return uniquefilename
+
+    #def PackageSearchResultXXX(self,searchterms,ignorecase=False):
+    #    """ Generate a ZIP file with a selection of entries from the current log file. 
+    #        searchterms = the selection phrase for grep.
+    #            Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
+    #        Returns a ZIP filename. """
+    #    path = os.path.dirname(self.FileName)
+    #    timestamp = str(self.NowUTC())
+    #    for c in ['-',':','.',' ']:
+    #        timestamp = timestamp.replace(c,'')
+    #    timestamp = timestamp.split('+')[0]
+    #    resultfile = os.path.join(path,'result_' + timestamp + '.log')
+    #    zipfile = os.path.join(path,'result_' + timestamp + '.zip')
+    #    self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
+    #    if ignorecase:
+    #        # -a : Treat file as text.
+    #        # -i : ignore case.
+    #        cmd = 'egrep -a -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
+    #    else:
+    #        cmd = 'egrep -a "' + searchterms + '" ' + self.FileName + '>' + resultfile
+    #    self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
+    #    os.system(cmd)
+    #    cmd = 'zip ' + zipfile + ' ' + resultfile
+    #    self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
+    #    os.system(cmd)
+    #    return zipfile
+
     def PackageSearchResult(self,searchterms,ignorecase=False):
         """ Generate a ZIP file with a selection of entries from the current log file. 
             searchterms = the selection phrase for grep.
                 Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
             Returns a ZIP filename. """
-        path = os.path.dirname(self.FileName)
-        timestamp = str(self.NowUTC())
-        for c in ['-',':','.',' ']:
-            timestamp = timestamp.replace(c,'')
-        timestamp = timestamp.split('+')[0]
-        resultfile = os.path.join(path,'result_' + timestamp + '.log')
-        zipfile = os.path.join(path,'result_' + timestamp + '.zip')
+        resultfile = self.UniqueFilename(self.FileName)
+        zipfile = resultfile.split('.')[0] + '.zip'
         self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
         if ignorecase:
             # -a : Treat file as text.
