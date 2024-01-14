@@ -812,6 +812,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.MaxAltitudeAngle = min(self.GetParmVal('MaxAltitudeAngle',90),90) # Fixed Issue #38
         self.UseMicrostepping = self.GetParmVal('UseMicrostepping',False) # Do we let the motors use microstepping for fine position control at the cost of lower torque?
         self.MotorStatusDelay = self.GetParmVal('MotorStatusDelay',10) # Microcontroller should send motor status messages every 'xxx' seconds. (Don't overload UART comms!)
+        self.OptimiseMoves = self.GetParmVal('OptimiseMoves',False) # Can the motorcontroller optimise large moves? (ie switch direction if it's faster)
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
         # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
@@ -2723,7 +2724,7 @@ class microcontroller(attributemaster): # 1 references.
                 lines = ["Detected a connected USB device labelled " + str(dl) + ".",
                          "This looks like it's a microcontroller.",
                          " ",
-                         "The microcontroller will receive conflicting voltages via the",
+                         "The microcontroller could receive conflicting voltages via the",
                          "USB line  and the GPIO header . These may damage the devices.",
                          " ",
                          "For  safety ,  I will not  enable the  GPIO pin  which  provides  power  to the",
@@ -3620,7 +3621,7 @@ class motorcontrol(attributemaster): # 2 references.
         if configuredflag != self.MotorConfigured: 
             self.Log("motorcontrol.ReceiveStatus(",self.MotorName,"): Configured flag set to ",configuredflag,terminal=False)
         self.MotorConfigured = configuredflag # Update the configured flag.
-        if self.MotorConfigured: # Only believe the angle once the motor is configured, otherwise it's just defaults and may be wrong.
+        if self.MotorConfigured: # Only believe the angle once the motor is configured, otherwise it's just a default value and probably inaccurate.
             self.PreviousAngle = self.CurrentAngle # Store previous position.
             self.CurrentAngle = float(lineitems[8])
             self.StoreRecoveryAngle() # Record the latest position of the motor for restart/recovery later.
@@ -3644,8 +3645,8 @@ class motorcontrol(attributemaster): # 2 references.
     def SendConfig(self):
         """ Send configuration information from this motor image to the microcontroller
             where it will be loaded into the motor control there. 
-                configure motor 20210409090949 azimuth 180.0 45.0 315.0 0.5 -1 0.0005 0.01 0.0005
-                    0       1          2          3      4    5     6    7   8   9      10   11  """
+                configure motor 20210409090949 azimuth 180.0 45.0 315.0 0.5 -1 0.0005 0.01 0.0005 10 n n 
+                    0       1          2          3      4    5     6    7   8   9      10   11  12 13 14 """
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') begin',terminal=False)
         line = 'configure motor ' # Fields 0 & 1
         line += CleanDatetimeString(NowUTC()) + ' ' # Field 2 
@@ -3659,7 +3660,8 @@ class motorcontrol(attributemaster): # 2 references.
         line += str(self.SlowTime) + ' ' # Field 10: Send the SLOW motor pulse limit.
         line += str(self.TimeDelta) + ' ' # Field 11: Send the motor pulse acceleration unit.
         line += str(Parameters.MotorStatusDelay) + ' ' # Field 12: Set timer delay for sending motor status back to the RPi.
-        # line += BoolToString(Parameters.FaultSensitive) + ' ' # Field 13: When 'y' the microcontroller will respect the DRV8825 fault pin to block movement.
+        line += BoolToString(Parameters.FaultSensitive) + ' ' # Field 13: When 'y' the microcontroller will respect the DRV8825 fault pin to block movement.
+        line += BoolToString(Parameters.OptimiseMoves) + ' ' # Field 14: When 'y' the microcontroller can take shortcuts for large moves.
         Mctl.Write(line)
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') end',terminal=False)
         return True
