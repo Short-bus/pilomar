@@ -336,6 +336,7 @@ class logfile():
         self.Lines = []
         self.BufferSize = 0
         self.MaxLines = 20 # Do not store more than 20 lines due to memory constraints.
+        self.Overflows = 0 # How many times has the buffer filled?
         self.Clock = None
 
     def Log(self,line,*args):
@@ -353,6 +354,8 @@ class logfile():
             self.BufferSize += len(line)
         else:
             print("logfile.Log: Buffer is full. log message ignored until cleared.")
+            self.Overflows += 1
+            print("logfile.Log: Memory available",gc.mem_free(),"bytes.")
 
     def SendAll(self):
         """ Call this to send ALL the outstanding log entries. """
@@ -911,6 +914,7 @@ class steppermotor():
         self.ConfigEndTime = None
         self.StatusStartTime = None
         self.StatusEndTime = None
+        self.OptimiseMoves = False # When set to TRUE the motor is allowed to take a short-cut if a requested move is > 50% of the circumference.
 
     def ReportStamps(self):
         """ Report back start/end timestmaps for config and status methods. """
@@ -1209,8 +1213,8 @@ class steppermotor():
             All values are optional.
             Any value of 'none' is ignored.
 
-            configure motor 20231016085541 azimuth 130.492 0 360 0.0 -1 0.001 0.05 0.003 10 n
-                0       1         2           3       4    5  6   7  8   9     10    11  12 13
+            configure motor 20231016085541 azimuth 130.492 0 360 0.0 -1 0.001 0.05 0.003 10 n  n
+                0       1         2           3       4    5  6   7  8   9     10    11  12 13 14
                 
             """
         #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") start.")
@@ -1250,6 +1254,8 @@ class steppermotor():
                 self.StatusTimer = timer(self.MotorName,temp) # Set new repeat time for sending motor status messages back to the RPi
             if lc > 13 and lineitems[13].lower() != 'none': # Enable/disable fault sensitivity. DRV8825 can then abort an observation.
                 self.FaultSensitive = StringToBool(lineitems[13])
+            if lc > 14 and lineitems[14].lower() != 'none': # Enable/disable move optimisation.
+                self.OptimiseMoves = StringToBool(lineitems[14])
             self.MotorConfigured = True
             #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") success.")
         except Exception as e:
@@ -1313,7 +1319,7 @@ class steppermotor():
             time.sleep(self.WaitTime)
             self.StepBCM.SetValue(False) # value(0)
             time.sleep(self.WaitTime)
-        self.CurrentPosition += (self.StepDir * stepsize)
+        self.CurrentPosition = (self.CurrentPosition + (self.StepDir * stepsize)) % self.AxisStepsPerRev
         self.CurrentAngle = self.StepToAngle(self.CurrentPosition)
         if self.UseMicrostepping:
             if self.CurrentPosition % self.MicrostepRatio == 0: # We're on a full-step-boundary.
@@ -1339,7 +1345,8 @@ class steppermotor():
         inversemove = motorsteps
         if abs(motorsteps) > int(self.AxisStepsPerRev / 2): # We're going the long way round.
             inversemove = self.InvertSteps(motorsteps)
-            LogFile.Log("steppermotor.EfficiencyCheck(): Inefficient move:",self.CurrentPosition,"to",self.TargetPosition,motorsteps,"steps, suggest",inversemove)
+            LogFile.Log("steppermotor.EfficiencyCheck(): Inefficient move:",self.CurrentPosition,"to",self.TargetPosition,",",motorsteps,"steps, suggest",inversemove)
+            print("Inefficient move:",self.CurrentPosition,"to",self.TargetPosition,",",motorsteps,"steps, suggest",inversemove)
         return inversemove
 
     def MoveMotor(self):
@@ -1354,7 +1361,14 @@ class steppermotor():
         #     Does minangle/maxangle become redundant?
         #     Find any/all checks against MinAngle and MaxAngle too.
         MotorSteps = self.TargetPosition - self.CurrentPosition # How many steps to take?
-        _ = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
+        if self.OptimiseMoves: # Allowed to find shorter paths!
+            inversemove = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
+            if inversemove != MotorSteps: # We're changing direction for a short cut.
+                MotorSteps = inversemove
+                print("steppermotor.MoveMotor moving",MotorSteps,"steps.")
+                self.StepDir *= -1
+        else: # Must move as instructed, but can report if a shorter path exists.
+            _ = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
         self.WaitTime = self.SlowTime # Start with slow move pulses. This reduces each time we call MoveFullStep().
         #FullStepCount = 0
         #MicroStepCount = 0
@@ -1511,7 +1525,9 @@ CommonDirectionBCM.SetValue(False)
 CommonEnableBCM.SetDirection(digitalio.Direction.OUTPUT)
 CommonEnableBCM.SetValue(False)
 AzimuthFaultBCM.SetDirection(digitalio.Direction.INPUT)
+AzimuthFaultBCM.pull = digitalio.Pull.UP # Floating pins will toggle between FAULT and OK which causes chaos. Pull UP defaults to OK.
 AltitudeFaultBCM.SetDirection(digitalio.Direction.INPUT)
+AltitudeFaultBCM.pull = digitalio.Pull.UP
 
 # Configure Motors.
 Azimuth = steppermotor('azimuth')
@@ -1706,6 +1722,8 @@ class memorymanager():
         self.Poll()
 
     def Poll(self): # Check current memory and trigger memory garbage collection early if needed.
+        """ It looks like CircuitPython allocates memory in 2K chunks, it will error out if it cannot allocate 2K at a time. 
+            So run cleanup at 3K for safety. """
         self.currmem = gc.mem_free()
         if self.currmem < 3000:
             gc.collect()
