@@ -56,7 +56,7 @@
 #   - UART communication flow between RPi and microcontroller, including trajectory calculation and updates.
 
 # KNOWN ISSUES -----------------------------------------------------------------------------------------------------------------------------------------------------------
-# *Q* On rare occassions, the camera process can hang completely, it does not complete image capture, requiring a power cycle of the RPi.
+# *Q* On rare occasions, the camera process can hang completely, it does not complete image capture, requiring a power cycle of the RPi.
 #     The cause is not known, but the camera board stops responding. I have read online that power problems to the camera can cause this.
 #     This is detected and reported, but this does not recover the situation programmatically.
 #     Problem is more rare in builds from 2023 onwards.
@@ -381,7 +381,9 @@ def HRBytes(bytecount: int) -> str: # Move to textcolor? # 14 references.
 #
 ## ------------------------------------------------------------------------------------------------------
 
-def HRInteger(value: int, uom='', scale=1000, powers=['','K','M','G','T','P']) -> str:
+# ------------------------------------------------------------------------------------------------------
+
+def HRInteger(value: int, uom='', scale=1000, powers=['','K','M','G','T','P','E','Z','Y']) -> str:
     """ Turn a large number into human readable format.
         returns 1GHz, 5.3Mb etc.
         UOM is the unit of measure added to T,G,M,K etc.
@@ -665,7 +667,6 @@ osCmdCode = OSCommand.ExecuteCode # Shortcut point to the execution method which
 
 # ------------------------------------------------------------------------------------------------------
 
-
 def OSVersion():
     """ Return the version of operating system.
         Returns 
@@ -792,6 +793,7 @@ class parameters(attributemaster): # Common # 1 references.
                 self.Log("Loading parameters from file: " + self.ParamFileName)
                 self._Dictionary = json.load(f) # Overwrite the default parameter values with anything from file.
         # Pull parameter values from the dictionary, and update the dictionary with defaults if necessary.
+        self.BoardType = self.GetParmVal('BoardType',None) # Define alternative motorcontroller board type here. Changes behaviour of board/microcontroller.
         self.BatchSize = self.GetParmVal('BatchSize',100) # How many photos to take in a batch.
         self.ControlBatchSize = self.GetParmVal('ControlBatchSize',20) # How many images to capture in each 'control set' (DARK, BIAS etc). High values offer limited gains.
         self.ColorScheme = self.GetParmVal('ColorScheme','green') # What colour scheme to use? (green, blue, red, white)
@@ -818,7 +820,7 @@ class parameters(attributemaster): # Common # 1 references.
         # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
         self.LocalStarsMagnitude = self.GetParmVal('LocalStarsMagnitude',7.0) # Max magnitude when selecting local stars.
         self.ConstellationStarsMagnitude = self.GetParmVal('ConstellationStarsMagnitude',7.0) # Max magnitude when selecting stars in a constellation.
-        
+
         # The following parameters decide which types of images are stored.
         self.CameraSaveJpg = self.GetParmVal('CameraSaveJpg',True) # Save the jpg image from observations, but will strip out the embedded RAW data.
         self.CameraSaveDng = self.GetParmVal('CameraSaveDng',True) # Save the raw image data as .dng file.
@@ -838,6 +840,10 @@ class parameters(attributemaster): # Common # 1 references.
         self.DebugMode = self.GetParmVal('DebugMode',True) # In DebugMode ObservationRun does not display the status windows. This makes error messages easier to read.
         self.KeyboardScanDelay = self.GetParmVal('KeyboardScanDelay',2) # How many seconds between keyboard scans when running an observation?
         
+        # Warn if magnitude limits are incorrectly set.
+        if self.TargetMinMagnitude > self.LocalStarsMagnitude:
+            self.Log("parameters.__init__(): TargetMinMagnitude",self.TargetMinMagnitude,"is dimmer than stars listed in Hipparcos catalog (",self.LocalStarsMagnitude,").",level='warning',terminal=True)
+
         # The following parameters set position and localisation.
         self.LocalTZ = self.GetParmVal('LocalTZ','Europe/London') # What's the local timezone (pytz values). pytz.all_timezones() lists all available. Info only at present.
         self.HomeLat = self.GetParmVal('HomeLat',None) # Latitude of the observer.
@@ -1148,6 +1154,32 @@ def UTCtoLocal(dt: datetime) -> datetime:
         If the timezone is missing (naive) then nothing changes. """
     if dt.tzinfo != None: dt = dt.astimezone(pytz.timezone(Parameters.LocalTZ))
     return dt
+
+# ------------------------------------------------------------------------------------------------------
+
+def NowLocal(real=False) -> datetime: # Many references.
+    """ Get system clock in local timezone. 
+        Microcontroller and Skyfield are operated in UTC vales. 
+        All clock-times used in this program use the UTC timestamped clock.
+        But this can return the current timestamp in local time for user displays etc.
+        real=True means that no time offset is applied, you get the true realtime clock value.
+        real=False means that any time offset is applied, making the clock run at some other point in time.
+        """
+    dt = UTCtoLocal(NowUTC(real=real)) # Offset supported, Convert to local timezone.
+    if real == False and ClockOffset != None: # Can apply time offset.
+        dt = dt + timedelta(seconds=ClockOffset)
+    return dt
+
+# ------------------------------------------------------------------------------------------------------
+
+
+def LocaltoUTC(dt: datetime) -> datetime:
+    """ Convert a timezone aware datetime into UTC timezone. 
+        Will only convert the timezone if the value is timezone aware.
+        If the timezone is missing (naive) then nothing changes. """
+    if dt.tzinfo != None: dt = dt.astimezone(pytz.timezone('UTC'))
+    return dt
+
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -1500,7 +1532,7 @@ colordisplay.AddCDEntry(colwidth=87,startcol=1)
 colordisplay.AddCDEntry(colwidth=80,startcol=None)
 colordisplay.AddCDEntry(colwidth=55,startcol=None)
 
-ObservationStatusWindow = colordisplay(rows=14,cdlayout=0,name='OSW',fg=OSW_TEXT_FG,bg=OSW_TEXT_BG,titlefg=OSW_TITLE_FG,titlebg=OSW_TITLE_BG,title='Observation status ' + ProgramTitle.upper()) # This is the text window that displays current progress of an observation.
+ObservationStatusWindow = colordisplay(rows=14,cdlayout=0,name='OSW',fg=OSW_TEXT_FG,bg=OSW_TEXT_BG,titlefg=OSW_TITLE_FG,titlebg=OSW_TITLE_BG,title='Observation status ' + ProgramTitle.upper() + ' ' + VERSION) # This is the text window that displays current progress of an observation.
 ObservationStatusWindow.DrawBorder = True # Draw border around window.
 ObservationStatusWindow.SetBorderColors(OSW_BORDER_FG,OSW_BORDER_BG) # Set border colors.
 ObservationStatusWindow.ClipWindow = True # Clip the display if the terminal area is insufficient. This means we see at least something.
@@ -1700,6 +1732,10 @@ class astrosensor(attributemaster): # 1 references.
                          4 : {'width' : 1012, 'height' : 760, 'video' : True, 'image' : True, 'aspect' : '4:3', 'framerate' : {'min' : 50.1, 'max' : 120}, 'fov' : 'full', 'binning' : False, 'scaled' : True, 'maxseconds' : 10.2, 'raw' : False}}
         self.Log("AstroSensor: Size, " + str(self.PixelWidth) + "*" + str(self.PixelHeight),terminal=False)
 
+    def GetCentre(self):
+        """ Return the X and Y co-ordinates of the centre of the image. """
+        return int(round(self.PixelWidth / 2,0)), int(round(self.PixelHeight / 2,0))
+        
     def _SetMode(self,mode : int):
         """ Given a new mode, validate it and then update the dependent values in the sensor.
             There are dependencies in AstroCamera that should be updated afterwards, so this
@@ -1763,8 +1799,8 @@ class astrosensor(attributemaster): # 1 references.
 # ------------------------------------------------------------------------------------------------------
 
 FolderList={} # Dummy entry until FolderList is fully defined. astrocamera doesn't initialize otherwise. 
-FolderList["dataroot"] = "/home/pi/pilomar/data/" # Create default DATA pointer.
-FolderList["log"] = "/home/pi/pilomar/log/" # Create default LOG pointer.
+FolderList["dataroot"] = ProjectRoot + "/data/" # Create default DATA pointer.
+FolderList["log"] = ProjectRoot + "/log/" # Create default LOG pointer.
 
 class astrocamera(attributemaster): # 1 references.
     """ Object representing the camera assembly being used.
@@ -2107,7 +2143,7 @@ class astrocamera(attributemaster): # 1 references.
         for i,opt in enumerate(optlist):
             if opt == '-ss': # Found exposure time.
                 delay = float(optlist[i + 1]) * 2 # Find the microsecond exposure time and double it to mimic camera.
-                delay = delay / 1000000 # Convert from microseconds to seconds.
+                delay = delay / 1_000_000 # Convert from microseconds to seconds.
                 self.Log("astrocamera.FakeDelay : ",round(delay,1),"s ...",terminal=False)
                 break
         delaytimer = timer(period=delay) # Create timer.
@@ -2278,7 +2314,7 @@ class astrocamera(attributemaster): # 1 references.
         """ Make an observation. This is a LIGHT image of the actual object under observation. """
         self.Log("astrocamera.TakePhoto: Begin",terminal=False)
         ExposureMicroseconds = int(self.ExposureSeconds * 1000000)
-        self.SetImageType('light') # Tell the camera we are taking flat photos.
+        self.SetImageType('light') # Tell the camera we are taking light photos.
         FileRoot=FolderList.get('light') + 'light_'
         CameraOptions = ''
         CameraOptions += '-ex off ' # Exposure control off.
@@ -2540,7 +2576,7 @@ def DetectCamera(canenable=False,candisable=False): # 4 references.
     tempcmd = 'rm ' + filename
     _ = osCmd(tempcmd)
     tempcmd = 'raspistill -o ' + filename # Simple command to test the camera.
-    print("DetectCamera:",tempcmd)
+    MainLog.Log("DetectCamera:",tempcmd,terminal=False)
     templist = osCmd(tempcmd)
     if os.path.exists(filename): # file exists so assume camera is available.
         tempresult = True
@@ -2615,7 +2651,14 @@ if Parameters.CameraEnabled:
     else: MainLog.Log("NOTE: on-chip cleanup has not changed state.",terminal=True)
 else: 
     print (textcolor.red("Camera disabled"))
-    MainLog.Log("The program will generate simulated images instead.",terminal=True)
+    MainLog.Log("The program will generate simulated images instead.",terminal=False)
+    lines = ["The camera is disabled, therefore the program will generate simulated",
+             "images instead . The simulated images will show approximate  star and",
+             "target locations.",
+             "Simulated images may take longer to calculate  than a true photograph"
+             "would take . Therefore the  telescope  may gather 'light' images more",
+             "slowly than you would expect."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)         
 
 # ///////////////////////////////////////////////////////////////////////////////////
 # GPIO setup.
@@ -2741,7 +2784,7 @@ class microcontroller(attributemaster): # 1 references.
         if self.ResetPin != None:
             GPIO.setup(self.ResetPin, GPIO.OUT)
             if self.PoweredByUsb == False: # If no USB power, we're powering it via a GPIO signal.
-                # Never turn on 2 second power source to the microcontroller if it's already got USB power.
+                # Never turn on second power source to the microcontroller if it's already got USB power.
                 GPIO.output(self.ResetPin, GPIO.HIGH) # Makes sure the pin is HIGH, otherwise the microcontroller resets.
         self.DeviceFailure = False # Set to TRUE if device seems to be irrecoverably lost.
         self.ErrorWindow = None
@@ -2988,11 +3031,11 @@ class microcontroller(attributemaster): # 1 references.
                     self.LastRxTime = NowUTC() # Note when last receive activity occurred. 
                     self.ResetAttempts = 0 # We have activity, so clear the restart counter.
                     self.LinesReceived += 1 # Increment count of lines received. 
-                    #if self.CommsLog != None: self.CommsLog("UART>RxQueue",self.InputLine,terminal=False)
+
                     # If we are not currently running an observation, nothing is reading the queue, so flush anything too old.
                     while len(self.Lines) > Parameters.UartRxQueueLimit:
                         delline = self.Lines.pop(0) # Kill the oldest lines first.
-                        #if self.CommsLog != None: self.CommsLog("RxQueue discarded:",delline,terminal=False)
+
                 self.InputLine = '' # Start a fresh input line next time anything is received. 
             else: self.InputLine += response # Add the character to the input line we are constructing. 
             #Led1.Off()
@@ -3011,10 +3054,10 @@ class microcontroller(attributemaster): # 1 references.
                 cleanresult = result
             self.Log('RPi received: ' + cleanresult,terminal=False)
             if self.PrintComms: print(textcolor.cyan('RPi received: ' + cleanresult))
-            #if self.CommsLog != None: self.CommsLog('RxQueue>RPi:',result,terminal=False) # Record the conversation separately.
-            MctlRxWindow.Print(self.RemoveChecksum(result))
+
+            MctlRxWindow.Print(cleanresult)
             if self.ValidateChecksum(result): # Line is good.
-                result = self.RemoveChecksum(result)
+                result = cleanresult # self.RemoveChecksum(result)
                 if result == 'pico started' or result == 'controller started': 
                     self.RemoteRestarts += 1 # Record how many times the remote device reports a restart.
                     ErrorWindow.Print(NowHMS() + " " + result)
@@ -3060,14 +3103,19 @@ class microcontroller(attributemaster): # 1 references.
         self.uart.write(line.encode('utf-8')) # Send data in UTF-8 format. 
         self.LastTxTime = NowUTC() # Note that time of the last data sent. 
         #Led2.Off()
-        #if self.CommsLog != None: self.CommsLog("TxQueue>UART:",line,terminal=False)
+
 
     def ReadFlush(self):
         """ Clear the input buffer. Don't actually transmit it, because you may never reach the end if 
             new messages are appearing. Just clear and reset the internal buffer of messages received. """
-        self.Log('microcontroller.ReadFlush: Drop unprocessed messages received from microcontroller...',terminal=False)
-        self.Lines = [] # Empty the queue. 
-        self.InputLine = '' # Scrap any line currently being received and constructed.
+        self.Log('microcontroller.ReadFlush: Drop',len(self.Lines),'unprocessed messages received from microcontroller...',terminal=False)
+        if len(self.Lines) > 0:
+            for line in self.Lines:
+                self.Log('microcontroller.ReadFlush: Dropped line:',line,terminal=False)
+            self.Lines = [] # Empty the queue.
+        if len(self.InputLine) > 0:
+            self.Log('microcontroller.ReadFlush: Abandoned partly received input line (',self.InputLine,')',terminal=False)
+            self.InputLine = '' # Scrap any line currently being received and constructed.
         
     def WriteFlush(self,send=True):
         """ Make sure the output buffer is completely flushed. Timeout after a limited number of attempts.
@@ -3076,7 +3124,7 @@ class microcontroller(attributemaster): # 1 references.
             if send parameter is false, the write queue is flushed without sending anything further. """
         result = True
         if send: # We should try to send outstanding messages.
-            self.Log('Flushing microcontroller output queue (pending messages will be sent)...',terminal=False)
+            self.Log('Flushing microcontroller output queue (',len(self.WriteQueue),'pending messages will be sent)...',terminal=False)
             TryCount = 0
             self.WriteProhibited = True # Don't allow anything further to be added to the queue at the moment.
             while len(self.WriteQueue) > 0:
@@ -3084,12 +3132,12 @@ class microcontroller(attributemaster): # 1 references.
                 self.Log("WriteFlush: Queue currently",len(self.WriteQueue),"entries",terminal=False)
                 time.sleep(0.1) # Pause until the CommsLoop thread has cleared the buffer.
                 if TryCount >= 500:
-                    self.Log('Flush timeout. Maximum loops. Remaining messages will be dropped.',terminal=False)
+                    self.Log('Flush timeout. Maximum loops.',len(self.WriteQueue),'Remaining messages will be dropped.',terminal=False)
                     self.WriteQueue = [] # Delete any remaining messages in the queue.
                     result = False
                     break
             self.WriteProhibited = False # OK to write again to the write queue.
-        else: self.Log('Flushing microcontroller output queue (pending messages will be dropped)...',terminal=False)
+        else: self.Log('Flushing microcontroller output queue (',len(self.WriteQueue),'pending messages will be dropped)...',terminal=False)
         return result
 
     def SetLedStatus(self,status=True):
@@ -3127,7 +3175,7 @@ class microcontroller(attributemaster): # 1 references.
             self.WriteQueue.append(self.AddChecksum(line)) # Add to send queue with Checksum.
             self.Log('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line,terminal=False)
             if self.PrintComms: print(textcolor.yellow('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line))
-            #if self.CommsLog != None: self.CommsLog("RPi>TxQueue:",line,terminal=False)
+
 
     def CommsLoop(self,commandqueue): # Runs as own thread.
         """ This runs in its own thread, it just continually reads/writes
@@ -3136,7 +3184,7 @@ class microcontroller(attributemaster): # 1 references.
             You can send commands to this communication loop itself via the commandqueue queue.
             - Eg : 'stop' to shut down the loop completely. """
         self.Log('microcontroller.CommsLoop(): Start',terminal=False)
-        #if self.CommsLog != None: self.CommsLog('microcontroller.CommsLoop(): Start',terminal=False)
+
         prevloop = NowUTC()
         while True: # Loop until explicitly told to break.
             # Warn if the loop is running slowly.
@@ -3353,7 +3401,7 @@ class motorcontrol(attributemaster): # 2 references.
         self.LastSentTrajectoryData = None # Last trajectory data sent to the microcontroller. This can be re-transmitted to save time if the microcontroller asks again.
         self.StatusMctlTimestamp = None # When did the Microcontroller send the status message?
         self.StatusLocalTimestamp = None # When did the RPi process the status message?
-        self.PrevVoltageTimestamp = None # The timestamp of the last status message received from the motorcontroller.
+        #self.PrevVoltageTimestamp = None # The timestamp of the last status message received from the motorcontroller.
         self.PreviousAngle = None # Holds angle from previous status message.
         self.PreviousMctlTimestamp = None # Says when the previous angle was set.
 
@@ -3384,8 +3432,7 @@ class motorcontrol(attributemaster): # 2 references.
 
     def RestoreAngle(self):
         """ This searches for the last recorded position of the motor and restores that state. 
-            The last recorded position is stored in a file in the self.RecoveryFolder. 
-            It also loads the total running time of the motor (in seconds). """
+            The last recorded position is stored in a file in the self.RecoveryFolder. """
         filename = ''
         oldfiles = [] # List of recovery files, we'll delete the old ones.
         # Find all the position recovery files available. Read in time sequence due to filenaming. 
@@ -3614,7 +3661,8 @@ class motorcontrol(attributemaster): # 2 references.
         9: BoolToString(self.MotorConfigured) MotorConfigured
         10: BoolToString(self.OnTarget) Motor is on target.
         11: str(self.WaitTime) Current speed of motor.
-        12: str(VMot()) Current motor power supply voltage.
+        12: str(VMot()) Current motor power supply voltage. - Feature withdrawn, now always '0'.
+        13: Reason. Code explaining WHY the status message was sent.
                                                                        """
         lineitems = line.split(' ')
         configuredflag = StringToBool(lineitems[9]) # Is the motor configured?
@@ -4938,12 +4986,12 @@ def hipex_load_dataframe(fobj): # 1 references.
     return df
 
 # If Hipparcos data already cached, use that, otherwise load and prepare the data cache now.
-if os.path.exists(HipparcosCacheFile): # Does the cache file exist?
+if os.path.exists(HipparcosCacheFile): # A cache of the hipparcos data already exists, use it.
     MainLog.Log("Hipparcos data cache exists, using that.",terminal=True)
     HipparcosDf = pandas.read_pickle(HipparcosCacheFile)
     MainLog.Log("Hipparcos dataframe loaded",len(HipparcosDf),"stars from cache.",terminal=False)
     MainLog.Log("Hipparcos dataframe contains",list(HipparcosDf.columns),"columns.",terminal=False)
-else:
+else: # There is no Hipparcos cache on disc yet, it must be constructed.
     MainLog.Log("Hipparcos data cache does not exist yet. Generating it now...",terminal=True)
     lines = ["The full Hipparcos star catalog contains over 100000 stars.",
              "Pi-lomar is about to optimise this list and add some extra detail to speed things up later.",
@@ -6109,7 +6157,7 @@ def ChooseSatellite(prechosen=None): # 8 references.
         MainLog.Log("ChooseSatellite: Observation target input:" + Result,terminal=False)
         if Result not in AvailableTargets:
             if prechosen != None:
-                MainLog.Log("ChooseSatellite: Prechosen not " + str(prechosen) + " recognised. Ignored.",terminal=False)
+                MainLog.Log("ChooseSatellite: Prechosen '" + str(prechosen) + "' not recognised. Ignored.",terminal=False)
                 return None # Scrap the attempt.
             print (textcolor.red("'" + Result + "' is not a recognised target name. Try again."))
             Result = ""
@@ -7336,6 +7384,8 @@ def CreateTargetImage(color=False,MinMagnitude=None,astrotime=None,StarLimit=Non
             if NewTargetImage.OutOfBounds(TempStarX,TempStarY): # The star is off the edge of the image, ignore it.
                 continue # The star is off the edge of the image, ignore it.
             TempStarMagnitude = TempStarRec['magnitude'] # Note the brightness of the star.
+            if TempStarMagnitude > MinMagnitude: # Too dim
+                continue # The star is too dimp, ignore it.
             if color: # Colour images need star colour and represent the magnitude via the size of the star.
                 TempStarRadius = int(TempStarRec['starradius'])
                 TempStarColor = (int(TempStarRec['color_b']),int(TempStarRec['color_g']),int(TempStarRec['color_r']))
@@ -7360,7 +7410,7 @@ def CreateTargetImage(color=False,MinMagnitude=None,astrotime=None,StarLimit=Non
         for i,TempStarName in enumerate(['sun','mercury barycenter','venus barycenter','moon','mars barycenter','jupiter barycenter','saturn barycenter','uranus barycenter','neptune barycenter','pluto barycenter']):
             TempStarMagnitude = 0.0
             if TempStarMagnitude > MinMagnitude: # Too dim to show.
-                continue # Skip to next star.
+                continue # Skip to next planet.
             if color: # Color images try to be vaguelly realistic.
                 TempStarColor = PlanetColors[i]
                 TempStarRadius = PlanetRadii[i]
@@ -7561,7 +7611,7 @@ def CameraHandler(outboundqueue,inboundqueue): # 1 references.
         PrevTaskList = CameraInUse.CameraTasks # This will be restored if the camera receives an override task from the main loop. So we don't miss anything.
         CameraInUse.CameraTasks = CameraInUse.CameraTasks[1:] # Shift the task list ready for the next loop. 
         CameraInUse.CameraTasks.append(LoopTask)
-        CamLog.Log('CameraHandler: Loop task',LoopTask,terminal=False)
+        CamLog.Log('CameraHandler: Loop task:',LoopTask,terminal=False)
         
         # This will run through all queued commands in sequence before capturing images if allowed.
         # This is performed regardless of which task is being performed in this loop.
@@ -7764,7 +7814,8 @@ def CameraHandler(outboundqueue,inboundqueue): # 1 references.
         LoopDuration = (NowUTC() - LoopStartTimestamp).total_seconds()
         TimeAllocation[LoopTask] = LoopDuration + TimeAllocation.get(LoopTask,0.0)
         LoopCounter += 1
-        CamLog.Log("CameraHandler: Loop completed in",round(LoopDuration,2),"seconds",terminal=False)
+        if LoopTask != 'pause': # Record CPU usage for the latest task.
+            CamLog.Log("CameraHandler: Loop completed",LoopTask,"in",round(LoopDuration,2),"seconds",terminal=False)
         if AllocationTimer.Due(): # Report how much time has been spent on each type of task.
             CamLog.Log("CameraHandler: Completed loop",LoopCounter,terminal=False)
             totaltime = 0
@@ -7953,7 +8004,7 @@ def GoToTarget(target_object): # 3 references.
             temp = i.GoToAngle(targetangle) # Move the motor now.
             i.MonitorMove = False # Do not display movement progress on the terminal.
             if not temp: # Move failed.
-                MainLog.Log('GoToTarget: GoToAngle() call failed. Alignment of ' + i.MotorName + ' failed (From angle',i.CurrentAngle,'to',Deg3dp(targetangle,DegreeSymbol),').',level='error')
+                MainLog.Log('GoToTarget: GoToAngle() call failed. Alignment of ' + i.MotorName + ' failed (From angle',Deg3dp(i.CurrentAngle,DegreeSymbol),'to',Deg3dp(targetangle,DegreeSymbol),').',level='error')
                 MainLog.Log('GoToTarget: GoToAngle() call failed. Alignment of ' + i.MotorName + ' failed (From position',i.AngleToStep(i.CurrentAngle),'to',i.AngleToStep(targetangle),').',level='error')
                 return False # Failed!
         else: MainLog.Log('GoToTarget: Motor ' + i.MotorName + ' already on target.')
@@ -8151,7 +8202,7 @@ def ObservationRun(): # 1 references.
                         In debug mode the main display is disabled and ONLY error messages will appear on the terminal.
                         Activate debug mode in the startup parameters json file. 
                             'Parameters.DebugMode' : true, 
-                        It can also be done from the Miscellaneous Tools.
+                        It can also be done from the Miscellaneous Tools menu, or by pressing 'd' key during an observation.
 
         There are 4 threads operating at this point.
         - The main processing thread is this ObservationRun routine which has overall coordination and maintains the display/dashboard.
@@ -8909,12 +8960,26 @@ def FlushCommandQueue(): # 1 references. # For menu
 def MicrocontrollerLedsOff(): # 1 references. # For menu
     Parameters.MctlLedStatus = False
     SetGlobalLedStatus()
+    lines = ["Microcontroller LEDs are now off.",
+             " ",
+             "The RGB LED will remain off throughout operation.",
+             " ",
+             "This reduces the stray light within the",
+             "observatory dome."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
 
 # ------------------------------------------------------------------------------------------------------
 
 def MicrocontrollerLedsOn(): # 1 references. # For menu
     Parameters.MctlLedStatus = True
     SetGlobalLedStatus()
+    lines = ["Microcontroller LEDs are now on.",
+             " ",
+             "The RGB LED will be active throughout operation.",
+             " ",
+             "This increases the stray light within the",
+             "observatory dome."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9065,9 +9130,9 @@ def ProgramStatus(): # 1 references. # For menu
         What are the settings?
         What's the current position of the telescope? """
     listlines = []
-    temp = (" " + ProgramTitle.upper() + "   Currently: " + (str(NowUTC()).split('.')[0]) + " UTC")
+    temp = (" " + ProgramTitle.upper() + " " + VERSION + " " + (str(NowUTC()).split('.')[0]) + " UTC")
     if Session.DebugMode: # In debug mode, warn the user.
-        temp += ' (OBSERVATION DISPLAY IN DEBUG MODE!)'
+        temp += ' (DEBUG MODE)'
     listlines.extend([temp])
     listlines.extend(TargetStrings())
     listlines.extend([RiseSetString(Session.Target)])
@@ -9119,21 +9184,30 @@ def MonitorComms():
     print(textcolor.yellow("MonitorComms"))
     print("This will show communication traffic.")
     print("Press 'x' to return to the menu.")
-    if Mctl.PowerIsOn(): # Warn if the microcontroller is not powered. 
-        print(textcolor.green("The microcontroller power is ON."))
+    if Mctl.PowerIsOn() or Mctl.PoweredByUsb: # Warn if the microcontroller is not powered. 
+        print(textcolor.green("The microcontroller power is ON. Communication should be running."))
     else:
-        print(textcolor.red("The microcontroller is OFF."))
-    Mctl.StartMonitor()
+        print(textcolor.red("The microcontroller is OFF. No communication expected."))
+    Mctl.StartMonitor() # Turn on replication to the terminal.
     while True:
         keypress = Keyboard.Check().lower()
         if keypress == 'x': break
         time.sleep(0.5)
-    Mctl.EndMonitor()
+    Mctl.EndMonitor() # Turn off replication to the terminal.
 
 # ------------------------------------------------------------------------------------------------------
 
 def ShowMotorStatus():
     """ Show the status of all the motors. """
+    print(textcolor.yellow("Motor status"))
+    
+    print("    Motors enabled:",Parameters.MotorsEnabled)
+    print("  Backlash enabled:",Parameters.BacklashEnabled)
+    print("   Fault sensitive:",Parameters.FaultSensitive)
+    print(" Use microstepping:",Parameters.UseMicrostepping)
+    print("Motor status delay:",Parameters.MotorStatusDelay,"s")
+    print("    Optimise moves:",Parameters.OptimiseMoves)
+    print(" ")
     for i in MotorControls:
         i.ShowMotorStatus()
 
@@ -9319,8 +9393,10 @@ MctlMenuOptions = {
     'StartMessage':            {'label':'Start message handler',           'call':MenuStartMessage},
     'ShutdownMessage':         {'label':'Shutdown message handler',        'call':MenuShutdownMessage},
     'FlushCommandQueue':       {'label':'Flush command queue',             'call':FlushCommandQueue},
-    'ZipCommsLog':             {'label':'Zip comms log',             'call':ZipCommsLog},
-    'MonitorComms':            {'label':'Monitor communication',     'call':MonitorComms},
+    'ZipCommsLog':             {'label':'Zip comms log',                   'call':ZipCommsLog},
+    'MonitorComms':            {'label':'Monitor communication',           'call':MonitorComms},
+    'MicrocontrollerLedsOn':   {'label':'Microcontroller LEDs on',         'call':MicrocontrollerLedsOn},
+    'MicrocontrollerLedsOff':  {'label':'Microcontroller LEDs off',        'call':MicrocontrollerLedsOff},
     'MicrocontrollerPowerOn':  {'label':'Microcontroller GPIO power ON',   'call':Mctl.PowerOn},
     'MicrocontrollerPowerOff': {'label':'Microcontroller GPIO power OFF',  'call':Mctl.PowerOff}
 }
@@ -9331,8 +9407,8 @@ MiscMenuOptions = {
     'ShowParameters':         {'label':'Show parameters',           'call':ShowParameters},
     'EditParameters':         {'label':'Edit parameters',           'call':EditParameters},
     'ReloadParameters':       {'label':'Reload parameters',         'call':ReloadParameters},
-    'SetLocalTZ':             {'label':'Set local timezone',        'call':DefineLocalTZ},
     'TrackingStatus':         {'label':'Tracking status',           'call':TrackingStatus},
+    'SetLocalTZ':             {'label':'Set local timezone',        'call':DefineLocalTZ},
     'ZipTrajectories':        {'label':'Zip trajectory log',        'call':ZipTrajectoryLog},
     'ShowFolderList':         {'label':'Show folder list',          'call':ShowFolderList},
     'EditTargetHistory':      {'label':'Edit target history',       'call':EditTargetHistory},
