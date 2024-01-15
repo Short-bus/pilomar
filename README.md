@@ -7,3 +7,6 @@ This uses Python3 on the Raspberry Pi and CircuitPython on a connected Pimoroni 
 
 The physical telescope, mechanism and dome is buildable from the Instructables page.
 [https://www.instructables.com/Pi-lomar-3D-Printed-Working-Miniature-Observatory-/]
+
+The wiki for pi-lomar is here.
+[https://github.com/Short-bus/pilomar/wiki]
