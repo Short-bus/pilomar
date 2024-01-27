@@ -2371,6 +2371,15 @@ class proceduremenu():
             if answer == '?': # Refresh the menu.
                 self.Draw() # Refresh the menu.
                 continue
+            if answer == ">": # Increase columns in display.
+                self.Columns += 1
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == "<": # Increase columns in display.
+                self.Columns -= 1
+                self.Columns = max(self.Columns,1) # must be at least 1 column.
+                self.Draw() # Refresh the menu.
+                continue
             if '?' in answer: # User wants help about an option.
                 self.ProcessHelpRequest(answer)
                 continue # Prompt again.
@@ -2550,6 +2559,15 @@ class optionmenu():
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
             if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
             if answer == '?': # Refresh the menu.
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == ">": # Increase columns in display.
+                self.Columns += 1
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == "<": # Increase columns in display.
+                self.Columns -= 1
+                self.Columns = max(self.Columns,1) # must be at least 1 column.
                 self.Draw() # Refresh the menu.
                 continue
             if '?' in answer: # User wants help about an option.

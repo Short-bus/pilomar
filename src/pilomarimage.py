@@ -1070,7 +1070,8 @@ class pilomarimage():
         return True
 
     def _initialize(self):
-        """ """
+        """ Create default values for the object. 
+            This creates initial values for new instances, and also clears them out if you want to reset an existing one. """
         self.ImageBuffer = None # This is the actual OpenCV / Numpy image buffer.
         self.ImageMask = None # Array identifying which cells are occupied and which to ignore.
         self.ImageAccumulator = None # Array of cumulative image values. (For live stacking)
@@ -1098,6 +1099,33 @@ class pilomarimage():
         self.NextTextX = None # When text is printed, this holds the 'x' position of the next line of text if you want to print a block of text.
         self.PrevTextY = None # When text is printed, this holds the 'y' position of the next line of text if you want to print a block of text going UPWARDS.
         self.PrevTextX = None # When text is printed, this holds the 'x' position of the next line of text if you want to print a block of text goind UPWARDS.
+        # Text collision avoidance...
+        self.TextList = [] # When text is printed, this holds the co-ordinates of each block of text added [[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],...]
+        self.AvoidTextCollisions = False # When TRUE, new text is only created if it doesn't overlap existing text.
+        
+    def TextCollision(self,fromx,fromy,tox,toy):
+        """ Return TRUE if proposed text area collides with an existing one. """
+        result = False
+        if self.AvoidTextCollisions: # Collision avoidance is active.
+            fromx, tox = min(fromx,tox), max(fromx,tox) # Make sure FROM is less than TO
+            fromy, toy = min(fromy,toy), max(fromy,toy)
+            for items in self.TextList: # Go through existing text items.
+                ifx = items[0] # Pull co-ordinates.
+                ify = items[1]
+                itx = items[2]
+                ity = items[3]
+                if (tox < ifx or fromx > itx or toy < ify or fromy > ity):
+                    # Right side of proposed text is < left side of existing text
+                    # Left side of proposed text is > right side of existing text
+                    # Top of proposed text is < bottom of existing text
+                    # Bottom of proposed text is > top of existing text
+                    pass # No collision.
+                else: # Collision!
+                    result = True
+                    break
+            if not result: # Text does not collide, we'll at it to the list of allowed text.
+                self.TextList.append([fromx,fromy,tox,toy])
+        return result
 
     def CalculateStarSpread(self):
         """ Calculate an approximation for the % of the frame that contains stars. 
@@ -1547,7 +1575,6 @@ class pilomarimage():
     def New(self,height,width,imagetype='bgr',datatype=np.uint8):
         """ Create a new empty ImageBuffer. """
         if self.Log != None: self.Log("pilomarimage",self.Name,".New(",height,width,imagetype,datatype,")",terminal=False)
-        # *Q* TODO: Warn if the image is too large, it won't save to disk. You'll just get an empty file.
         if not imagetype in pilomarimage.IMAGETYPES:
             if self.Log != None: self.Log("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
             else: print("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES)
@@ -2522,21 +2549,28 @@ class pilomarimage():
             y = int(fromy + ydim) - ybase
         else: 
             y = fromy - ybase # Test is above the location.
-        if bgcolor != None: # Draw background under the text.
-            bgcolor = self.SafeColor(bgcolor)
-            if border != None: b = border
-            else: b = 0
-            self.FillRectangle((x - b,y + ybase + b),(x + xdim + b,y - ydim + ybase - b),color=bgcolor)
-        if border != None: #Draw a border around the text.
-            self.DrawRectangle((x - border,y + ybase + border),(x + xdim + border,y - ydim + ybase - border),color=color,thickness=thickness)
-        # Store where the 'next' line of text would go if we're printing multiple lines. (Text must remain same size!)
-        self.ImageBuffer = cv2.putText(self.ImageBuffer,text,self.OrientCoord((x,y)),self.Font,size,color,thickness,lineType=cv2.LINE_AA)
+        if border != None: b = border
+        else: b = 0
+        if self.TextCollision(x - b,y + ybase + b,x + xdim + b,y - ydim + ybase - b): # This would collide with existing text, so don't add it.
+            #self.DrawRectangle((x - b,y + ybase + b),(x + xdim + b,y - ydim + ybase - b),color=self.SafeColor(pilomarimage.BGROrangeRed),thickness=thickness)
+            OK2Draw = False # It's not safe to draw.
+        else:
+            OK2Draw = True # It's safe to draw.
+        if OK2Draw: # Proceed with the drawing.
+            if bgcolor != None: # Draw background under the text.
+                bgcolor = self.SafeColor(bgcolor)
+                self.FillRectangle((x - b,y + ybase + b),(x + xdim + b,y - ydim + ybase - b),color=bgcolor)
+            # We're OK to add the text at this point.
+            if border != None: #Draw a border around the text.
+                self.DrawRectangle((x - border,y + ybase + border),(x + xdim + border,y - ydim + ybase - border),color=color,thickness=thickness)
+            # Store where the 'next' line of text would go if we're printing multiple lines. (Text must remain same size!)
+            self.ImageBuffer = cv2.putText(self.ImageBuffer,text,self.OrientCoord((x,y)),self.Font,size,color,thickness,lineType=cv2.LINE_AA)
+            self.ActionList.append(['addtext',text,fromx,fromy,color,size,thickness,hjust,vjust])
+            self.ModifiedTimestamp = self.Now()
         self.NextTextX = fromx # If printing multiple lines of text, this is the start point for the next line if you're printing downwards.
-        self.NextTextY = fromy + ydim # If printing multiple lines of text, this is the start point for the next line if you're printing downwards.
+        self.NextTextY = fromy + ydim + 1 # If printing multiple lines of text, this is the start point for the next line if you're printing downwards.
         self.PrevTextX = fromx # If printing multiple lines of text, this is the start point for the previous line if your printing upwards.
-        self.PrevTextY = fromy - ydim # If printing multiple lines of text, this is the start point for the previous line if your printing upwards.
-        self.ActionList.append(['addtext',text,fromx,fromy,color,size,thickness,hjust,vjust])
-        self.ModifiedTimestamp = self.Now()
+        self.PrevTextY = fromy - ydim - 1 # If printing multiple lines of text, this is the start point for the previous line if you're printing upwards.
         return True
 
     def AddAngleText(self,text,fromx,fromy,color=None,size=1.0,thickness=None,hjust='l',vjust='t',border=None,bgcolor=None,angle=90):

@@ -9,7 +9,7 @@
 # - NGC (New General Catalog) data is based upon the Saguaro Astronomy Club Database version 8.1
 # - The MESSIER catalog is gathered from multiple sources.
 # - The MeteorShower list is based upon the Wikipedia list (2021).
-# - Space station data comes from the celestrak.org website (using NORAD public data)
+# - Space station data comes from the celestrak.org website (using NORAD public data).
 
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 # OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
@@ -32,7 +32,7 @@
 # - DRV8825 stepper motor driver chips.
 # - Raspberry Pi High Quality Camera Sensor V1.0
 # - Raspberry Pi 16mm 'telephoto' lens.
-# - - You can use other lenses, the program will generally try to adapt to the lens length defined in the parameter file, do not exceed 50mm!
+# - - You can use other lenses, the program will generally try to adapt to the lens length defined in the parameter file, do not exceed 50mm.
 
 # Recommended exposures.
 # = Full Moon = 1e-6 seconds
@@ -365,21 +365,6 @@ def HRBytes(bytecount: int) -> str: # Move to textcolor? # 14 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-#def HRHertz(hertz: int) -> str: # Move to textcolor? # 1 references.
-#    """ Turn a large number into human readable format.
-#        returns 1GHz etc. """
-#    try:
-#        if hertz >= (1000 ** 4): line = str(round(hertz / (1000 ** 4),1)) + "THz"
-#        elif hertz >= (1000 ** 3): line = str(round(hertz / (1000 ** 3),1)) + "GHz"
-#        elif hertz >= (1000 ** 2): line = str(round(hertz / (1000 ** 2),1)) + "MHz"
-#        elif hertz >= (1000 ** 1): line = str(round(hertz / (1000 ** 1),1)) + "KHz"
-#        else: line = str(hertz) + "Hz"
-#    except Exception as e:
-#        print(e) # Trap all the exception information in the main log file.
-#        raise Exception("HRHertz() failed.") from e # Continue with regular exception stack.
-#    return line
-#
-## ------------------------------------------------------------------------------------------------------
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -656,6 +641,8 @@ print("Camera log to", CamLogFileName)
 CamLog = logfile(CamLogFileName,clockoffset=ClockOffset) # Create a CAMERA specific log file. (This runs in separate thread, unsure if logging would be thread-safe.)
 
 MainLog.Log("Python version:",sys.version,terminal=False)
+MainLog.Log("Main: ReloadData",ReloadData,terminal=False) # Record that 'reload' has been triggered.
+
 MainLog.Log("Startup parameters:", RunArgs,terminal=False)
 HistoryFile = ProjectRoot + '/data/' + ProgramTitle + '_sessions.txt' # Chosen observation targets and settings are stored in this file.
 
@@ -728,7 +715,7 @@ print('Done.')
 # Log details about the environment.
 MainLog.Log("Skyfield version:", SkyfieldVersion, terminal=False)
 if SkyfieldVersion[0] > 1 or SkyfieldVersion[1] > 39:
-    MainLog.Log("Pilomar is developed with Skyfield version 1.39: This version",str(SkyfieldVersion[0]) + "." + str(SkyfieldVersion[1]),"may not be compatible.",level='warning')
+    MainLog.Log("Pilomar is developed with Skyfield version 1.39: This version",str(SkyfieldVersion[0]) + "." + str(SkyfieldVersion[1]),"may not be compatible.",level='warning',terminal=False)
 
 textcolor.GetTermType()
 MainLog.Log("Terminal type:", textcolor.TermType, textcolor.Mode,terminal=False)
@@ -799,7 +786,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.ColorScheme = self.GetParmVal('ColorScheme','green') # What colour scheme to use? (green, blue, red, white)
         
         # The following parameters control hardware features.
-        self.MotorsEnabled = self.GetParmVal('MotorsEnabled',True) # Are the motors to be powered on?
+        #self.MotorsEnabled = self.GetParmVal('MotorsEnabled',True) # Are the motors to be powered on?
         self.CameraEnabled = self.GetParmVal('CameraEnabled',True) # Is the camera on?
         self.DisableCleanup = self.GetParmVal('DisableCleanup',True) # Set to TRUE to disable the on-chip cleanup. (More pure RAW image is captured.)
         self.BacklashEnabled = self.GetParmVal('BacklashEnabled',False) # ENABLE to let the motors make extra moves to cope with gear backlash.
@@ -808,13 +795,40 @@ class parameters(attributemaster): # Common # 1 references.
         self.ObservationResetsMctl = self.GetParmVal('ObservationResetsMctl',False) # Force a reset of the microcontroller each time a new ObservationRun begins?
         self.MctlResetPin = self.GetParmVal('MctlResetPin',4) # Which RPi4 GPIO pin is used to RESET the microcontroller?
         self.UartRxQueueLimit = self.GetParmVal('UartRxQueueLimit',50) # How many messages can be held in the input queue from the Microcontroller? Kill older entries.
+        # Azimuth motor parameters.
         self.MinAzimuthAngle = self.GetParmVal('MinAzimuthAngle',0)
         self.MaxAzimuthAngle = min(self.GetParmVal('MaxAzimuthAngle',360),360)
+        self.AzimuthGearRatio = self.GetParmVal('AzimuthGearRatio',240)
+        self.AzimuthMotorStepsPerRev = self.GetParmVal('AzimuthMotorStepsPerRev',400)
+        self.AzimuthMicrostepRatio = self.GetParmVal('AzimuthMicrostepRatio',1) 
+        self.AzimuthRestAngle = self.GetParmVal('AzimuthRestAngle',180.0)
+        self.AzimuthBacklashAngle = self.GetParmVal('AzimuthBacklashAngle',0.0)
+        self.AzimuthOrientation = self.GetParmVal('AzimuthOrientation',-1)
+        self.AzimuthLimitAngle = self.GetParmVal('AzimuthLimitAngle',None) # Set motion limit for rotation.
+        # Altitude motor parameters.
         self.MinAltitudeAngle = self.GetParmVal('MinAltitudeAngle',0) # Fixed Issue #38
         self.MaxAltitudeAngle = min(self.GetParmVal('MaxAltitudeAngle',90),90) # Fixed Issue #38
-        self.UseMicrostepping = self.GetParmVal('UseMicrostepping',False) # Do we let the motors use microstepping for fine position control at the cost of lower torque?
+        self.AltitudeGearRatio = self.GetParmVal('AltitudeGearRatio',240)
+        self.AltitudeMotorStepsPerRev = self.GetParmVal('AltitudeMotorStepsPerRev',400)
+        self.AltitudeMicrostepRatio = self.GetParmVal('AltitudeMicrostepRatio',1)
+        self.AltitudeRestAngle = self.GetParmVal('AltitudeRestAngle',0.0)
+        self.AltitudeBacklashAngle = self.GetParmVal('AltitudeBacklashAngle',0.0)
+        self.AltitudeOrientation = self.GetParmVal('AltitudeOrientation',-1)
+        self.AltitudeLimitAngle = self.GetParmVal('AltitudeLimitAngle',None) # Set motion limit for rotation.
+
+        #self.UseMicrostepping = self.GetParmVal('UseMicrostepping',False) # Do we let the motors use microstepping for fine position control at the cost of lower torque?
         self.MotorStatusDelay = self.GetParmVal('MotorStatusDelay',10) # Microcontroller should send motor status messages every 'xxx' seconds. (Don't overload UART comms!)
         self.OptimiseMoves = self.GetParmVal('OptimiseMoves',False) # Can the motorcontroller optimise large moves? (ie switch direction if it's faster)
+        if self.OptimiseMoves: # If allowed to optimise moves, warn the user.
+            lines = [
+               "OptimiseMoves parameter is enabled.",
+               "The telescope has more  flexibility  about how it moves.",
+               "Take care that continuous rotation in the same direction",
+               "may eventually twist the power cables.",
+               "It is  recommended  to check the cables are untangled at",
+               "the start of each observation session."               
+            ]
+            textcolor.TextBox(lines,fg=textcolor.WHITE,bg=textcolor.ORANGERED1)
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
         # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
@@ -833,6 +847,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.TrackingExposureSeconds = self.GetParmVal('TrackingExposureSeconds',5.0) # How long is the exposure when capturing a tracking photo. It must be standardised rather than using the variable 'light' image exposure time.
         self.UseTracking = self.GetParmVal('UseTracking',True) # TRUE = Use image tracking. FALSE = No tracking.
         self.PrepImagesForTracking = self.GetParmVal('PrepImagesForTracking',False) # TRUE = latest image is simplified. FALSE = latest image is used as is.
+        self.GeneratePreview = self.GetParmVal('GeneratePreview',True) # TRUE = Preview images are generated periodically, and can be turned into AVI file when observation ends.
         self.InitialGoTo = self.GetParmVal('InitialGoTo',True) # Perform initial GOTO before downloading the trajectory. (Eases comms with microcontroller.)
         self.TargetInclusionRadius = self.GetParmVal('TargetInclusionRadius',15) # Angle (radius) for inclusion of neighbouring stars when generating target image.
         self.TargetMinMagnitude = self.GetParmVal('TargetMinMagnitude',7.0) # Minimum magnitude for stars to display. At a 2 second exposure, Magnitude 5.0 is a good value, at 5 seconds, Mag 9, over 10 seconds, Mag 10 is about as good as it gets.
@@ -862,12 +877,16 @@ class parameters(attributemaster): # Common # 1 references.
         self.MarkupInterval = self.GetParmVal('MarkupInterval',300) # How often do we generate a preview image (seconds).
         self.MarkupShowLabels = self.GetParmVal('MarkupShowLabels',True) # Add labels to markup images, such as locations.
         self.MarkupShowNames = self.GetParmVal('MarkupShowNames',True) # Add names to markup images, such as star names.
+        self.MarkupStarLabelLimit = self.GetParmVal('MarkupStarLabelLimit',100) # Maximum number of star labels to add to the image. Keep it readable.
+        self.MarkupAvoidCollisions = self.GetParmVal('MarkupAvoidCollisions',False) # Does image markup avoid text overlaps?
         
         # The following parameters describe the camera and lens.
         self.LensLength = self.GetParmVal('LensLength',16.0) # Focal length of lens
         self.LensHorizontalFov = self.GetParmVal('LensHorizontalFov',21.8) # Degrees FoV horizontally
         self.LensVerticalFov = self.GetParmVal('LensVerticalFov',16.4) # Degrees FoV vertically.
         self.SensorType = self.GetParmVal('SensorType','imx477') # Sensor type. 
+        self.IRFilter = self.GetParmVal('IRFilter',True) # Is Infra Red filter fitted?
+        self.PollutionFilter = self.GetParmVal('PollutionFilter',False) # Is light pollution filter fitted?
         
         # The following parameters dictate how the trajectory is calculated for the motorcontroller.
         self.TrajectoryWindow = self.GetParmVal('TrajectoryWindow',1200) # How many seconds into the future should the motor trajectory last?
@@ -892,7 +911,7 @@ class parameters(attributemaster): # Common # 1 references.
         self.SetColorScheme(self.ColorScheme)
 		
         self.ScanForMeteors = self.GetParmVal('ScanForMeteors',True) # Scan light images for streaks, report them if found.
-        self.MinSatelliteAltitude = self.GetParmVal('MinSatelliteAltitude',30) # Satellite's are only considered to RISE if they will culminate above this altitude. (Else to0 brief and low to see)
+        self.MinSatelliteAltitude = self.GetParmVal('MinSatelliteAltitude',30) # Satellite's are only considered to RISE if they will culminate above this altitude. (Else too brief and low to see)
         
     def GetParmVal(self,name,default):
         """ Get a value from the parameter file. 
@@ -1081,7 +1100,7 @@ if Parameters.HomeLatVal >= 90.0: # Things break down at the poles.
     textcolor.TextBox(linelist,fg=textcolor.WHITE,bg=textcolor.RED)
 
 # Create global timers.
-PreviewTimer = timer(period=Parameters.MarkupInterval) # ObservationRun will generate a Preview image every 180 seconds. 
+PreviewTimer = timer(period=Parameters.MarkupInterval) # ObservationRun will generate a Preview image every nnn seconds. 
 
 # Colour scheme for displays.
 MENU_TITLE_FG = Parameters.MenuTitleFG
@@ -1498,14 +1517,17 @@ def CreateFolderList(campaign_name,exposure=None): # 9 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-def AskYesNo(text,default=True): # 7 references.
+def AskYesNo(text,default=True,fg=None,bg=None): # 7 references.
     """ Ask any question that needs a simple Y/N answer.
         Returns logical value ('yes' or 'true' returns True, 'no' or 'false' returns False)
         Returns default value if user just presses ENTER. 
         Ignores 2nd and subsequent characters.
         Rejects all other input. """
     while True: # Loop until a satisfactory answer is given.
-        temp = input(textcolor.cyan(text.strip() + " ")) # Python3
+        if fg == None: # Use default color.
+            temp = input(textcolor.cyan(text.strip() + " ")) # Ensure 1 character space between text and response cursor.
+        else:
+            temp = input(textcolor.fgbgcolor(fg,bg,text.strip() + " "))
         if len(temp) == 0:
             result = default
             break
@@ -1539,7 +1561,7 @@ ObservationStatusWindow.ClipWindow = True # Clip the display if the terminal are
 ObservationStatusWindow.PlaceString('           Target: [TARGET                                                           ]',row=1,col=0)
 ObservationStatusWindow.PlaceString('   Session folder: [FOLDER                                                           ]',row=2,col=0)
 ObservationStatusWindow.PlaceString('   Tracking clock: [CLOCK                    ]UTC  Duration: [DURATION         ]      ',row=3,col=0)
-ObservationStatusWindow.PlaceString('Storage available: [STORAGE               ]  Motors enabled: [MEN ]                   ',row=5,col=0)
+ObservationStatusWindow.PlaceString('Storage available: [STORAGE               ]                                           ',row=5,col=0)
 ObservationStatusWindow.PlaceString('   Camera Enabled: [CEN ] Exposure: [EXP         ]                                    ',row=6,col=0)
 ObservationStatusWindow.PlaceString('   OnChip cleanup: [OCC ]                      Control mode: [CMODE           ]       ',row=7,col=0)
 ObservationStatusWindow.PlaceString('    Target status: [TSTATUS] [TSDESC                                                 ]',row=8,col=0)
@@ -1813,6 +1835,8 @@ class astrocamera(attributemaster): # 1 references.
         self.TrackingExposureSeconds = trackingexposure # Tracking photos are always 5 second exposure.
         self.PixelsPerFovDegreeWidth = 0 # Set by ModeChange() below.
         self.PixelsPerFovDegreeHeight = 0 # Set by ModeChange() below. 
+        self.PixelFovWidth = 0 # Set by ModeChange() below. # Field of view of an individual pixel (very approximate).
+        self.PixelFovHeight = 0 # Set by ModeChange() below.
         self.SecondsPerPixel = 0.0 # Set by ModeChange() below. Specifies how long an object takes to traverse one pixel of an image.
         self.ModeChange() # Set values based upon sensor mode. 
         self.LastImageDateTime = None # When was the latest image taken? # *Q* How widely is this attribute used?
@@ -1836,6 +1860,15 @@ class astrocamera(attributemaster): # 1 references.
         self.RxCount = 0 # Number of messages received by camera thread.
         self.TxCount = 0 # Number of messages sent by camera thread.
 
+    def PixelFoV(self):
+        """ Return the approximate Field Of View of a single pixel.
+            This measure is useful for calibrating the tolerance of trajectory segments. """
+        if self.PixelsPerFovDegreeWidth != 0: self.PixelFovWidth = 1 / self.PixelsPerFovDegreeWidth
+        else: self.PixelFovWidth = 0
+        if self.PixelsPerFovDegreeHeight != 0: self.PixelFovHeight = 1 / self.PixelsPerFovDegreeHeight
+        else: self.PixelFovHeight = 0
+        self.Log("astrocamera.PixelFoV (w/h)", self.PixelFovWidth, self.PixelFovHeight,terminal=False)
+
     def SetObservationParameters(self):
         """ Choose which parameter settings to apply to the observation about to begin.
             These are based upon the general parameter settings, but are overridden 
@@ -1854,8 +1887,11 @@ class astrocamera(attributemaster): # 1 references.
         if Session.Target.ObjectType in ['meteor']: 
             CameraWindow.Print(NowHMS() + " No preview's generated for " + Session.Target.ObjectType + " recordings.")
             self.Log("astrocamera.SetObservationParameters No preview's generated for", Session.Target.ObjectType, "recordings.",terminal=False)
+        elif Parameters.GeneratePreview == False:
+            CameraWindow.Print(NowHMS() + " Preview generation is disabled in parameters.")
+            self.Log("astrocamera.SetObservationParameters Preview generation is disabled in parameters.",terminal=False)
         else: self.CameraTasks.append('preview') # Don't preview for meteor showers.
-        if Session.Target.ObjectType in ['meteor','altaz','earth satellite']:
+        if Session.Target.ObjectType in ['meteor','altaz','earth satellite','aurora']:
             # Don't track for fixed targets or fast moving targets.
             CameraWindow.Print(NowHMS() + " No tracking performed for " + Session.Target.ObjectType + " targets.")
             self.Log("astrocamera.SetObservationParameters No tracking performed for", Session.Target.ObjectType, "targets.",terminal=False)
@@ -2032,13 +2068,6 @@ class astrocamera(attributemaster): # 1 references.
             result = result.total_seconds()
         return result
 
-    #def LastImageAge(self):
-    #    """ Return a timedelta object with the age of the last image. 
-    #        Returns None if no image captured yet. """
-    #    result = None
-    #    if self.LastImageDateTime != None:
-    #        result = NowUTC() - self.LastImageDateTime
-    #    return result
 
     def CameraFault(self):
         """ Return true if it looks like the camera has hung. 
@@ -2091,6 +2120,7 @@ class astrocamera(attributemaster): # 1 references.
         self.SecondsPerPixel = float(ArcSecondsPerPixel) * SecondsPerAS
         self.Log("astrocamera.ModeChange(): Static camera image will blur if exposure exceeds " + str(round(self.SecondsPerPixel,3)) + "seconds.",terminal=False)
         self.Log("astrocamera.ModeChange(): Mode " + str(self.Sensor.Mode) + " selected.",terminal=False)
+        self.PixelFoV() # Calculate field of view of an individual pixel (very approximate).
 
     def CleanupLastjpg(self):
         """ Call this to delete the disc copy of the last jpg file that was generated.
@@ -2419,6 +2449,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("Lens cap must be ON.")
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
+        print ('Capturing Dark image set...')
         CameraOptions = ''
         CameraOptions += '-ex off ' # Exposure control off.
         CameraOptions += '-md ' + str(self.Sensor.Mode) + ' ' # Mode 3 allows exposures over 10.2 seconds apparently.
@@ -2445,6 +2476,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("Lens cap must be ON.")
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
+        print ('Capturing Dark-Flat image set...')
         CameraOptions = ''
         CameraOptions += '-ex off ' # Exposure control off.
         CameraOptions += '-md ' + str(self.Sensor.Mode) + ' ' # Mode 3 allows exposures over 10.2 seconds apparently.
@@ -2473,6 +2505,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("You can re-use the flat image set across multiple campaigns.")
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
+        print ('Capturing Flat image set...')
         CameraOptions = ''
         CameraOptions += '-t 10 ' # Timeout ms - This is an attempt to take the photo as fast as possible, but pre-photo calculations double the requested time :(
         CameraOptions += '-n ' # Nopreview
@@ -2497,6 +2530,7 @@ class astrocamera(attributemaster): # 1 references.
         self.Log("These are used to remove manufacturing defects from the images that the sensor captures.")
         self.Log("Lens cap must be ON.")
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
+        print ('Capturing Bias image set...')
         CameraOptions = ''
         CameraOptions += '-ex off ' # Exposure control off.
         CameraOptions += '-t 10 ' # Timeout ms - This is an attempt to take the photo as fast as possible, but pre-photo calculations double the requested time :(
@@ -2561,9 +2595,9 @@ CameraWindow.Print("Sensor: Width",SensorInUse.PixelWidth,"* Height",SensorInUse
 # Enable/disable key features during testing.
 # ///////////////////////////////////////////////////////////////////////////////////
 
-MainLog.Log("The motors can be disabled in the parameters file if you want to test only the software.",terminal=False)
-if Parameters.MotorsEnabled: print (textcolor.green("Motors enabled"))
-else: print (textcolor.red("Motors disabled"))
+#MainLog.Log("The motors can be disabled in the parameters file if you want to test only the software.",terminal=False)
+#if Parameters.MotorsEnabled: print (textcolor.green("Motors enabled"))
+#else: print (textcolor.red("Motors disabled"))
 
 # ---------------------------------------------------------------------------------------------------- 
 
@@ -2652,10 +2686,10 @@ if Parameters.CameraEnabled:
 else: 
     print (textcolor.red("Camera disabled"))
     MainLog.Log("The program will generate simulated images instead.",terminal=False)
-    lines = ["The camera is disabled, therefore the program will generate simulated",
-             "images instead . The simulated images will show approximate  star and",
-             "target locations.",
-             "Simulated images may take longer to calculate  than a true photograph"
+    lines = ["The camera is disabled . The program will generate  simulated  images",
+             "instead . The simulated images will show approximate  star and target",
+             "locations.",
+             "Simulated images may take longer to calculate  than a true photograph",
              "would take . Therefore the  telescope  may gather 'light' images more",
              "slowly than you would expect."]
     textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)         
@@ -2703,24 +2737,13 @@ class outputpin(): # 4 references.
         self.Enabled = False
         self.Refresh()
 
-#Led1 = outputpin(27,'led1') # UART RX traffic.
-#Led2 = outputpin(22,'led2') # UART TX traffic.
-#Led3 = outputpin(5,'led3') # Camera capturing image.
-#Led4 = outputpin(6,'led4') # ReadyToObserve status LED.
-
-#LedList = [Led1,Led2,Led3,Led4]
-
-#def AllLEDsOn():
-#    for leds in LedList: leds.On()
-#
-#def AllLEDsOff():
-#    for leds in LedList: leds.Off()
 
 # ------------------------------------------------------------------------------------------------------
 
 class microcontroller(attributemaster): # 1 references.
     """ Class to manage the UART communication between the RPi and the motor microcontroller. 
         This handles I/O and buffering of inbound/outbound messages over the UART lines.
+        It also represents the entire motorcontroller PCB.
 
         Creating an instance of this object is not enough to initiate communication.
         - You must then call the 'initiate()' method to kick things off.
@@ -2733,10 +2756,9 @@ class microcontroller(attributemaster): # 1 references.
     def __init__(self,port='/dev/serial0',resetpin=4):
         self.uart = serial.Serial(port,115200,timeout=0,exclusive=True)
         self.Log = None # Handle to the method/function which will be used for logging messages.
-        #self.CommsLog = None # Handle to method/function which records communication traffic.
         self.QueueToMctl = Queue() # Use queue mechanism to send commands to the microcontroller communication thread. 
         self.QueueFromMctl = Queue() # Use queue mechanism to receive commands from the microcontroller communication thread. 
-        self.ResetPin = resetpin # Earthing this pin will RESET the remote device.
+        self.ResetPin = resetpin # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
         self.Lines = [] # No lines received yet.
         self.WriteChunkBytes = 32
         self.WriteChunkSeconds = 0.2 # Seconds between chunks written to microcontroller.
@@ -2811,7 +2833,7 @@ class microcontroller(attributemaster): # 1 references.
         if self.ResetPin == None:
             self.Log("microcontroller.PowerOn(): No Reset pin defined.",terminal=True)
             return
-        authority = AskYesNo("No safety checks. Do you want to turn ON GPIO power for the microcontroller (y/N)?",False)
+        authority = AskYesNo("No safety checks. Do you want to turn ON GPIO power for the microcontroller [y/N]?",False,fg=textcolor.ORANGERED1,bg=textcolor.BLACK)
         if authority:
             self.Log("microcontroller.PowerOn(): No safety checks. GPIO POWER PIN turned on for Microcontroller.",terminal=True)
             GPIO.output(self.ResetPin, GPIO.HIGH)
@@ -2821,7 +2843,7 @@ class microcontroller(attributemaster): # 1 references.
         if self.ResetPin == None:
             self.Log("microcontroller.PowerOff(): No Reset pin defined.",terminal=True)
             return
-        authority = AskYesNo("No safety checks. Do you want to turn OFF GPIO power for the microcontroller (y/N)?",False)
+        authority = AskYesNo("No safety checks. Do you want to turn OFF GPIO power for the microcontroller [y/N]?",False,fg=textcolor.ORANGERED1,bg=textcolor.BLACK)
         if authority:
             self.Log("microcontroller.PowerOff(): No safety checks. GPIO POWER PIN turned off for Microcontroller.",terminal=True)
             GPIO.output(self.ResetPin, GPIO.LOW)
@@ -2832,35 +2854,6 @@ class microcontroller(attributemaster): # 1 references.
             it still works and returns the state of the pin. """
         return GPIO.input(self.ResetPin)
 
-    #def Led1On(self):
-    #    self.LedOn(Led1)
-    #    
-    #def Led2On(self):
-    #    self.LedOn(Led2)
-    #
-    #def Led3On(self):
-    #    self.LedOn(Led3)
-    #    
-    #def Led4On(self):
-    #    self.LedOn(Led4)
-    #
-    #def LedOn(self,led):
-    #    led.On()
-
-    #def Led1Off(self):
-    #    self.LedOff(Led1)
-    #    
-    #def Led2Off(self):
-    #    self.LedOff(Led2)
-    #
-    #def Led3Off(self):
-    #    self.LedOff(Led3)
-    #    
-    #def Led4Off(self):
-    #    self.LedOff(Led4)
-    #
-    #def LedOff(self,led):
-    #    led.Off()
 
     def Initiate(self):
         """ Initiate communication. """
@@ -3038,7 +3031,6 @@ class microcontroller(attributemaster): # 1 references.
 
                 self.InputLine = '' # Start a fresh input line next time anything is received. 
             else: self.InputLine += response # Add the character to the input line we are constructing. 
-            #Led1.Off()
 
     def Read(self):
         """ Return the next input line received (if there is one).
@@ -3099,11 +3091,8 @@ class microcontroller(attributemaster): # 1 references.
         line += terminator
         self.LinesSent += 1
         self.BytesSent += len(line)
-        #Led2.On()
         self.uart.write(line.encode('utf-8')) # Send data in UTF-8 format. 
         self.LastTxTime = NowUTC() # Note that time of the last data sent. 
-        #Led2.Off()
-
 
     def ReadFlush(self):
         """ Clear the input buffer. Don't actually transmit it, because you may never reach the end if 
@@ -3247,11 +3236,6 @@ if Mctl == None: # Microcontroller couldn't start.
 def SetGlobalLedStatus(): # 2 references.
     try:
         Mctl.SetLedStatus(Parameters.MctlLedStatus) # Set the LED status on the microcontroller.
-        #for Led in LedList:
-        #    if Parameters.MctlLedStatus:
-        #        Led.Enable()
-        #    else:
-        #        Led.Disable()
     except Exception as e:
         MainLog.RaiseException(e,comment='SetGlobalLedStatus') # Trap all the exception information in the main log file.
 
@@ -3289,7 +3273,7 @@ class motorcontrol(attributemaster): # 2 references.
         
     AllMotors = [] # A list of all sibling motors which is common to all instances of motorcontrol. So any single motor instance can refer to all the other motors if needed via motorcontrol.AllMotors.
 
-    def __init__(self,name,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1):
+    def __init__(self,name,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1,limitangle=None):
         """ Initialize with values that we know from the physical construction of the motor.
             Other values can be configured later by the remote server. """
         self.Log = MainLog.Log # Handle to logging function/method to be used by this class.
@@ -3302,6 +3286,7 @@ class motorcontrol(attributemaster): # 2 references.
         self.MinWarningAngle = minangle + self.WarningAngle # Can warn if within xx degrees of minimum position.
         self.MaxAngle = maxangle
         self.MaxWarningAngle = maxangle - self.WarningAngle # Can warn if within xx degrees of maximum position.
+        self.LimitAngle = limitangle # The motor will reverse around a limit rather than crossing it.
         self.Orientation = orientation
         self.BacklashAngle = backlashangle
         self.CurrentAngle = currentangle # This will be updated by the microcontroller once running. 
@@ -3311,9 +3296,9 @@ class motorcontrol(attributemaster): # 2 references.
         self.MotorStepsPerAxisDegree = self.MicrostepRatio * self.MotorStepsPerRev / 360.0
         self.AxisStepsPerRev = self.MicrostepRatio * self.MotorStepsPerRev * self.GearRatio 
         self.MotorConfigured = False
-        self.FastTime = 0.002 # Was 0.0005
-        self.SlowTime = 0.05
-        self.TimeDelta = 0.003
+        self.FastTime = 0.002 # Fastest pulse to the motor STEP signal. (Full speed in large move.) # Was 0.0005
+        self.SlowTime = 0.05 # Slowest pulse to the motor STEP signal. (Initial speed at start of move.)
+        self.TimeDelta = 0.003 # Acceleration rate for the motor STEP signal. 
         self.TrajectorySegmentSize = 60 # Seconds.
         self.TrajectoryValid = False # Is the microcontroller trajectory valid?
         self.TrajectoryEntries = 0 # Number of trajectory entries stored on the microcontroller.
@@ -3372,23 +3357,6 @@ class motorcontrol(attributemaster): # 2 references.
         print("RecoveryFileName:",self.RecoveryFileName)
         print("")
 
-    #def SetMotorClock(self):
-    #    """ Prompt user for new clock running time (in hours) 
-    #        Update the clock time accordingly. """
-    #    print(textcolor.yellow('Update ' + self.MotorName + ' motor clock'))
-    #    while True:
-    #        temp = input('Enter new running hours (x to quit): ')
-    #        if temp.lower() == 'x': 
-    #            print('Nothing changed.')
-    #            break
-    #        hours = TextToFloat(temp)
-    #        if hours == None:
-    #            print(textcolor.red('Invalid, must be a decimal value. Try again.'))
-    #            continue # Try again.
-    #        self.MotorRunningSeconds = hours * 3600 # Convert to seconds.
-    #        print(textcolor.yellow('Clock set to ' + str(self.MotorRunningSeconds) + 'seconds (' + HRSeconds(self.MotorRunningSeconds) + ')'))
-    #        self.StoreRecoveryAngle(force=True) # Record the new value immediately.
-
     def Restarted(self): 
         """ Call this if the microcontroller restarts. 
             This resets some status flags so that we know the motor isn't fully configured yet. """
@@ -3424,12 +3392,6 @@ class motorcontrol(attributemaster): # 2 references.
             if self.AngleToStep(angle1) == self.AngleToStep(angle2): result = True # Angles equate to the same step position.
         return result
 
-    #def MotorHours(self):
-    #    """ Return number of hours the motor has been running for. 
-    #        (total lifetime of the motor). """
-    #    mrh = round(self.MotorRunningSeconds / 3600) # How many HOURS have the motors been running for?
-    #    return mrh
-
     def RestoreAngle(self):
         """ This searches for the last recorded position of the motor and restores that state. 
             The last recorded position is stored in a file in the self.RecoveryFolder. """
@@ -3452,20 +3414,8 @@ class motorcontrol(attributemaster): # 2 references.
                 ls = line.split(";") # Format is 'timestamp';'angle';'seconds'
                 if len(ls) > 1: angle = float(ls[1]) # 'timestamp';'angle';'seconds'
                 else: self.Log("Bad recovery entry (" + line + "), angle ignored.",level='warning')
-                #if len(ls) > 2: 
-                #    self.MotorRunningSeconds = int(ls[2]) # 'timestamp';'angle';'seconds'
-                #else: self.Log("Bad recovery entry (" + line + ") running seconds ignored.",level='warning')
         self.CurrentAngle = angle
         self.Log(self.MotorName,"motor restored to last known position", self.AngleToStep(self.CurrentAngle), "(", Deg3dp(self.CurrentAngle,DegreeSymbol), ")")
-        ## Check the total running time of the motor. They have a design life!
-        #self.Log(self.MotorName,"motor has so far been running for", self.MotorHours(), "h, (", self.MotorRunningSeconds, "s).",terminal=True)
-        #MotorInitialHours = self.MotorHours()
-        #if MotorInitialHours > 10000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
-        #    if MotorInitialHours > 20000: # Nema17 motors designed for 20,000hour 'on' time. This is whenever they are energised, not just moving.
-        #        self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Please replace it.",level='error')
-        #    else:
-        #        self.Log(self.MotorName,"motor has been energised for",str(MotorInitialHours),". Design time is 20k hours in total. Consider replacing it.",level='warning')
-        #    self.Log("Motor",self.MotorName,": When you replace it, please reset the running time in the recovery file in",self.RecoveryFolder,level='warning')
         # Now remove any old recovery files that we don't need. Always keep last 2.
         if len(oldfiles) > 2: # Only tidyup if more than 2 files available.
             oldfiles = sorted(oldfiles)[:-2] # Sort alphabetically. This is equivalent to chronological sequence. Ignore the last 2 files, we want to keep these.
@@ -3486,7 +3436,9 @@ class motorcontrol(attributemaster): # 2 references.
         else: # Bug in early version of microcontroller software, timestamp returned as integer. Just use current time instead.
             self.LatestTuneTime = NowUTC()
             self.Log("Motor",self.MotorName,"received old format tune acknowledgement. Please update it!",level='warning',terminal=False)
-        self.LatestTuneSteps = TextToInt(lineitems[4]) # Element 4 is the number of steps that the tune command executed.
+        steps = TextToInt(lineitems[4])
+        self.Log("motorcontrol.TuneComplete: LatestTuneSteps:",steps,terminal=False)
+        self.LatestTuneSteps = TextToInt(steps) # Element 4 is the number of steps that the tune command executed.
 
     def StoreRecoveryAngle(self,force=False):
         """ Records the latest position of the motor for recovery purposes. 
@@ -3710,6 +3662,12 @@ class motorcontrol(attributemaster): # 2 references.
         line += str(Parameters.MotorStatusDelay) + ' ' # Field 12: Set timer delay for sending motor status back to the RPi.
         line += BoolToString(Parameters.FaultSensitive) + ' ' # Field 13: When 'y' the microcontroller will respect the DRV8825 fault pin to block movement.
         line += BoolToString(Parameters.OptimiseMoves) + ' ' # Field 14: When 'y' the microcontroller can take shortcuts for large moves.
+        line += str(self.LimitAngle) + ' ' # Field 15: Movement limit, motor will reverse around rather than crossing this limit.
+        line += str(self.GearRatio) + ' ' # Field 16: GearRatio.
+        line += str(self.MotorStepsPerRev) + ' ' # Field 17 MotorStepsPerRev
+        line += str(self.MicrostepRatio) + ' ' # Field 18 MicrostepRatio
+        line += str(self.RestAngle) + ' ' # Field 19 RestAngle
+        
         Mctl.Write(line)
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') end',terminal=False)
         return True
@@ -3818,7 +3776,7 @@ class motorcontrol(attributemaster): # 2 references.
             while MaxIterations > 0: # Time out if max iterations hit.
                 MaxIterations -= 1 # Reduce timeout.
                 segmentsize += int(self.TrajectorySegmentSize / 4) # Increase the segment size.
-                nextutc = startutc + timedelta(seconds=segmentsize) # Timestamp of the larget segment size.
+                nextutc = startutc + timedelta(seconds=segmentsize) # Timestamp of the larger segment size.
                 az, alt = targetobj.AzAltDegrees(time=Datetime2Ts(nextutc)) # Needs to be Skyfield time!
                 if self.MotorName == 'altitude': nextangle = alt
                 else: nextangle = az
@@ -3849,8 +3807,30 @@ class motorcontrol(attributemaster): # 2 references.
 # ------------------------------------------------------------------------------------------------------
 
 # Create and initialize motor instances.
-AzimuthControl = motorcontrol('azimuth',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAzimuthAngle,maxangle=Parameters.MaxAzimuthAngle,restangle=180.0,currentangle=180.0,backlashangle=0.0,orientation=-1)
-AltitudeControl = motorcontrol('altitude',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAltitudeAngle,maxangle=Parameters.MaxAltitudeAngle,restangle=0.0,currentangle=0.0,backlashangle=0.0,orientation=-1)
+#AzimuthControl = motorcontrol('azimuth',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAzimuthAngle,maxangle=Parameters.MaxAzimuthAngle,restangle=180.0,currentangle=180.0,backlashangle=0.0,orientation=-1,limitangle=Parameters.AzimuthLimitAngle)
+#AltitudeControl = motorcontrol('altitude',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAltitudeAngle,maxangle=Parameters.MaxAltitudeAngle,restangle=0.0,currentangle=0.0,backlashangle=0.0,orientation=-1,limitangle=Parameters.AltitudeLimitAngle)
+AzimuthControl = motorcontrol('azimuth',
+                              gearratio=Parameters.AzimuthGearRatio, # 240
+                              motorstepsperrev=Parameters.AzimuthMotorStepsPerRev, # 400
+                              microstepratio=Parameters.AzimuthMicrostepRatio, # 1 
+                              minangle=Parameters.MinAzimuthAngle, # 0 
+                              maxangle=Parameters.MaxAzimuthAngle, # 360
+                              restangle=Parameters.AzimuthRestAngle, # 180.0,
+                              currentangle=Parameters.AzimuthRestAngle, # 180.0 # Yes it's the same as above!
+                              backlashangle=Parameters.AzimuthBacklashAngle, # 0.0
+                              orientation=Parameters.AzimuthOrientation, # -1,
+                              limitangle=Parameters.AzimuthLimitAngle)
+AltitudeControl = motorcontrol('altitude',
+                              gearratio=Parameters.AltitudeGearRatio, # 240,
+                              motorstepsperrev=Parameters.AltitudeMotorStepsPerRev, # 400,
+                              microstepratio=Parameters.AltitudeMicrostepRatio, # 1
+                              minangle=Parameters.MinAltitudeAngle, # 0
+                              maxangle=Parameters.MaxAltitudeAngle, # 90
+                              restangle=Parameters.AltitudeRestAngle, # 0.0,
+                              currentangle=Parameters.AltitudeRestAngle, # 0.0,
+                              backlashangle=Parameters.AltitudeBacklashAngle, # 0.0,
+                              orientation=Parameters.AltitudeOrientation, # -1,
+                              limitangle=Parameters.AltitudeLimitAngle)
 MotorControls = motorcontrol.AllMotors #  Alias for the list of ALL defined motors held in the motorcontrol class.
 
 # Assign filename for the 'observation running' flag file. Thie file indicates that an observation started, but has not yet cleanly finished.
@@ -4127,16 +4107,35 @@ class sessionstatus(attributemaster): # 1 references.
         self.Log('sessionstatus:UnrecognisedMessage():',line,terminal=False)
         ErrorWindow.Print(NowHMS() + ' Unrecognised message: ' + line)
 
+    def ValidControllerVersion(self):
+        """ Return TRUE if controller version is known and acceptable.
+            This only succeeds if the microcontroller is communicating
+            and has send the controller version number to the RPi already. """
+        result = False # Not acceptable unless proven.
+        if self.ControllerVersion != 'unknown':
+            try:
+                compversion = self.ControllerVersion[:self.ControllerVersion.rindex('.')] # Ignore patch level. Select "a.b" from "a.b.c" format version numbers.
+                if compversion in ACCEPTABLECONTROLLERVERSIONS:
+                    result = True # Acceptable
+            except Exception as e:
+                self.Log('sessionstatus.ValidControllerVersion(): Failed to check',self.ControllerVersion,level='error')
+                self.Log('sessionstatus.ValidControllerVersion(): Failed with',str(e),level='error')
+        return result
+
     def CheckControllerVersion(self,line):
         """ Handle controller version message. 'controller version 0.0.0' """
         self.Log('sessionstatus:CheckControllerVersion(): ' + line,terminal=False)
         lineitems = line.split(' ')
         if len(lineitems) > 2:
             self.ControllerVersion = lineitems[2]
-            compversion = self.ControllerVersion[:self.ControllerVersion.rindex('.')] # Ignore patch level. Select "a.b" from "a.b.c" format version numbers.
-            if not compversion in ACCEPTABLECONTROLLERVERSIONS:
-                self.Log('sessionstatus.CheckControllerVersion():',self.ControllerVersion,'is not in',ACCEPTABLECONTROLLERVERSIONS,terminal=True)
-                ErrorWindow.Print(NowHMS() + ' ' + self.ControllerVersion + ' is not in ' + str(ACCEPTABLECONTROLLERVERSIONS))
+            try:
+                compversion = self.ControllerVersion[:self.ControllerVersion.rindex('.')] # Ignore patch level. Select "a.b" from "a.b.c" format version numbers.
+                if not compversion in ACCEPTABLECONTROLLERVERSIONS:
+                    self.Log('sessionstatus.CheckControllerVersion():',self.ControllerVersion,'is not in',ACCEPTABLECONTROLLERVERSIONS,terminal=True)
+                    ErrorWindow.Print(NowHMS() + ' ' + self.ControllerVersion + ' is not in ' + str(ACCEPTABLECONTROLLERVERSIONS))
+            except Exception as e:
+                self.Log('sessionstatus.CheckControllerVersion(): Failed to check',self.ControllerVersion,level='error')
+                self.Log('sessionstatus.CheckControllerVersion(): Failed with',str(e),level='error')
         else:
             self.Log('sessionstatus.CheckControllerVersion(): Response is incomplete:',line,level='warning')
 
@@ -4185,6 +4184,7 @@ class sessionstatus(attributemaster): # 1 references.
         except Exception as e: # Message handler failed.
             self.Log("sessionstatus.MctlHandler: Failed!",level='error')
             MainLog.ReportException(e,comment='MctlHandler failed.') # Trap all the exception information in the main log file.
+        self.TerminateMctlHandler = False # Reset the termination flag.
         self.Log('sessionstatus.MctlHandler(): End.',terminal=True)
 
     def TimeDiffSecs(self):
@@ -4455,23 +4455,6 @@ class imagetracker(attributemaster): # 1 references.
             
         return result # True if successful, False if failed.
 
-    #def ScaleStarList(self,inputlist,scalefactor):
-    #    """ Take a list of star locations and scale the first two terms.
-    #        Any additional terms are left unmodified. 
-    #        Each star in the list consists of x,y image position pairs.
-    #            [xpos,ypos] 
-    #        Only the xpos and ypos entries are scaled, all other terms remain unchanged. """
-    #    self.Log("ImageTracker.ScaleStarList: Scale:",scalefactor,"List:",inputlist,terminal=False)
-    #    newlist = [] # The resulting list.
-    #    for star in inputlist: # Go through each star in turn.
-    #        newstar = []
-    #        for i,term in enumerate(star):
-    #            if i < 2: newterm = term * scalefactor
-    #            else: newterm = term
-    #            newstar.append(int(newterm))
-    #        newlist.append(newstar)
-    #    self.Log("ImageTracker.ScaleStarList: Result:",newlist,terminal=False)
-    #    return newlist
         
     def ValidStarValues(self,entry):
         """ Return if 'star' value is valid. Star is an entry from a StarMatchList.
@@ -4638,6 +4621,7 @@ StarNameUrl = ProjectRoot + '/data/starnames.json'
 MessierDictUrl = ProjectRoot + '/data/messierobjects.json'
 MeteorDictUrl = ProjectRoot + '/data/meteors.json'
 HipparcosCacheFile = ProjectRoot + '/data/hipparcos.pkl'
+NGCCacheFile = ProjectRoot + '/data/ngc.pkl'
 NGCUrl = ProjectRoot + '/data/ngc.json'
 
 def DictionaryLoader(filename): # 4 references.
@@ -4819,15 +4803,6 @@ def DimChannel(channel,ratio): # 3 references.
 
 # ------------------------------------------------------------------------------------------------------
 
-#def DimColor(color,ratio): # 4 references.
-#    """ Simple multiplier for BGR or BGRA color tuples. """
-#    if len(color) == 4: # Adjust BGR, but not A.
-#        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio),color[3])
-#    elif len(color) == 3: # Adjust BGR
-#        return (DimChannel(color[0],ratio),DimChannel(color[1],ratio),DimChannel(color[2],ratio))
-#    else: return DimChannel(color,ratio) # Assume single channel.
-#
-## ------------------------------------------------------------------------------------------------------
 
 def hipex_load_dataframe(fobj): # 1 references.
     """ Skyfield has a built in method to extract Hipparcos data and convert it into a Pandas dataframe.
@@ -4986,7 +4961,7 @@ def hipex_load_dataframe(fobj): # 1 references.
     return df
 
 # If Hipparcos data already cached, use that, otherwise load and prepare the data cache now.
-if os.path.exists(HipparcosCacheFile): # A cache of the hipparcos data already exists, use it.
+if ReloadData == False and os.path.exists(HipparcosCacheFile): # A cache of the hipparcos data already exists, use it.
     MainLog.Log("Hipparcos data cache exists, using that.",terminal=True)
     HipparcosDf = pandas.read_pickle(HipparcosCacheFile)
     MainLog.Log("Hipparcos dataframe loaded",len(HipparcosDf),"stars from cache.",terminal=False)
@@ -5027,7 +5002,7 @@ MainLog.Log("Loading solar system ephemeris from JPL...",terminal=False)
 planets = load('de421.bsp') # Compact list of inner planets. *Q* Does this have a 'reload' option like load.open does?
 
 # Load Messier object list.
-MainLog.Log('Loading Messier catalog from', MessierDictUrl, '...',terminal=False)
+MainLog.Log('Loading Messier catalog from', MessierDictUrl, '...',terminal=True)
 Messier_dictionary = DictionaryLoader(MessierDictUrl)
 # Add some precalculated fields to simplify life later on.
 for key,TempStarParms in Messier_dictionary.items():
@@ -5056,6 +5031,7 @@ with load.open(StellariumUrl) as f:
     StellariumConstellations = stellarium.parse_constellations(f)
 
 # Create internal list of the stars in each constellation. This indicates which stars to 'join up' in order to draw a constellation pattern.
+MainLog.Log('Loading constellation patterns...',terminal=True)
 ConstellationLinks = [] # Start new empty list of constellation patterns. [ [from hip num, to hip num, constellation], [from hip num, to hip num, constellation], ... ]
 ConstellationCodes = dict(load_constellation_names()) # Used to turn abbreviations into full names.
 ConstellationStarList = [] # List of HIP numbers for stars in constellation patterns. Used to find MarkupPreview stars which can be joined up.
@@ -5079,7 +5055,7 @@ MainLog.Log("ConstellationLinks:",len(ConstellationLinks),"star pairs.",terminal
 MainLog.Log("ConstellationLinks:",len(ConstellationStarList),"unique stars.",terminal=False)
 
 # Load NGC list.
-MainLog.Log('Loading New General Catalog (NGC) entries from', NGCUrl, '...',terminal=False)
+MainLog.Log('Loading New General Catalog (NGC) entries from', NGCUrl, '...',terminal=True)
 NGCDict = DictionaryLoader(NGCUrl)
 NGC_Namelist = [] # List of names.
 for key, value in NGCDict.items():
@@ -5091,9 +5067,41 @@ def GenerateNGCDataframe(NGCDict):
         processing of large lists, and moves closer to having common
         routines for handling all the different object lists. """
     MainLog.Log('GenerateNGCDataframe...',terminal=False)
+    NGCTypes = {"aster":"Asterism",
+                "brtnb":"Bright nebula",
+                "cl+nb":"Cluster with nebulosity",
+                "drknb":"Dark nebula",
+                "galcl":"Galaxy cluster",
+                "galxy":"Galaxy",
+                "glocl":"Globular cluster",
+                "gx+dn":"Diffuse nebula in a galaxy",
+                "gx+gc":"Globular cluster in a galaxy",
+                "g+c+n":"Cluster with nebulosity in a galaxy",
+                "lmccn":"LMC cluster with nebulosity",
+                "lmcdn":"LMC diffuse nebula",
+                "lmcgc":"LMC globular cluster",
+                "lmcoc":"LMC open cluster",
+                "nonex":"Nonexistent",
+                "opncl":"Open cluster",
+                "plnnb":"Planetary nebula",
+                "smccn":"SMC cluster with nebulosity",
+                "smcdn":"SMC diffuse nebula",
+                "smcgc":"SMC globular cluster",
+                "smcoc":"SMC open cluster",
+                "snrem":"Supernova remnant",
+                "quasr":"Quasar",
+                "1star":"Star",
+                "2star":"2 Stars",
+                "3star":"3 Stars",
+                "4star":"4 Stars",
+                "5star":"5 Stars",
+                "6star":"6 Stars",
+                "7star":"7 Stars"}
 
     # Store some repeated calculations in the dictionary to improve performance later on.
+    count = 0
     for NGCEntry,NGCValues in NGCDict.items():
+        MainLog.Log("GenerateNGCDataframe: Loading:",NGCEntry,terminal=False)
         TempRAH = NGCValues['rah'] # Right Ascension HOURS
         TempRAM = NGCValues['ram'] # Right Ascension MINUTES
         TempRAS = NGCValues['ras'] # Right Ascension SECONDS
@@ -5102,20 +5110,35 @@ def GenerateNGCDataframe(NGCDict):
         TempDEM = NGCValues['dem'] # Declination MINUTES
         TempDES = NGCValues['des'] # Declination SECONDS
         NGCValues['decdeg'] = DMSToAngle(TempDED,TempDEM,TempDES) # Create new 'degrees' declination value.
-        NGCValues['widthdeg'] = float(NGCValues['width']) / (60 ** 2) # Convert from arcseconds to degrees
-        NGCValues['heightdeg'] = float(NGCValues['height']) / (60 ** 2)
+        tempw = float(NGCValues['width']) / (60 ** 2) # Convert from arcseconds to degrees
+        temph = float(NGCValues['height']) / (60 ** 2)
+        if temph == 0.0: temph = tempw # Use WIDTH if HEIGHT is not specified.
+        if tempw == 0.0: tempw = temph # Use HEIGHT if WIDTH is not specified.
+        if temph == 0.0: temph = tempw = 1/ (60 ** 2) # Default to 1 arc-second if dimensions are not known.
+        NGCValues['widthdeg'] = tempw # Convert from arcseconds to degrees
+        NGCValues['heightdeg'] = temph
         NGCValues['name'] = NGCEntry
+        n_type = NGCValues['type'].lower()
+        if n_type in NGCTypes:
+            NGCValues['typelabel'] = NGCTypes[n_type]
+        else:
+            NGCValues['typelabel'] = n_type
         NGCValues['ralabel'] = str(TempRAH) + "h " + str(TempRAM) + "m " + str(TempRAS) + "s"
         NGCValues['declabel'] = str(TempDED) + "d " + str(TempDEM) + "' " + str(TempDES) + '"'
+        MainLog.Log("GenerateNGCDataframe: Record",count,":",NGCEntry,": RA deg",NGCValues['radeg'],"Dec deg",NGCValues['decdeg'],n_type,NGCValues['typelabel'],terminal=False)
+        count += 1
 
     # Convert the dictionary to a pandas dataframe.
     NGC_DF = pandas.DataFrame.from_dict(NGCDict) # Convert from dictionary to pandas dataframe (but the rows/columns are transposed).
     NGC_DF = NGC_DF.transpose() # Swap rows/columns the right way round.
 
     # Eliminate any entries which will never be selected.
-    boolseries = NGC_DF['magnitude'].between(-100,Parameters.TargetMinMagnitude, inclusive='both') # Create filter for items within Magnitude range.
+    MainLog.Log("GenerateNGCDataframe: Before removing dim objects.",len(NGC_DF),"records.",terminal=False)
+    # Filter out dim NGC objects, but make the limit dimmer than the star selection because they are interesting objects.
+    boolseries = NGC_DF['magnitude'].between(-100,Parameters.TargetMinMagnitude * 1.5, inclusive='both') # Create filter for items within Magnitude range.
     NGC_DF = NGC_DF[boolseries] # Apply filter.
-    MainLog.Log("NGC_DF: Columns",NGC_DF.columns,terminal=False)
+    MainLog.Log("GenerateNGCDataframe: After removing dim objects.",len(NGC_DF),"records. (Magnitude",Parameters.TargetMinMagnitude,")",terminal=False)
+    MainLog.Log("GenerateNGCDataframe: Dataframe contains: Rows",len(NGC_DF),"Columns",NGC_DF.columns,terminal=False)
     
     #  Index(['magnitude', 'rah', 'ram', 'ras', 'ded', 'dem', 'des', 'width',
     #         'height','radeg','decdeg','widthdeg','heightdeg'],
@@ -5139,16 +5162,24 @@ def GenerateNGCDataframe(NGCDict):
     #   13  name
     #   14  ralabel
     #   15  declabel
+    NGC_DF.to_pickle(NGCCacheFile) # Save the processed file as a cache to speed things up next time.
+
     return NGC_DF
     
-NGC_DF = GenerateNGCDataframe(NGCDict)
+if ReloadData == False and os.path.exists(NGCCacheFile): # A cache of the NGC data already exists, use it.
+    MainLog.Log("NGC data cache exists, using that.",terminal=True)
+    NGC_DF = pandas.read_pickle(NGCCacheFile)
+else:
+    MainLog.Log("No NGC data cache, creating one now.",terminal=True)
+    NGC_DF = GenerateNGCDataframe(NGCDict)
+MainLog.Log("NGC dataframe contains: Rows",len(NGC_DF),"Columns",NGC_DF.columns,terminal=False)
 
 # Load Meteor shower list.
-MainLog.Log('Loading meteor shower list from', MeteorDictUrl, '...',terminal=False)
+MainLog.Log('Loading meteor shower list from', MeteorDictUrl, '...',terminal=True)
 Meteor_dictionary = DictionaryLoader(MeteorDictUrl)
 
 # Load comet data.
-MainLog.Log('Loading comet list from',mpc.COMET_URL,'...',terminal=False)
+MainLog.Log('Loading comet list from',mpc.COMET_URL,'...',terminal=True)
 with load.open(mpc.COMET_URL,reload=ReloadData) as f: # Don't keep reloading it if it is already on disc.
     comets = mpc.load_comets_dataframe(f) # Comet data loaded as a Pandas dataframe.
 MainLog.Log(len(comets), 'comets loaded.',terminal=False)
@@ -5391,17 +5422,6 @@ class target(attributemaster): # 28 references.
         self.PrevAlt = None # Previous location
         self.RotationPoint = None # Will hold rotation reference point if activated.
 
-    #def TwilightLevel(self,time=None): # 1 references.
-    #    """ Return the twilight level for the current location.
-    #        If 'time' parameter given, it's the lightlevel at that time.
-    #        If 'time' is None, then the current time is used. """
-    #    az, alt = self.AzAltDegrees(time=time)
-    #    if alt > 0: result = "daytime"
-    #    elif alt >= -6: result = "civil twilight"
-    #    elif alt >= -12: result = "nautical twilight"
-    #    elif alt >= -18: result = "astronomical twilight"
-    #    else: result = "nighttime"
-    #    return result
     
     def Datetime2Ts(self,dt): # Referenced by external dependencies.
         """ Convert datetime into TS (skyfield) timestamp. """
@@ -5618,7 +5638,7 @@ class target(attributemaster): # 28 references.
             ram = ra[1]
             ras = ra[2]
         TempStar = Star(ra_hours=(rah,ram,ras), dec=Angle(degrees=dec)) # Create a Skyfield target object.
-        TempStarAlt, TempStarAz, TempStardistance = HomeSite.at(time).observe(TempStar).apparent().altaz() # Work out where the rotation point is.
+        TempStarAlt, TempStarAz, TempStardistance = HomeSite.at(time).observe(TempStar).apparent().altaz() 
         return TempStarAlt.degrees,TempStarAz.degrees
 
     def SetHome(self,homelat,homelon):
@@ -5768,22 +5788,6 @@ class target(attributemaster): # 28 references.
         result = almanac.moon_phase(planets, time)
         return result.degrees
 
-    #def MoonFull(self,time=None):
-    #    """ Return the % of full moon.
-    #        Used to indicate light pollution from the moon. """
-    #    moonphase = self.LunarPhase(time=time)
-    #    # Convert moonphase into an approximate % full. We're interested in light pollution levels.
-    #    if moonphase > 180: 
-    #        moonphase = 360 - moonphase
-    #    moonphase = 100 * moonphase / 180
-    #    return moonphase
-
-    #def MoonWaxing(self):
-    #    """ Return TRUE if moon is Waxing. 
-    #        Return FALSE if moon is Waning. """
-    #    if self.LunarPhase() <= 180: result = True
-    #    else: result = False
-    #    return result
 
     def ApparentCometMagnitudeGK(self):
         """ Calculate comet apparent magnitude using GK model. 
@@ -6394,8 +6398,8 @@ def ChooseHistory(selection=None): # 1 references.
             searchterm = obitems[3]
             exposureseconds = float(obitems[4])
             exposuremode = int(obitems[5]) # *Q* This is not reapplied to the new observation yet!
-            MainLog.Log("ChooseHistory: Selected " + lines[i],terminal=False)
             CameraInUse.ExposureSeconds = exposureseconds
+            MainLog.Log("ChooseHistory: Selected " + lines[i],terminal=False)
             if searchgroup == 'solar':
                 obstarget = ChooseSolar(searchterm) # Create a solar system target.
                 break
@@ -6449,8 +6453,8 @@ def ChooseLastTarget(): # 2 references.
     searchterm = obitems[3]
     exposureseconds = float(obitems[4])
     exposuremode = int(obitems[5]) # *Q* This is not set for the restarted observation yet!
-    MainLog.Log("ChooseLastTarget: Selected " + line,terminal=False)
     CameraInUse.ExposureSeconds = exposureseconds
+    MainLog.Log("ChooseLastTarget: Selected " + line,terminal=False)
     if searchgroup == 'solar': obstarget = ChooseSolar(searchterm) # Create a solar system target.
     elif searchgroup == 'satellite': obstarget = ChooseSatellite(searchterm) # Create a satellite target.
     elif searchgroup == 'hipparcos': obstarget = ChooseHipparcos(searchterm) # Create a hipparcos star target.
@@ -6858,13 +6862,15 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
     if True: # Parameters.MarkupShowFullStepScale: # Mark FULL STEP scale.
         # Calibration - Azimuth
         NewImageBuffer.SetPenColor(BGRCyan)
+        c = 0
         for i in range(-1000,1001,200): # Major tick marks only.
+            c = 1 - c
             xpos = int((width/2) + (i * az_pixels_per_fullstep))
             ypos = int(height/2)
             NewImageBuffer.DrawLine((xpos,ypos),(xpos,ypos + 100),thickness=3)
             text = str(i) + "Steps"
             if i > 0: text = "+" + text
-            NewImageBuffer.AddText(text,xpos,ypos + 110,size=1.0,hjust='c',vjust='b')
+            NewImageBuffer.AddText(text,xpos,ypos + 110 + (c * 25),size=1.0,hjust='c',vjust='b') # Offset alternate markings to keep legible.
         # Calibration - Altitude
         for i in range(-1000,1001,200): # Major tick marks only
             xpos = int(width/2)
@@ -6883,8 +6889,7 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
             NewImageBuffer.DrawCircle(xpos,ypos,int(az_pixels_per_fullstep),color=BGRBlack)
 
     if True: # Draw angular scale for reference.
-        ScaleList = [['1hr',     360.0/24.0,0.0,0.0],
-                     ['1deg',    1.0,0.0 ,0.0],
+        ScaleList = [['1deg',    1.0,0.0 ,0.0],
                      ['30arcmin',0.0,30.0,0.0],
                      ['10arcmin',0.0,10.0,0.0],
                      ['1arcmin', 0.0,1.0 ,0.0],
@@ -6928,6 +6933,8 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
             TempStarHeight = int((TempStarParms['heightdeg'] * CameraInUse.PixelsPerFovDegreeHeight) / 2)
             temptarget = target(TempStar,name=TempStarName,objecttype=TempStarType,constellation="",description="",magnitude=TempStarParms['magnitude'])
             TempStarAz, TempStarAlt = temptarget.AzAltDegrees(time=t)
+            if TempStarAz < 0: # Below horizon, don't mark it up.
+                continue # Skip to next object.
             PlotStarAlt, PlotStarAz = RelativeAltAz(TempStarAlt,TempStarAz,CentreAlt,CentreAz)
             TempStarX, TempStarY = PlotRelativeAltAz(PlotStarAlt,PlotStarAz,height,width)
             TempTextX = TempStarX + TempStarWidth + 5 # Put Messier labels on the RIGHT of the object so they don't clash with NGC labels for the same thing.
@@ -6941,45 +6948,61 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
                     NewImageBuffer.AddText(TempStarName.upper(),TempTextX,TempStarY -20,size=1)
 
     if True: # Mark neighbouring NGC items ...
-        # Find that alt/az locations of all the objects.
+        # Find the alt/az locations of all the objects.
         # NGC catalog is large, eliminate as much as possible first.
+        CamLog.Log("MarkupPreview: NGCItems: CentreRa",CentreRa,DegreeSymbol,"CentreDec",CentreDec,DegreeSymbol,terminal=False)
+        CamLog.Log("MarkupPreview: NGCItems: Start:",len(NGC_DF),"records.",terminal=False)
         boolseries = NGC_DF['radeg'].between(MinRADeg, MaxRADeg, inclusive='both') # Create filter for items within RA range.
         tempdf = NGC_DF[boolseries] # Apply filter.
+        CamLog.Log("MarkupPreview: NGCItems: RA Filtered:",MinRADeg,DegreeSymbol,MaxRADeg,DegreeSymbol,". Leaves",len(tempdf),"records.",terminal=False)
         boolseries = tempdf['decdeg'].between(MinDecDeg, MaxDecDeg, inclusive='both') # Create filter for items with Dec range.
         tempdf = tempdf[boolseries] # Apply filter.
+        CamLog.Log("MarkupPreview: NGCItems: Dec Filtered:",MinDecDeg,DegreeSymbol,MaxDecDeg,DegreeSymbol,". Leaves",len(tempdf),"records.",terminal=False)
         NewImageBuffer.SetPenColor(BGRLightBlue)
         for i in range(len(tempdf)):
             TempStarParms = tempdf.iloc[i] # Select each row in turn from the Pandas dataframe.
             TempStarName = TempStarParms['name']
-            try:
+            try: # Earlier versions of the data file may not have this column.
                 TempStarName2 = TempStarParms['knownas']
             except:
                 TempStarName2 = '' # Field not available in this data set.
+            try: # Earlier versions of the data file may not have this column.
+                NGCType = TempStarParms['typelabel']
+            except:
+                NGCType = TempStarParms['type']
             TempStar = Star(ra_hours=(TempStarParms['rah'], TempStarParms['ram'], TempStarParms['ras']), 
                             dec_degrees=(TempStarParms['ded'], TempStarParms['dem'], TempStarParms['des'])) # Create star object from RADEC co-ordinates.
             TempStarWidth = int((TempStarParms['widthdeg'] * CameraInUse.PixelsPerFovDegreeWidth) / 2) # Convert from arcseconds to degrees & radius.
             TempStarHeight = int((TempStarParms['heightdeg'] * CameraInUse.PixelsPerFovDegreeHeight) / 2)
+            if TempStarWidth < 1 and TempStarHeight < 1: continue # Too small to display.
             temptarget = target(TempStar,name=TempStarName,objecttype='ngc',constellation="",description="",magnitude=TempStarParms['magnitude'])
             TempStarAz, TempStarAlt = temptarget.AzAltDegrees(time=t)
+            if TempStarAz < 0: # Below horizon, don't mark it up.
+                continue # Skip to next object.
             PlotStarAlt, PlotStarAz = RelativeAltAz(TempStarAlt,TempStarAz,CentreAlt,CentreAz)
             TempStarX, TempStarY = PlotRelativeAltAz(PlotStarAlt,PlotStarAz,height,width)
-            TempTextX = TempStarX - TempStarWidth - 5 # Put NGC labels on the LEFT of the object so they don't clash with any matching Messier label for the same thing.
+            #TempTextX = TempStarX - TempStarWidth - 5 # Put NGC labels on the LEFT of the object so they don't clash with any matching Messier label for the same thing.
             NewImageBuffer.DrawEllipse(TempStarX,TempStarY, int(TempStarWidth),int(TempStarHeight), angle=0, startAngle=0, endAngle=360)
+            CamLog.Log("MarkupPreview: NGCItems: Processing entry",i,TempStarName,TempStarName2,";",TempStarWidth,"*",TempStarHeight,";",TempStarX,",",TempStarY,terminal=False)
             if Parameters.MarkupShowLabels:
+                TempTextX = TempStarX - TempStarWidth - 5 # Put NGC labels on the LEFT of the object so they don't clash with any matching Messier label for the same thing.
                 text = AzAltText(TempStarAz,TempStarAlt,'deg')
                 NewImageBuffer.AddText(text,TempTextX,TempStarY + lineheight,size=0.5,hjust='r')
                 text = "RA:" + TempStarParms['ralabel'] + " Dec:" + TempStarParms['declabel']
                 NewImageBuffer.AddText(text,TempTextX,NewImageBuffer.NextTextY,size=0.5,hjust='r')
+                if NGCType != None: # Describe the object type.
+                    NewImageBuffer.AddText(NGCType.title(),TempTextX,NewImageBuffer.NextTextY,size=0.5,hjust='r')
                 if TempStarName != None: # Name - ie NGCxxx
                     NewImageBuffer.AddText(TempStarName.upper(),TempTextX,TempStarY -30,size=1,hjust='r')
                 if TempStarName2 != None: # Known as - ie Whirlpool Galaxy
                     NewImageBuffer.AddText(TempStarName2.title(),TempTextX,NewImageBuffer.NextTextY,size=1,hjust='r')
-        CamLog.Log("MarkupPreview: Plot NGC objects end. (",len(tempdf),"/",len(NGC_DF),"objects selected)",terminal=False)
+        CamLog.Log("MarkupPreview: NGCItems: Plot NGC objects end. (",len(tempdf),"/",len(NGC_DF),"objects selected)",terminal=False)
     
     
     hsat = HomeSite.at(t)
     if True: # Parameters.MarkupShowStars: # Mark neighbouring stars.
         CamLog.Log("MarkupPreview: ShowStars",terminal=False)
+        NewImageBuffer.AvoidTextCollisions = Parameters.MarkupAvoidCollisions # Do we allow star labels to overlap?
         # Mark neighbouring stars on the picture too. This will help with alignment.
         # Select a subset of the Hipparcos catalog which is within 10Deg of the target (=centre of image)
         CamLog.Log("MarkupPreview: SelectStars start",terminal=False)
@@ -6989,6 +7012,7 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
         CamLog.Log("MarkupPreview: NeighbouringStars contains",NeighbouringStarCount,"entries.",terminal=False)
         NewImageBuffer.SetPenColor(BGRPaleGreen)
         # Now convert this list of ra/dec locations into alt/az positions for plotting on the preview image.
+        PlottedStarCount = 0 # How many stars have been plotted? We don't want to swamp the display.
         for i in range(NeighbouringStarCount):
             if i % 400 == 0:
                 CamLog.Log("MarkupPreview: ShowStars. Processing star",i,terminal=False)
@@ -6999,6 +7023,8 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
             PlotStarAlt, PlotStarAz = RelativeAltAz(TempStarAlt.degrees,TempStarAz.degrees,CentreAlt,CentreAz)
             TempStarX, TempStarY = PlotRelativeAltAz(PlotStarAlt,PlotStarAz,height,width)
             if NewImageBuffer.OutOfBounds(TempStarX,TempStarY): continue # This star is off the edge of the image, skip it.
+            # We're going to plot this one.
+            PlottedStarCount += 1
             TempStarWidth = int(TempStarRec['markupradius'])
             NewImageBuffer.DrawCircle(TempStarX,TempStarY,TempStarWidth,thickness=3) # cyan # circle where the star is.
             labelx = TempStarX + TempStarWidth + 5 # X location of labels.
@@ -7018,6 +7044,10 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
                 NewImageBuffer.AddText(text,labelx,NewImageBuffer.NextTextY,size=0.5) 
                 text = "RA:" + TempStarRec['ralabel'] + " Dec:" + TempStarRec['declabel']
                 NewImageBuffer.AddText(text,labelx,NewImageBuffer.NextTextY,size=0.5) 
+            if PlottedStarCount >= Parameters.MarkupStarLabelLimit: # We're plotted enough, don't swamp the image.
+                CamLog.Log("MarkupPreview: ShowStars: Plotted maximum",PlottedStarCount,"star labels.",terminal=False)
+                break
+        NewImageBuffer.AvoidTextCollisions = False # Turn off the label collision protection.
 
     if True: #Parameters.MarkupConstellations: # Mark constellation patterns... # Workaround for post skyfield 1.39. Fault not fully understood yet.
         CamLog.Log("MarkupPreview: ShowConstellations POST OCT.2023 version. Post Skyfield 1.39 etc.",terminal=False)
@@ -7346,12 +7376,13 @@ def CreateTargetImage(color=False,MinMagnitude=None,astrotime=None,StarLimit=Non
             TempStarAz, TempStarAlt = temptarget.AzAltDegrees(time=t)
             PlotStarAlt, PlotStarAz = RelativeAltAz(TempStarAlt,TempStarAz,alt_degree,az_degree)
             TempStarX, TempStarY = PlotRelativeAltAz(PlotStarAlt,PlotStarAz,height,width)
+            CamLog.Log("CreateTargetImage: Plot NGC ",i,tempdf['name'],"at",TempStarX,TempStarY,"radius",TempStarWidth,TempStarHeight,terminal=False)
             NewTargetImage.FillEllipse(TempStarX,TempStarY, TempStarWidth,TempStarHeight, angle=0, startAngle=0, endAngle=360, color=BGRDarkGreen)
-        CamLog.Log("CreateTargetImage: Plot NGC objects end. (",len(tempdf),"/",len(NGC_DF),"objects selected)",terminal=False)
+        CamLog.Log("CreateTargetImage: NGCItems: Plot NGC objects end. (",len(tempdf),"/",len(NGC_DF),"objects selected)",terminal=False)
         
     # Decide on a cutoff for the number of stars to plot.
     # If not specified by calling routine, try to match the number of stars detected in the latest live image.
-    # (When simulating images, the first tracking pass will have 0 stars in the LatestStarCount, because we're drawing it here!)
+    # (When simulating images, the first tracking pass will have 0 stars in the LatestStarCount, because it doesn't exist until we create it here.)
     if StarLimit == None: 
         StarLimit = max(DriftTracker.LatestImage.StarCount + 10,50)
         CamLog.Log("CreateTargetImage: LatestStarCount from last saved image is:", DriftTracker.LatestImage.StarCount,terminal=False)
@@ -7385,7 +7416,7 @@ def CreateTargetImage(color=False,MinMagnitude=None,astrotime=None,StarLimit=Non
                 continue # The star is off the edge of the image, ignore it.
             TempStarMagnitude = TempStarRec['magnitude'] # Note the brightness of the star.
             if TempStarMagnitude > MinMagnitude: # Too dim
-                continue # The star is too dimp, ignore it.
+                continue # The star is too dim, ignore it.
             if color: # Colour images need star colour and represent the magnitude via the size of the star.
                 TempStarRadius = int(TempStarRec['starradius'])
                 TempStarColor = (int(TempStarRec['color_b']),int(TempStarRec['color_g']),int(TempStarRec['color_r']))
@@ -7556,7 +7587,7 @@ def CheckImageSet(): # 5 references.
                  "Images captured so far:",
                  imagelist]
         textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
-        result = AskYesNo("Is this session complete? (y/N) ",default=False)
+        result = AskYesNo("Is this session complete? [y/N]",default=False)
         print (" ")
     return result
 
@@ -7638,6 +7669,10 @@ def CameraHandler(outboundqueue,inboundqueue): # 1 references.
             if 'ReadyToObserve' in ReceivedMessage: # Main routine is updating the ReadyToObserve status.
                 ReadyToObserve = ReceivedMessage['ReadyToObserve']
                 CamLog.Log('CameraHandler.inboundqueue: ReadyToObserve =',ReadyToObserve,terminal=False)
+            if 'Reset' in ReceivedMessage: # Instruction to reset image buffers.
+                CameraInUse.Reset() # Reset the image buffers.
+                CameraWindow.Print(NowHMS() + ' Reset image buffers.')
+                CamLog.Log('CameraHandler.inboundqueue: reset received.',terminal=False)
             if 'PhotoCount' in ReceivedMessage: # Main routine is updating the current photo count.
                 PhotoCount = ReceivedMessage['PhotoCount']
                 ReplyMessage = {'TimeStamp' : NowUTC(), 'PhotoCountReset' : True} # Acknowledge that the photo count has been reset.
@@ -7876,7 +7911,9 @@ def ShutdownCamera(): # 9 references.
         else: StatusMessage = {} # Nothing from CameraHandler.
         if 'RunThread' in StatusMessage: # RunThread status message received.
             if StatusMessage['RunThread'] == False: # CameraHandler is shutting down.
-                CameraThread.join() # Wait for it to complete.
+                print ("CameraThread stopping...")
+                if CameraThread.is_alive():
+                    CameraThread.join() # Wait for it to complete.
                 print (textcolor.yellow("CameraThread successfully stopped."))
                 break # OK to proceed.
         if CameraShutdownTimer.Due(): # Timeout has expired, something's wrong.
@@ -7917,6 +7954,7 @@ MessageThread = None # Pointer to the message handler.
 
 def StartMessageThread(): 
     global MessageThread # Must be global because it must persist after this function completes. 
+    Session.TerminateMctlHandler = False # Clear any existing shutdown flag.
     if MessageThread == None or MessageThread.is_alive() != True:
         MessageThread = threading.Thread(target=Session.MctlHandler)
         MessageThread.start()
@@ -8009,7 +8047,7 @@ def GoToTarget(target_object): # 3 references.
                 return False # Failed!
         else: MainLog.Log('GoToTarget: Motor ' + i.MotorName + ' already on target.')
     StopMotors() # Reset motor condition to prevent further movement.
-    print ("NOTE: The camera is now positioned, but it is not tracking or photographing the object yet.")
+    print ("NOTE: The camera is now positioned, but it is not tracking or photographing the target yet.")
     print ("      (Pi-lomar must calculate a trajectory before photography can start.)")
     print (textcolor.yellow("Done."))
     return True
@@ -8039,6 +8077,32 @@ def RestartMicrocontroller(): # 2 references. # For menu
 
 # ------------------------------------------------------------------------------------------------------
 
+def MicrocontrollerLedsOff(): # 1 references. # For menu
+    Parameters.MctlLedStatus = False
+    SetGlobalLedStatus()
+    lines = ["Microcontroller LEDs are now off.",
+             " ",
+             "The RGB LED will remain off throughout operation.",
+             " ",
+             "This reduces the stray light within the",
+             "observatory dome."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
+
+# ------------------------------------------------------------------------------------------------------
+
+def MicrocontrollerLedsOn(): # 1 references. # For menu
+    Parameters.MctlLedStatus = True
+    SetGlobalLedStatus()
+    lines = ["Microcontroller LEDs are now on.",
+             " ",
+             "The RGB LED will be active throughout operation.",
+             " ",
+             "This increases the stray light within the",
+             "observatory dome."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
+
+# ------------------------------------------------------------------------------------------------------
+
 def ObservationSubmenu(drifttracker=None): # 1 references. 
     """ Submenu of options that can be used DURING an observation. """
     ClearScreen() # Clear the screen and force window refresh.
@@ -8049,6 +8113,8 @@ def ObservationSubmenu(drifttracker=None): # 1 references.
         'ProgramStatus':          {'label':'Status',                  'call':ProgramStatus},
         'TuneAzimuth':            {'label':'Tune azimuth',            'call':TunePositionAzimuth},
         'TuneAltitude':           {'label':'Tune altitude',           'call':TunePositionAltitude},
+        'MctlLedsOff':            {'label':'Microcontroller LEDS off','call':MicrocontrollerLedsOff},
+        'MctlLedsOn':             {'label':'Microcontroller LEDS on', 'call':MicrocontrollerLedsOn},
         'ResetDriftTracking':     {'label':'Reset drift tracking',    'call':temp},
         'RestartMicrocontroller': {'label':'Restart microcontroller', 'call':RestartMicrocontroller}
     }
@@ -8114,6 +8180,27 @@ def UpdateCameraCaptureStatus(): # 1 references.
 
 # ------------------------------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------------------------------
+        
+def GeneratePreviewMovie(folder=None,filename=None): # 1 references.    
+    MainLog.Log("Generating animation of observation previews...",terminal=False)
+    print(textcolor.yellow("Generating animation of observation previews (if available)..."))
+    print('May take some time...')
+    if folder == None: # No folder named, default to current one.
+        folder = FolderList.get('preview')
+    sourcefilepattern = folder + 'preview_*.jpg'
+    avifilename = folder + 'preview_' + CleanDatetimeString(str(NowUTC())) + '.mp4'
+    if filename != None: # Override target filename.
+        avifilename = filename
+    # *Q* GLOB facility may disappear from later versions of ffmpeg, this will need revising when that happens.
+    cmd = "ffmpeg -y -framerate 10 -pattern_type glob -i '" + sourcefilepattern + "' -vf scale='iw/2:ih/2' " + avifilename
+    osCmd(cmd)
+    print(textcolor.yellow("Generated"), avifilename)
+    MainLog.Log("GeneratePreviewAvi: Completed animation of observation previews.",terminal=False)
+    return True
+
+# ------------------------------------------------------------------------------------------------------
+   
 def ReportObservationErrors(): # 1 references.
     # If any errors were recorded during the session, summarise them here.
     # The display is very active during an observation, so it is useful to summarise errors clearly when the observation is complete.
@@ -8151,7 +8238,7 @@ def IncompleteObservationCheck():
                  "This may mean that the camera positions are out of date",
                  "you may need to reset the camera altitude and azimuth."]
         textcolor.TextBox(lines,fg=textcolor.WHITE,bg=textcolor.ORANGERED1)
-        result = AskYesNo("Continue with this observation? (y/N)",default=False)
+        result = AskYesNo("Continue with this observation? [y/N]",default=False)
     else:
         result = True
     return result
@@ -8241,7 +8328,6 @@ def ObservationRun(): # 1 references.
     MainLog.ErrorList = [] # Clear out any old error summaries. We only want to report NEW instances.
     CamLog.ErrorList = [] # Clear out any old error summaries. We only want to report NEW instances.
     ReadyToObserve = False # We are not on-target yet.
-    #Led4.Off() # ReadyToObserve status LED.
     MainLog.Log('ObservationRun.initial: ReadyToObserve = False',terminal=False)
     temp = GetTerminalSize() # Note the size of the window. If it changes, we'll clear the screen.
     TerminalCols = temp[0] # Current screen columns.
@@ -8259,6 +8345,9 @@ def ObservationRun(): # 1 references.
     StartCameraThread() # Fire up the camera thread if it's not running.
     time.sleep(0.5) # Pause briefly before sending the control message to the camera handler.
     ControlMessage = {'TimeStamp' : NowUTC(), 'PhotoCount' : 0} # *Q* Can be common attribute now rather than message queues.
+    CameraControlQueue.put(ControlMessage) # Tell the camera to reset the photo count.
+    Session.CameraTxCount += 1 # We sent another message to the camera.
+    ControlMessage = {'Reset':True} # Tell the camera to reset buffers.
     CameraControlQueue.put(ControlMessage) # Tell the camera to reset the photo count.
     Session.CameraTxCount += 1 # We sent another message to the camera.
     # Wait for acknowledgement
@@ -8337,8 +8426,9 @@ def ObservationRun(): # 1 references.
     if Mctl.BytesReceived < 10: # Not much sign of activity from the microcontroller!
         MainLog.Log("ObservationRun: Microcontroller UART link does not appear to be communicating. Please check.",level='error',terminal=True)
         print("1) Is microcontroller installed?")
-        print("2) Is microcontroller connected via UART pins?")
+        print("2) Is microcontroller connected via UART pins / GPIO header?")
         print("3) Is microcontroller software installed?")
+        print("4) Microcontroller connection via USB alone will not support UART communication.")
         observationresult = False # Don't continue.
         RunObservation = False # We cannot perform the observation. We will have to return to the menu.
         return observationresult # Return to the menu.
@@ -8348,7 +8438,8 @@ def ObservationRun(): # 1 references.
         temp = GoToTarget(Session.Target) # Go directly to the target before starting the trajectory mechanism.
         if temp == False:
             MainLog.Log("ObservationRun: Initial GOTO failed.",level='error')
-            return # Quit immediately.
+            temp = AskYesNo("Do you want to continue anyway? [y/N]",False)
+            if not temp: return # Quit immediately.
     else: # Let the telescope perform initial GOTO once the trajectory is available. Risks comms bottleneck.
         MainLog.Log('ObservationRun: No initial GOTO performed before creating trajectory.',terminal=False)
     if Session.Target.IsFixedPoint(): # Fixed point observations don't move the telescope, so no trajectory is needed.
@@ -8475,8 +8566,8 @@ def ObservationRun(): # 1 references.
             RunObservation = False # Quit the observation run.
             MainLog.Log("ObservationRun: Insufficient storage space terminating the observation.",level="error")
         # Motor status.
-        if Parameters.MotorsEnabled: ObservationStatusWindow.FieldValue('MEN',Parameters.MotorsEnabled,fg=OSW_TEXT_GOOD) # Green
-        else: ObservationStatusWindow.FieldValue('MEN',Parameters.MotorsEnabled,fg=OSW_TEXT_BAD) # Red
+#        if Parameters.MotorsEnabled: ObservationStatusWindow.FieldValue('MEN',Parameters.MotorsEnabled,fg=OSW_TEXT_GOOD) # Green
+#        else: ObservationStatusWindow.FieldValue('MEN',Parameters.MotorsEnabled,fg=OSW_TEXT_BAD) # Red
         # Camera status.
         UpdateCameraStatus() # Update the camera status.
         # Motor control mode.
@@ -8634,8 +8725,6 @@ def ObservationRun(): # 1 references.
                 ImageStatusWindow.FieldValue("LAZT",line,fg=OSW_TEXT_GOOD)
             else:
                 ImageStatusWindow.FieldValue("LALT",line,fg=OSW_TEXT_GOOD)
-        #if ReadyToObserve: Led4.On() # ReadyToObserve status LED.
-        #else: Led4.Off() # ReadyToObserve status LED.
         
         if Session.DebugMode: # We're in debug mode, just summary status update.
             if DebugTimer.Due(): # It's time to publish a summary status.
@@ -8687,7 +8776,6 @@ def ObservationRun(): # 1 references.
     # Observation is over at this point.
     print(textcolor.clearforward()) # Clear the screen from the current location forward, makes the following messages easier to read.
     ReadyToObserve = False
-    #Led4.Off() # ReadyToObserve light should be OFF now.
     if True: # Was Parameters.CameraEnabled: # Tell the camera it is all over.
         ControlMessage = {'TimeStamp' : NowUTC(), 'ReadyToObserve' : False}
         CameraControlQueue.put(ControlMessage) # Keep sending the CameraEnabled status to the camera.
@@ -8696,6 +8784,9 @@ def ObservationRun(): # 1 references.
     # Tell the motors it is all over now that the camera is completed. 
     StopMotors() # Tell the motors to immediately stop. 
     print ('\n' + textcolor.cursordown(10) + textcolor.clearforward()) # Move cursor below the ObservationRun display and clear the rest of the screen to make way for the menu.
+    if Parameters.GeneratePreview: # Preview images were requested.
+        if AskYesNo("Do you want to generate an AVI animation of the preview files? [y/N]",False): # We can generate a small animation of the observation from the preview images.
+            GeneratePreviewMovie()
     ReportObservationErrors()
 
     textcolor.TextBox("The images are stored in " + FolderList.get('session'),fg=textcolor.YELLOW,bg=textcolor.BLACK)
@@ -8709,39 +8800,6 @@ def ObservationRun(): # 1 references.
 
 # ----------------------------------------------------------------------------------------------------- 
 
-#def AddAngles(angle1,angle2): # 2 references.
-#    """ Add 2 angles together.
-#        Angles can be decimal values, or skyfield angle objects. """
-#    if hasattr(angle1,'_degrees'): a1 = angle1._degrees
-#    elif hasattr(angle1,'degrees'): a1 = angle1.degrees
-#    else: a1 = angle1
-#    if hasattr(angle2,'_degrees'): a2 = angle2._degrees
-#    elif hasattr(angle2,'degrees'): a2 = angle2.degrees
-#    else: a2 = angle2
-#    result = a1 + a2
-#    return result
-#
-## ----------------------------------------------------------------------------------------------------- 
-#
-#def SetMotorClock(name): # 2 references.
-#    FoundIt = False
-#    for i in MotorControls:
-#        if i.MotorName == name:
-#            FoundIt = True
-#            i.SetMotorClock()
-#    return FoundIt
-#
-## ------------------------------------------------------------------------------------------------
-#
-#def SetAzimuthClock(): # 1 references. # For menu
-#    SetMotorClock('azimuth')
-#    
-## ------------------------------------------------------------------------------------------------
-#
-#def SetAltitudeClock(): # 1 references. # For menu
-#    SetMotorClock('altitude')
-#
-# ------------------------------------------------------------------------------------------------
 
 def DisableCleanup(): # 1 references. # For menu
     global FolderList
@@ -8750,7 +8808,7 @@ def DisableCleanup(): # 1 references. # For menu
         print ("This may degrade the raw image data.")
         print ("It is recommended to disable this feature for astrophotography.")
         print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
-        if AskYesNo("Disable on-sensor cleanup? (y/N)",False):
+        if AskYesNo("Disable on-sensor cleanup? [y/N]",False):
             SensorInUse.DisableCleanup()
             Parameters.DisableCleanup = True
             FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
@@ -8766,7 +8824,7 @@ def EnableCleanup(): # 1 references. # For menu
         print ("It is often disabled for astrophotography because it degrades the raw image data slightly.")
         print ("It is recommended to enable this for regular photography.")
         print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
-        if AskYesNo("Enable on-sensor cleanup? (y/N)",False):
+        if AskYesNo("Enable on-sensor cleanup? [y/N]",False):
             Parameters.DisableCleanup = False
             SensorInUse.EnableCleanup()
             FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
@@ -8918,6 +8976,8 @@ def DocumentSession(): # 8 references.
         f.write("Pixels per FOV degree width\t" + str(CameraInUse.PixelsPerFovDegreeWidth) + "\n")
         f.write("Pixels per FOV degree height\t" + str(CameraInUse.PixelsPerFovDegreeHeight) + "\n")
         f.write("Seconds per pixel\t" + str(CameraInUse.SecondsPerPixel) + "\n")
+        f.write("Infra red filter\t" + str(Parameters.IRFilter) + "\n")
+        f.write("Light pollution filter\t" + str(Parameters.PollutionFilter) + "\n")
     # Append key values to 'recent target list'. This is useful if recovering from system failure, or resuming a previous observation at a later date.
     # When selecting a new target, this recent target list is offered as a short-cut to duplicate previous observations.
     with open(HistoryFile,'a') as f:
@@ -8926,7 +8986,7 @@ def DocumentSession(): # 8 references.
                 Session.Target.SearchGroup + "\t" + \
                 Session.Target.SearchTerm + "\t" + \
                 str(float(CameraInUse.ExposureSeconds)) + "\t" + \
-                str(SensorInUse.Mode) + "\n") # + \
+                str(SensorInUse.Mode) + "\n")
     return
 
 # ------------------------------------------------------------------------------------------------------
@@ -8954,32 +9014,6 @@ DocumentSession() # Write a summary document with key info into the session fold
 def FlushCommandQueue(): # 1 references. # For menu
     Mctl.WriteFlush(send=False)
     Mctl.ReadFlush()
-
-# ------------------------------------------------------------------------------------------------------
-
-def MicrocontrollerLedsOff(): # 1 references. # For menu
-    Parameters.MctlLedStatus = False
-    SetGlobalLedStatus()
-    lines = ["Microcontroller LEDs are now off.",
-             " ",
-             "The RGB LED will remain off throughout operation.",
-             " ",
-             "This reduces the stray light within the",
-             "observatory dome."]
-    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
-
-# ------------------------------------------------------------------------------------------------------
-
-def MicrocontrollerLedsOn(): # 1 references. # For menu
-    Parameters.MctlLedStatus = True
-    SetGlobalLedStatus()
-    lines = ["Microcontroller LEDs are now on.",
-             " ",
-             "The RGB LED will be active throughout operation.",
-             " ",
-             "This increases the stray light within the",
-             "observatory dome."]
-    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9045,7 +9079,7 @@ def SelectTarget(): # 1 references. # For menu
 
 def BeginObservation(): # 1 references. # For menu
     print(textcolor.yellow(SummariseObservationParameters()))
-    if AskYesNo('OK to start observation? (y/N)',default=False):
+    if AskYesNo('OK to start observation? [y/N]',default=False):
         ObservationRun()
 
 # ------------------------------------------------------------------------------------------------------
@@ -9101,9 +9135,12 @@ def MenuManualPreview(): # 1 references. # For Menu
 # ------------------------------------------------------------------------------------------------------
 
 def MenuAutoPhoto(): # 1 references. # For menu
-    StartCameraThread()
-    CameraInUse.AutoPhoto() # Take a series of completely automatic exposures (for focus testing etc in daylight).
-    ShutdownCamera()
+    if Parameters.CameraEnabled:
+        StartCameraThread()
+        CameraInUse.AutoPhoto() # Take a series of completely automatic exposures (for focus testing etc in daylight).
+        ShutdownCamera()
+    else:
+        MainLog.Log("MenuAutoPhoto: Camera is disabled. Cannot capture images.",level='warning',terminal=True)
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9201,10 +9238,10 @@ def ShowMotorStatus():
     """ Show the status of all the motors. """
     print(textcolor.yellow("Motor status"))
     
-    print("    Motors enabled:",Parameters.MotorsEnabled)
+    #print("    Motors enabled:",Parameters.MotorsEnabled)
     print("  Backlash enabled:",Parameters.BacklashEnabled)
     print("   Fault sensitive:",Parameters.FaultSensitive)
-    print(" Use microstepping:",Parameters.UseMicrostepping)
+    #print(" Use microstepping:",Parameters.UseMicrostepping)
     print("Motor status delay:",Parameters.MotorStatusDelay,"s")
     print("    Optimise moves:",Parameters.OptimiseMoves)
     print(" ")
@@ -9326,6 +9363,46 @@ def TrackingStatus():
 
 # ------------------------------------------------------------------------------------------------------
 
+def AboutCamera():
+    """ Display information about the camera. """
+    print(textcolor.yellow("About Camera"))
+
+    print(textcolor.white(" Sensor"))
+    print("  Sensor width:",SensorInUse.PixelWidth,"px")
+    print("  Sensor height:",SensorInUse.PixelHeight,"px")
+    print("  Max exposure:",SensorInUse.MaxExposureSeconds,"s")
+    print("  Min exposure:",SensorInUse.MinExposureSeconds,"s")
+    print("  Sensor type:",SensorInUse.Type)
+    print("  Sensor ID:",SensorInUse.ID)
+    print("  Sensor mode:",SensorInUse.Mode)
+    print("  On chip cleanup:",SensorInUse.OnChipCleanup)
+    print("  Infra red filter:",Parameters.IRFilter) # Is Infra Red filter fitted?
+
+    print(textcolor.white(" Lens"))
+    print("  Base focal length:",LensInUse.BaseLength,"mm (before converters)")
+    print("  Focal length:",LensInUse.Length,"mm (including converters)")
+    print("  35mm equivalent focal length:",LensInUse.EquivLength,"mm")
+    print("  Horizontal Field of View:",LensInUse.FovHorizontal,DegreeSymbol)
+    print("  Vertical Field of View:",LensInUse.FovVertical,DegreeSymbol)
+    print("  Field of View:",LensInUse.Fov,DegreeSymbol)
+    print("  Aperture:","f",LensInUse.Aperture)
+    print("  Pollution filter:",Parameters.PollutionFilter) # Is light pollution filter fitted?
+    
+    print(textcolor.white(" Camera"))
+    if Parameters.CameraEnabled:
+        print("  Camera enabled:",textcolor.green(Parameters.CameraEnabled))
+    else:
+        print("  Camera enabled:",textcolor.red(Parameters.CameraEnabled))
+    print("  Exposure time:",CameraInUse.ExposureSeconds,"s")
+    print("  Tracking exposure time:",CameraInUse.TrackingExposureSeconds,"s")
+    print("  Pixels per FoV degree width:",CameraInUse.PixelsPerFovDegreeWidth)
+    print("  Pixels per FoV degree height:",CameraInUse.PixelsPerFovDegreeHeight)
+    print("  Pixel FoV width:",round(CameraInUse.PixelFovWidth,4),DegreeSymbol)
+    print("  Pixel FoV height:",round(CameraInUse.PixelFovHeight,4),DegreeSymbol)
+    print("  Motion:",round(CameraInUse.SecondsPerPixel,4),"s/px")
+
+# ------------------------------------------------------------------------------------------------------
+
 def About():
     """ Display version information. """
     print(textcolor.yellow("About",sys.argv[0]))
@@ -9351,7 +9428,10 @@ def About():
     MainLog.Log("Program:",sys.argv[0],terminal=True) # What program name is running?
     MainLog.Log("Program version:",VERSION,terminal=True) # Print RPi software version.
     MainLog.Log("Project root:",ProjectRoot,terminal=True) # What is the project root?
-    MainLog.Log("Microcontroller program version:",Session.ControllerVersion,terminal=True) # What microcontroller software version is running?
+    if Session.ValidControllerVersion():
+        MainLog.Log("Microcontroller program version:",textcolor.green(Session.ControllerVersion),"(good)",terminal=True) # We like this version.
+    else:
+        MainLog.Log("Microcontroller program version:",textcolor.red(Session.ControllerVersion),"(check)",terminal=True) # We don't trust this version.
     MainLog.Log("Acceptable microcontroller versions:",ACCEPTABLECONTROLLERVERSIONS,terminal=True) # What microcontroller versions are acceptable?
     MainLog.Log("Python version:",sys.version_info,terminal=True) # What version of Python is this?
     # Print any package versions available. 
@@ -9383,6 +9463,7 @@ CameraMenuOptions = {
     'SensorCleanupOn':           {'label':'Sensor cleanup on',          'call':EnableCleanup},
     'AutoDetectCamera':          {'label':'Auto detect camera',         'call':AutoDetectCamera},
     'CalibrateFov':              {'label':'Calibrate FoV',              'call':CalibrateFovMenu},
+    'AboutCamera':               {'label':'About camera',               'call':AboutCamera},
     'EnableCamera':              {'label':'Enable camera',              'call':EnableCamera},
     'DisableCamera':             {'label':'Disable camera',             'call':DisableCamera}
 }
@@ -9447,7 +9528,7 @@ MainMenu = proceduremenu(MainMenuOptions,'Pilomar main menu',titlefg=MENU_TITLE_
 # Run main menu.
 while True:
     MainMenu.Prompt()
-    if AskYesNo("Do you really want to shut down? (y/N)",default=False): break # OK to quit.
+    if AskYesNo("Do you really want to shut down? [y/N]",default=False): break # OK to quit.
 
 # Cleanup.
 MainLog.Log("MAIN: CLOSING",terminal=False)
@@ -9460,7 +9541,7 @@ CameraAlt, CameraAz = LastReportedAltAz() # What is the alt/az location of the c
 HomeAlt, HomeAz = HomeAltAz() # Home position for camera.
 if round(CameraAlt,1) != round(HomeAlt,1) or round(CameraAz,1) != round(HomeAz,1): # Camera is not at home position.
     print(textcolor.yellow("The camera is currently at " + AzAltText(CameraAz,CameraAlt)))
-    answer = AskYesNo("Would you like to home the camera before powering off? (y/N) ",False)
+    answer = AskYesNo("Would you like to home the camera before powering off? [y/N]",False)
     if answer:
         print ("Returning camera to home position...")
         HomePosition()
