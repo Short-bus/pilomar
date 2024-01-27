@@ -533,6 +533,15 @@ class uarthost():
         LastRecMs = self.ticks_ms() - self.LastRxms # How old is the last receipt?
         return LastRecMs
 
+    def RemoveCounter(self,line):
+        """ If the line ends with a message counter ('[nnn]') remove it. """
+        temp = line.rfind('[')
+        if temp >= 0:
+            #print("RemoveCounter: Before '" + str(line) + "', idx",temp)
+            line = line[:temp].strip() # Strip anything after the last '[' character, it's a message count and not data.
+            #print("RemoveCounter: After '" + str(line) + "'")
+        return line
+
     def Read(self):
         """ Return next available complete received line. """
         # 1st check for new data received on serial port.
@@ -542,6 +551,7 @@ class uarthost():
             line = self.ReceivedLines.pop(0)
             if self.ValidateChecksum(line): # Checksum is good, trust the line.
                 line = self.RemoveChecksum(line)
+                line = self.RemoveCounter(line) # Strip any final message count from the end of the line.
             else: # Checksum is bad, reject the line.
                 print ('uarthost.Read: Rejected checksum : ' + line)
                 LogFile.Log('uarthost.Read: Rejected checksum : ' + line)
@@ -872,7 +882,7 @@ class steppermotor():
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.Orientation = 1 # 1=Fwd, -1=Bkwd. This sets the overall orientation of motion. Compensate for gearing reversing the direction of motion here! It's applied to the DirectionBCM pin when the move is made.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
-        self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. This may be useful for handling gear backlash. Starts at ZERO (No direction)
+        self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. Useful for handling gear backlash and handling rotation limits. Starts at ZERO (No direction)
         self.BacklashAngle = 0.0 # This is the angle the motor must move to overcome backlash in the gearing when changing direction.
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
         self.MotorStepsPerRev = None
@@ -892,6 +902,9 @@ class steppermotor():
         self.MaxPosition = None # Max clockwise movement. Location of limit switch in steps (This is self calibrating when in use).
         self.RestAngle = None # The 'rest' position of the axis. Used for calibrating at startup. Typically DUE SOUTH or HORIZONTAL position of the axis.
         self.RestPosition = None
+        # Limit position. This is not the position of a Limit switch, it is a rotation limit to prevent excessive cable twisting.
+        self.LimitAngle = None # If given, this is a limit of movement. The telescope will reverse around this rather than cross it. It sets LimitPosition.
+        self.LimitPosition = None # If given, this is the limit of movement. The telescope will reverse around this rather than cross it.
         self.RequestedAngle = None
         self.RequestedPosition = None
         # Set up control pins for the motor.
@@ -1134,15 +1147,6 @@ class steppermotor():
         #LogFile.Log("#", self.MotorName, 'Fault pin', self.FaultBCM.PinNumber)
 
     def SetConfig(self,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,orientation,backlashangle):
-        #LogFile.Log("#", self.MotorName, 'gearratio', gearratio)
-        #LogFile.Log("#", self.MotorName, 'motorstepsperrev', motorstepsperrev)
-        #LogFile.Log("#", self.MotorName, 'microstepratio', microstepratio)
-        #LogFile.Log("#", self.MotorName, 'minangle', minangle)
-        #LogFile.Log("#", self.MotorName, 'maxangle', maxangle)
-        #LogFile.Log("#", self.MotorName, 'restangle', restangle)
-        #LogFile.Log("#", self.MotorName, 'currentangle', currentangle)
-        #LogFile.Log("#", self.MotorName, 'orientation', orientation)
-        #LogFile.Log("#", self.MotorName, 'backlashangle', backlashangle)
         self.GearRatio = gearratio
         self.MotorStepsPerRev = motorstepsperrev
         self.MicrostepRatio = microstepratio
@@ -1153,11 +1157,11 @@ class steppermotor():
         self.Orientation = orientation
         self.BacklashAngle = backlashangle
         # Reapply dependent calculations.
-        #self.FastTime = 0.0005 # The fastest pulse time for moving the motor.
-        #self.SlowTime = 0.05 # The slowest pulse time for moving the motor.
-        #self.DeltaTime = 0.003 # The acceleration amount moving from SlowTime to FastTime as the motor gets going.
         if self.MicrostepRatio != 1: self.UseMicrostepping = True # Allow microstepping to be used. Increases resolution 32times, but let torque.
         else: self.UseMicrostepping = False
+        if self.UseMicrostepping: # Microstepping function is not currently tested because it's not used in the current project. Warn!
+            LogFile.Log("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
+            print("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
         self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. This may be useful for handling gear backlash. Starts at ZERO (No direction)
@@ -1213,19 +1217,15 @@ class steppermotor():
             All values are optional.
             Any value of 'none' is ignored.
 
-            configure motor 20231016085541 azimuth 130.492 0 360 0.0 -1 0.001 0.05 0.003 10 n  n
-                0       1         2           3       4    5  6   7  8   9     10    11  12 13 14
+            configure motor 20231016085541 azimuth 130.492 0 360 0.0 -1 0.001 0.05 0.003 10 n  n 90.0 240 400  1 180.0
+                0       1         2           3       4    5  6   7  8   9     10    11  12 13 14 15   16 17  18 19
                 
             """
-        #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") start.")
-        #print("s.CM rec:",line)
         self.ConfigStartTime = Clock.Now()
         try:
             lineitems = line.split(' ')
             lc = len(lineitems)
-            if lc > 2: 
-                #print("s.CM Check clock",lineitems[2])
-                Clock.UpdateClockFromString(lineitems[2]) # Check that the clock is as synchronised as possible.
+            if lc > 2: Clock.UpdateClockFromString(lineitems[2]) # Check that the clock is as synchronised as possible.
             if lc > 4 and lineitems[4].lower() != 'none': # To apply to live copy.
                 self.CurrentAngle = float(lineitems[4]) # Restore current position of the motor from the RPi's memory.
                 self.CurrentPosition = self.AngleToStep(self.CurrentAngle)
@@ -1256,13 +1256,27 @@ class steppermotor():
                 self.FaultSensitive = StringToBool(lineitems[13])
             if lc > 14 and lineitems[14].lower() != 'none': # Enable/disable move optimisation.
                 self.OptimiseMoves = StringToBool(lineitems[14])
+            if lc > 15: # Define movement limit on the motor. The motor will reverse around a limit rather than crossing it.
+                if lineitems[15].lower() != 'none': # Set a movement limit.
+                    self.LimitAngle = float(lineitems[15])
+                    self.LimitPosition = self.AngleToStep(self.LimitAngle)
+                else:
+                    self.LimitAngle = None 
+                    self.LimitPosition = None
+            if lc > 16 and lineitems[16].lower() != 'none': # Define GearRatio.
+                self.GearRatio = float(lineitems[16])
+            if lc > 17 and lineitems[17].lower() != 'none': # Define motorstepsperrev
+                self.MotorStepsPerRev = int(lineitems[17])
+            if lc > 18 and lineitems[18].lower() != 'none': # Define microstepratio
+                self.MicrostepRatio = int(lineitems[18])
+            if lc > 19 and lineitems[19].lower() != 'none': # Define restangle
+                self.RestAngle = float(lineitems[19])
             self.MotorConfigured = True
-            #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") success.")
         except Exception as e:
             LogFile.Log("steppermotor.ConfigureMotor(line) failed: " + str(e))
             print("steppermotor.ConfigureMotor() failed.")
         self.ConfigEndTime = Clock.Now()
-        #LogFile.Log("steppermotor.ConfigureMotor(",self.MotorName,") end.")
+        self.ReportMotorConfig() # Report the configuration back to the RPi.
         return self.MotorConfigured
 
     def MoveFullStep(self,stepsize=1):
@@ -1288,7 +1302,6 @@ class steppermotor():
                 LogFile.Log("steppermotor.MoveFullStep(", self.MotorName, ') DRV8825 fault - cleared.')
                 self.FaultDetected = False # No fault.
         if abs(self.StepDir) != 1: # self.StepDir must be +1 or -1
-            #raise Exception ('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
             LogFile.Log('MoveFullStep: ' + self.MotorName + ' StepDir " + str(self.StepDir) + " is invalid. Must be +/-1')
             return
         if (self.StepDir * self.Orientation) > 0:
@@ -1314,7 +1327,6 @@ class steppermotor():
             self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
         # Send MOVE pulse to controller.
         if self.MotorEnabled: # If we've disabled the motor, then perform everything except the move pulse.
-            #print ('Sending motor pulse...')
             self.StepBCM.SetValue(True) # value(1)
             time.sleep(self.WaitTime)
             self.StepBCM.SetValue(False) # value(0)
@@ -1349,100 +1361,69 @@ class steppermotor():
             print("Inefficient move:",self.CurrentPosition,"to",self.TargetPosition,",",motorsteps,"steps, suggest",inversemove)
         return inversemove
 
+    def LimitCheck(self,steps):
+        """ Return TRUE if the proposed move tries to cross the movement limit. 
+            This implies that the motor should turn around the other way to get 
+            to the target location. """
+        # Find the range of positions that the move covers.
+        result = False # The limit is not hit.
+        if self.LimitPosition != None: # A limit position is specified.
+            cp = self.CurrentPosition + self.AxisStepsPerRev
+            tp = cp + steps
+            lp = self.LimitPosition + self.AxisStepsPerRev
+            if cp > tp: 
+                cp,tp = tp,cp # Invert so that cp is always the lower value, tp is always the upper value.
+            if cp < lp < tp: # limit position is in the way.
+                result = True # The limit is hit.
+            if self.CurrentPosition == self.LimitPosition and self.StepDir == self.LastStepDir: # Cannot continue in the same direction from the limit position.
+                result = True # We hit the limit in the previous move, we must bounce off it.
+            if result: # LimitCheck was triggered. 
+                LogFile.Log("steppermotor.LimitCheck(): From:",self.CurrentPosition,"to",self.TargetPosition,"steps",steps,"crosses",self.LimitPosition)
+                print("steppermotor.LimitCheck(): From:",self.CurrentPosition,"to",self.TargetPosition,"steps",steps,"crosses",self.LimitPosition)
+        return result
+
     def MoveMotor(self):
         """ Move the motor to the new target position. Target must be defined before calling this.
             If this is handling a very large move, it may take some time, so it can also trigger
             sending MotorStatus messages back to the RPi. Because some moves are quite long, this 
-            also processes UART communication periodically too. """
-        # *Q* Choosing MotorSteps should take into account that it may be faster to go from 359Deg to 1Deg directly instead of winding backwards 358 degrees.
-        #     Decide which direction to move.
-        #     Make sure that the motor position counter handles wrapping around in both directions.
-        #     Respect an arbitrary 'turn back' point to avoid cables becoming tangled.
-        #     Does minangle/maxangle become redundant?
-        #     Find any/all checks against MinAngle and MaxAngle too.
+            also processes UART communication periodically too.
+            The motor will generally take the shortest path to the target position.
+            It may take the longer route under some circumstances. (LimitPosition must not be crossed etc.) """
         MotorSteps = self.TargetPosition - self.CurrentPosition # How many steps to take?
         if self.OptimiseMoves: # Allowed to find shorter paths!
             inversemove = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
             if inversemove != MotorSteps: # We're changing direction for a short cut.
                 MotorSteps = inversemove
-                print("steppermotor.MoveMotor moving",MotorSteps,"steps.")
+                print("steppermotor.MoveMotor moving",MotorSteps,"steps after efficiency check.")
                 self.StepDir *= -1
         else: # Must move as instructed, but can report if a shorter path exists.
             _ = self.EfficiencyCheck(MotorSteps) # Check if this is the most efficient move.
+        _ = self.LimitCheck(MotorSteps) # Check if the move would violate the LimitPosition barrier. It cannot cross this barrier.
         self.WaitTime = self.SlowTime # Start with slow move pulses. This reduces each time we call MoveFullStep().
-        #FullStepCount = 0
-        #MicroStepCount = 0
         if MotorSteps != 0:
             StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
             if abs(MotorSteps) > 100: # Large moves will reset the 'OnTarget' flag.
-                #LogFile.Log('steppermotor.MoveMotor: Large move (',MotorSteps,'). OnTarget=False')
                 self.OnTarget = False
         while MotorSteps != 0:
-            # If supporting microstepping. If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
-            # We can make a FULL step.
+            # If supporting microstepping: If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
+            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
             if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
-                if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary:
+                if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary: # Full steps work for this move.
                     # We have a long way to go, and we are at a safe point, so move a FULL STEP.
                     # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
                     MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
                     self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
-                    #FullStepCount += 1
-                else:
+                else: # Only microsteps work for this move.
                     # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
                     MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
                     self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-                    #MicroStepCount += 1
             else: # We're not using microstepping, so we're just moving full steps.
                 MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
                 self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-                #FullStepCount += 1
             self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
             for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
                 RPi.BufferInput() # Keep polling for input from the RPi.
                 RPi.WritePoll() # Keep sending data to RPi.
-            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
-        self.CheckOnTarget() # Are we actually pointing at the target?
-        if self.CurrentPosition != self.TargetPosition: # Did the motor reach intended position? (May not be the requested target if movement limits reached)
-            LogFile.Log("MoveMotor(" + self.MotorName + "): End. CurrentPosition (" + str(self.CurrentPosition) + ") is NOT TargetPosition (" + str(self.TargetPosition) + ")!")
-        StatusLed.Task('idle')
-
-    def MoveMotor_xxx(self):
-        """ Move the motor to the new target position. Target must be defined before calling this.
-            If this is handling a very large move, it may take some time, so it can also trigger
-            sending MotorStatus messages back to the RPi. """
-        MotorSteps = self.TargetPosition - self.CurrentPosition # How many steps to take?
-        self.WaitTime = self.SlowTime # Start with slow move pulses. This reduces each time we call MoveFullStep().
-        FullStepCount = 0
-        MicroStepCount = 0
-        if MotorSteps != 0:
-            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
-            if abs(MotorSteps) > 100: # Large moves will reset the 'OnTarget' flag.
-                LogFile.Log('steppermotor.MoveMotor: Large move (',MotorSteps,'). OnTarget=False')
-                self.OnTarget = False
-        while MotorSteps != 0:
-            # If supporting microstepping. If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
-            # We can make a FULL step.
-            if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
-                if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary:
-                    # We have a long way to go, and we are at a safe point, so move a FULL STEP.
-                    # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
-                    MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
-                    self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
-                    FullStepCount += 1
-                else:
-                    # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
-                    MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-                    self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-                    MicroStepCount += 1
-            else: # We're not using microstepping, so we're just moving full steps.
-                MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-                self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-                FullStepCount += 1
-            self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
-            for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
-                RPi.BufferInput() # Keep polling for input from the RPi.
-                RPi.WritePoll() # Keep sending data to RPi.
-            StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
         self.CheckOnTarget() # Are we actually pointing at the target?
         if self.CurrentPosition != self.TargetPosition: # Did the motor reach intended position? (May not be the requested target if movement limits reached)
             LogFile.Log("MoveMotor(" + self.MotorName + "): End. CurrentPosition (" + str(self.CurrentPosition) + ") is NOT TargetPosition (" + str(self.TargetPosition) + ")!")
@@ -1464,6 +1445,36 @@ class steppermotor():
             result = None
         return result
 
+    def ReportMotorConfig(self):
+        """ Report motor configuration back to the RPi. """
+        line = "# Motor " + self.MotorName + " conf 1: "
+        line += IntToTimeString(Clock.Now()) + " " 
+        line += "MinA " + str(self.MinAngle) + " " 
+        line += "MinP " + str(self.MinPosition) + " " 
+        line += "MaxA " + str(self.MaxAngle) + " " 
+        line += "MaxP " + str(self.MaxPosition) + " " 
+        line += "LimA " + str(self.LimitAngle) + " " 
+        line += "LimP " + str(self.LimitPosition) + " " 
+        RPi.Write(line) # Send over UART to RPi.
+        line = "# Motor " + self.MotorName + " conf 2: "
+        line += "FastT " + str(self.FastTime) + " " 
+        line += "SlowT " + str(self.SlowTime) + " " 
+        line += "TDelta " + str(self.TimeDelta) + " " 
+        line += "FaultS " + str(self.FaultSensitive) + " " 
+        line += "BackA " + str(self.BacklashAngle) + " " 
+        line += "Orient " + str(self.Orientation) + " " 
+        line += "OptMvs " + str(self.OptimiseMoves) + " " 
+        RPi.Write(line) # Send over UART to RPi.
+        line = "# Motor " + self.MotorName + " conf 3: "
+        line += "GearRat " + str(self.GearRatio) + " " 
+        line += "Steps/Rev " + str(self.MotorStepsPerRev) + " " 
+        line += "ustepRat " + str(self.MicrostepRatio) + " " 
+        line += "MStp/AxDeg " + str(int(self.MotorStepsPerAxisDegree)) + " " 
+        line += "AxStp/Rev " + str(int(self.AxisStepsPerRev)) + " "
+        line += "RestA " + str(self.RestAngle) + " " 
+        line += "MtrCnf " + str(self.MotorConfigured) + " " 
+        RPi.Write(line) # Send over UART to RPi.
+        
     def SendMotorStatus(self,immediate=False,codes='?-?'):
         """ Generate status message to RPi.
             The RPi uses this to decide what commands and configurations to send to the microcontroller.
@@ -1474,9 +1485,8 @@ class steppermotor():
             codes: Optional string of codes that are added to the status message. (Debug/test/dev etc)
             """
         if immediate or self.StatusTimer.Due(): # Only send the status at regular intervals, otherwise we flood communications.
-            #print("motorcontrol.SendMotorStatus(",self.MotorName,"): Start")
             self.StatusStartTime = Clock.Now()
-            if self.SendStatus == False: # Don't send status message.
+            if self.SendStatus == False: # Status message is currently disabled. Inform that we're not sending it.
                 RPi.Write('# SendMotorStatus ' + IntToTimeString(Clock.Now()) + ' ' + self.MotorName + ' disabled. ' + str(codes))
                 print("SendMotorStatus",self.MotorName,"currently disabled.",codes)
                 return
@@ -1497,7 +1507,6 @@ class steppermotor():
             self.StatusEndTime = Clock.Now()
             # Reset the status timer.
             self.StatusTimer.Reset()
-            #print(self.MotorName,"status next due in",self.StatusTimer.Remaining(),"s. at",IntToTimeString(self.StatusTimer.NextDue),"Repeat",self.StatusTimer.RepeatSeconds,"s.", codes)
 
 # Define pins for motorcontroller chips.
 AzimuthStepBCM = GPIOpin(board.GP29) # Tiny RP2040
@@ -1532,7 +1541,7 @@ AltitudeFaultBCM.pull = digitalio.Pull.UP
 # Configure Motors.
 Azimuth = steppermotor('azimuth')
 Azimuth.SetPins(stepBCM=AzimuthStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AzimuthFaultBCM) # Direct control over Azimuth motor.
-Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.5)
+Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
 Altitude = steppermotor('altitude')
 Altitude.SetPins(stepBCM=AltitudeStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AltitudeFaultBCM) # Direct control over Altitude motor.
 Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
@@ -1554,16 +1563,12 @@ class picosession():
         result = True
         for i in Motors: # for ALL motors.
             if not i.MotorConfigured: result = False # Motor must be configured.
-        #if result != self.RemoteControl:
-        #    RPi.Write('RemoteControl ' + str(result))
         self.RemoteControl = result
         # Decide if the microcontroller can have autonomous control of the motors.
         # They may start moving immediately.
         if not Clock.ClockSynchronised: result = False # Clock must be synchronised.
         for i in Motors: # for ALL motors.
             if not i.Trajectory.Valid: result = False # Trajectory must be valid.
-        #if result != self.AutonomousControl:
-        #    RPi.Write('AutonomousControl ' + BoolToString(result))
         self.AutonomousControl = result
 
     def SendMotorStatus(self,motorname,immediate=False,codes='?-?'):
@@ -1625,7 +1630,6 @@ class picosession():
         line += str(len(RPi.WriteQueue)) + ' ' # How many messages in the send queue currently? Checking for backlog building up.
         line += str(codes) + ' ' # Add optional extra codes.
         RPi.Write(line) # Send over UART to RPi.
-        #for i in Motors: i.ReportStamps() # Report timestamps to aid tracing situations where motor status messages stop for a motor sometimes.
 
     def AutoMoveMotors(self): # Trigger movement of the motors.
         """ Call this to check the current position of each motor against their trajectory.
@@ -1694,6 +1698,9 @@ def ProcessInput(line):
                 i.ConfigureMotor(line) # Load configuration.
                 i.SendMotorStatus(immediate=True,codes='cfg') # Immediately respond with lates motor status.
         Session.MovePermission() # Decide if we have valid trajectories and configuration in every motor. OK to move if we do!
+    elif line.startswith == 'report motor': # RPi has requested the motor configurations to be reported back.
+        for i in Motors:
+            i.ReportMotorConfig()
     elif lineitems[0] == 'trajectory':
         for i in Motors:
             if i.MotorName == lineitems[2]:
@@ -1708,10 +1715,8 @@ def ProcessInput(line):
         Session.MovePermission() # Decide if we have valid trajectories and configuration in every motor. OK to move if we do!
     elif line.startswith('leds off'): # Go to stealth mode, turn LEDs off.
         StatusLed.Disable() # Disable the onboard status LED.
-        #BoardLed.Disable()
     elif line.startswith('leds on'): # Enable the LEDs to show processing.
         StatusLed.Enable() # Enable the onboard status LED.
-        #BoardLed.Enable()
     else:
         RPi.Write('error: unrecognised RPi command: ' + line)
 
@@ -1738,7 +1743,7 @@ RPi.Write('controller started') # Tell the remote device we're up and running. R
 RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
 RPi.Write('# circuitpython ' + Bootline) # Tell what version of circuitpython is in use.
 RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
-# Report back which motors are configured.
+# Report back which motors are defined.
 line = "defined motors "
 for i in Motors:
     line += i.MotorName + ' '
@@ -1750,15 +1755,22 @@ try:
         try:
             LogFile.SendCheck() # Keep log file buffer under control. Flushes the buffer if it gets too large.
         except Exception as e:
-            LogFile.Log("Main:Logfile.SendCheck failed.",e)
-            print("Main:Logfile.SendCheck failed.",e)
-            
+            LogFile.Log("Main:LogFile.SendCheck failed.",e)
+            print("Main:LogFile.SendCheck failed.",e)
+
+        line = ''
         try:
             line = RPi.Read() # Any input from the Raspberry Pi in the cache? 
-            if len(line) != 0: ProcessInput(line) # Process it.
         except Exception as e:
             LogFile.Log("Main:RPi.Read failed.",e)
             print("Main:RPi.Read failed.",e)
+            print("Main:Failed on",line)
+
+        try:
+            if len(line) != 0: ProcessInput(line) # Process it.
+        except Exception as e:
+            LogFile.Log("Main:ProcessInput failed.",e)
+            print("Main:ProcessInput failed.",e)
             print("Main:Failed on",line)
             
         try:
