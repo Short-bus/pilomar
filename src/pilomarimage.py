@@ -1132,7 +1132,7 @@ class pilomarimage():
             LOW values mean that the stars are not spread out evenly across the frame. 
             HIGH values mean that the stars are spread out more evenly across the frame.
             Sets % value for each axis and the total image. """
-        if self.ImageExists(): # There's an image loaded.
+        if self.ImageExists() and len(self.StarList) > 0: # There's an image loaded and stars were identified.
             HMin = None # Lowest 'X' position of a star.
             HMax = None # Highest 'X' position of a star.
             VMin = None # Lowest 'Y' position of a star.
@@ -1146,7 +1146,7 @@ class pilomarimage():
             self.VerticalSpread = 100 * (VMax - VMin) / self.GetHeight()
             self.ImageSpread = 100 * ((self.HorizontalSpread / 100) * (self.VerticalSpread / 100))
             result = True
-        else: # There's no image.
+        else: # There's no image, or no stars were identified.
             self.HorizontalSpread = self.VerticalSpread = self.ImageSpread = 0 # No spread to measure.
             result = False
         return result
