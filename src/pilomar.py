@@ -9373,6 +9373,40 @@ def TrackingStatus():
 
 # ------------------------------------------------------------------------------------------------------
 
+def MicrocontrollerStatus():
+    """ Display information about the microcontroller and communications. """
+    print(textcolor.yellow("Microcontroller status"))
+    
+    print("Board type:",Parameters.BoardType)
+    print("Reset PIN:",Mctl.ResetPin) # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
+    print("Received line queue:",len(Mctl.Lines)) # No lines received yet.
+    print("Write chunk size:",Mctl.WriteChunkBytes,"bytes")
+    print("Write chunk gap:",Mctl.WriteChunkSeconds,"s") # Seconds between chunks written to microcontroller.
+    print("Current receiving line:",Mctl.InputLine)
+    print("Write queue length:",len(Mctl.WriteQueue))
+    print("Lines received:",Mctl.LinesReceived)
+    print("Lines sent:",Mctl.LinesSent)
+    print("Bytes received:",Mctl.BytesReceived)
+    print("Bytes sent",Mctl.BytesSent)
+    print("Print communications:",Mctl.PrintComms) # When TRUE communication log is copied to the terminal, otherwise it's only written to the log file.
+    print("LEDs active:",Mctl.LedStatus) # LEDS on by default.
+    print("UART line opened:",Mctl.LineOpenedTime,"UTC")
+    print("UART Last Tx:",Mctl.LastTxTime,"UTC") # When was data last sent?
+    print("UART Last Rx:",Mctl.LastRxTime,"UTC") # When was data last received?
+    print("UART Rx errors:",Mctl.RxErrors)
+    print("Comms timeout:",Mctl.CommsTimeout,"s") # Seconds. microcontroller is restarted if no data received after this period.
+    print("Forced restarts:",Mctl.ForcedRestarts) # How many restarts have been forced by this software?
+    print("Remote restarts:",Mctl.RemoteRestarts) # How many restarts have been registered by the remote device itself?
+    print("Reset attempts:",Mctl.ResetAttempts) # Increment for each sequential attempt to reset communication with the remote microcontroller board.
+    print("Powered by USB:",Mctl.PoweredByUsb) # Don't allow GPIO power pin to be used.
+    print("Device failure:",Mctl.DeviceFailure) # Set to TRUE if device seems to be irrecoverably lost.
+    print("Write queue prohibit:",Mctl.WriteProhibited) # OK to write again to the write queue.
+    print("Outbound message counter:",Mctl.SendId) # Incremental counter, the message number being sent to the microcontroller.
+
+
+    
+# ------------------------------------------------------------------------------------------------------
+
 def AboutCamera():
     """ Display information about the camera. """
     print(textcolor.yellow("About Camera"))
@@ -9480,6 +9514,7 @@ CameraMenuOptions = {
 CameraMenu = proceduremenu(CameraMenuOptions,'Camera tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
 MctlMenuOptions = {
+    'MicrocontrollerStatus':   {'label':'Microcontroller status',          'call':MicrocontrollerStatus},
     'RestartMicrocontroller':  {'label':'Restart microcontroller',         'call':RestartMicrocontroller},
     'StartMessage':            {'label':'Start message handler',           'call':MenuStartMessage},
     'ShutdownMessage':         {'label':'Shutdown message handler',        'call':MenuShutdownMessage},
