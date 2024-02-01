@@ -21,9 +21,15 @@ VERSION = '0.3.0' # Software version reported to the RPi.
 ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
+print ('This is code.py for CircuitPython.')
+print ('This supports the Pimoroni Tiny2040 board.')
+
 # Check we are running CircuitPython.
 CircuitPython = False # Indicates CircuitPython rather than MicroPython.
+# Bootline contains description like...
+# Adafruit CircuitPython 7.2.0 on 2022-02-24 Pimoroni Tiny 2040 (8MB) with rp2040 Board ID:pimoroni_tiny2040|4e4b
 Bootline = '' # Make sure the entire boot_out.txt content is available as a single item.
+CircuitPythonVersion = ''
 with open('boot_out.txt','r') as f:
     while True:
         line = f.readline()
@@ -35,8 +41,11 @@ with open('boot_out.txt','r') as f:
             print(cleanitem)
             for elements in item.split(' '):
                 if elements.strip().lower() == 'circuitpython': CircuitPython = True # This is a CircuitPython build.
-print("CircuitPython installation?:",CircuitPython)
-print("CircuitPython version:",Bootline)
+                if len(elements.split('.')) == 3: # 'a.b.c' format is version number.
+                    CircuitPythonVersion = elements # Allows code to adapt to different CircuitPython versions.
+print("CircuitPython installed:",CircuitPython)
+print("CircuitPython version:",CircuitPythonVersion)
+print("CircuitPython environment:",Bootline)
 
 import digitalio
 import microcontroller
@@ -61,9 +70,6 @@ def neatprint(*args):
         print (line)
     else: # Suppress output.
         pass
-
-neatprint ('CIRCUITPYTHON: code.py running...')
-neatprint ('Pimoroni Tiny2040 board.')
 
 class GPIOpin():
     def __init__(self,pin):
@@ -349,7 +355,7 @@ class logfile():
             line = IntToTimeString(time.time()) + ":" + line + '\n'
         else:
             line = IntToTimeString(self.Clock.Now()) + ":" + line + '\n'
-        if len(self.Lines) < 20:
+        if len(self.Lines) < self.MaxLines:
             self.Lines.append(line)
             self.BufferSize += len(line)
         else:
@@ -435,8 +441,11 @@ class uarthost():
         self.WriteQueue = [] # Empty the write queue.
         self.ReceivedLines = [] # Empty the input queue.
         for i in range(2): self.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
-        self.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
-        self.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
+        self.Write('controller started') # Tell the remote device we're up and running.
+        self.Write('controller version ' + VERSION) # Tell the remote device which software version is running.
+        self.Write('# CP env ' + str(Bootline)) # Show the circuitpython environment.
+        self.Write('# CP ver ' + str(CircuitPythonVersion)) # Tell what version of circuitpython is in use.
+        self.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
         
     def ticks_ms(self):
         """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
@@ -1738,11 +1747,13 @@ MemMgr = memorymanager()
 
 print ('Starting...')
 # *Q* Following code could be merged/replaced by RPi.Reset() ?
-for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
-RPi.Write('controller started') # Tell the remote device we're up and running. Replaced 'pico started' message.
-RPi.Write('controller version ' + VERSION) # Tell the remove device which software version is running.
-RPi.Write('# circuitpython ' + Bootline) # Tell what version of circuitpython is in use.
-RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
+#for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
+#RPi.Write('controller started') # Tell the remote device we're up and running.
+#RPi.Write('controller version ' + VERSION) # Tell the remote device which software version is running.
+#RPi.Write('# CP env ' + str(Bootline)) # Show the circuitpython environment.
+#RPi.Write('# CP ver ' + str(CircuitPythonVersion)) # Tell what version of circuitpython is in use.
+#RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
+RPi.Reset() # Reset comms and send initial header.
 # Report back which motors are defined.
 line = "defined motors "
 for i in Motors:
