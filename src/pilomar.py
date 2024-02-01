@@ -77,7 +77,7 @@
 #          18.12.2023 Version validation only considers first 2 elements.
 #                     SetMotorAngle() now states current motor angle.
 # 0.2.0    13.01.2024 GoToAngle, GoToTarget show progress during large moves.
-#                      
+#          31.01.2024 2024-01-issues items addressed.            
 
 # Version numbering scheme:
 #           aa.bb.cc
@@ -815,6 +815,10 @@ class parameters(attributemaster): # Common # 1 references.
         self.AltitudeBacklashAngle = self.GetParmVal('AltitudeBacklashAngle',0.0)
         self.AltitudeOrientation = self.GetParmVal('AltitudeOrientation',-1)
         self.AltitudeLimitAngle = self.GetParmVal('AltitudeLimitAngle',None) # Set motion limit for rotation.
+        # Motor pulse speed and acceleration (applies to both motors)
+        self.FastTime = self.GetParmVal('FastTime',0.002) # Fastest pulse to the motor STEP signal. (Full speed in large move.) # Was 0.0005
+        self.SlowTime = self.GetParmVal('SlowTime',0.05) # Slowest pulse to the motor STEP signal. (Initial speed at start of move.)
+        self.TimeDelta = self.GetParmVal('TimeDelta',0.003) # Acceleration rate for the motor STEP signal. 
 
         #self.UseMicrostepping = self.GetParmVal('UseMicrostepping',False) # Do we let the motors use microstepping for fine position control at the cost of lower torque?
         self.MotorStatusDelay = self.GetParmVal('MotorStatusDelay',10) # Microcontroller should send motor status messages every 'xxx' seconds. (Don't overload UART comms!)
@@ -3273,7 +3277,7 @@ class motorcontrol(attributemaster): # 2 references.
         
     AllMotors = [] # A list of all sibling motors which is common to all instances of motorcontrol. So any single motor instance can refer to all the other motors if needed via motorcontrol.AllMotors.
 
-    def __init__(self,name,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1,limitangle=None):
+    def __init__(self,name,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1,limitangle=None,fasttime=0.002,slowtime=0.05,timedelta=0.003):
         """ Initialize with values that we know from the physical construction of the motor.
             Other values can be configured later by the remote server. """
         self.Log = MainLog.Log # Handle to logging function/method to be used by this class.
@@ -3296,9 +3300,9 @@ class motorcontrol(attributemaster): # 2 references.
         self.MotorStepsPerAxisDegree = self.MicrostepRatio * self.MotorStepsPerRev / 360.0
         self.AxisStepsPerRev = self.MicrostepRatio * self.MotorStepsPerRev * self.GearRatio 
         self.MotorConfigured = False
-        self.FastTime = 0.002 # Fastest pulse to the motor STEP signal. (Full speed in large move.) # Was 0.0005
-        self.SlowTime = 0.05 # Slowest pulse to the motor STEP signal. (Initial speed at start of move.)
-        self.TimeDelta = 0.003 # Acceleration rate for the motor STEP signal. 
+        self.FastTime = fasttime # Fastest pulse to the motor STEP signal. (Full speed in large move.) # Was 0.0005
+        self.SlowTime = slowtime # Slowest pulse to the motor STEP signal. (Initial speed at start of move.)
+        self.TimeDelta = timedelta # Acceleration rate for the motor STEP signal. 
         self.TrajectorySegmentSize = 60 # Seconds.
         self.TrajectoryValid = False # Is the microcontroller trajectory valid?
         self.TrajectoryEntries = 0 # Number of trajectory entries stored on the microcontroller.
@@ -3577,7 +3581,7 @@ class motorcontrol(attributemaster): # 2 references.
         if self.MotorSpeed != None and self.StatusMctlTimestamp != None:
             timechange = (NowUTC() - self.StatusMctlTimestamp).total_seconds() # Seconds since last position sent. 
             anglechange = self.MotorSpeed * timechange # How many degrees has the motor probably moved in this time?
-            angle = self.CurrentAngle + anglechange # Where is the motor likely to be now?
+            angle = (self.CurrentAngle + anglechange) % 360 # Where is the motor likely to be now (0-360 degree range)
             #self.Log("motorcontrol.EstimateCurrentAngle(",self.MotorName,"): In",timechange,"seconds since",self.StatusMctlTimestamp,"motor moved",anglechange,"deg to",angle,"deg.",terminal=False)
         else:
             angle = self.CurrentAngle # Just use latest static angle we know.
@@ -3819,7 +3823,10 @@ AzimuthControl = motorcontrol('azimuth',
                               currentangle=Parameters.AzimuthRestAngle, # 180.0 # Yes it's the same as above!
                               backlashangle=Parameters.AzimuthBacklashAngle, # 0.0
                               orientation=Parameters.AzimuthOrientation, # -1,
-                              limitangle=Parameters.AzimuthLimitAngle)
+                              limitangle=Parameters.AzimuthLimitAngle,
+                              fasttime=Parameters.FastTime,
+                              slowtime=Parameters.SlowTime,
+                              timedelta=Parameters.TimeDelta)
 AltitudeControl = motorcontrol('altitude',
                               gearratio=Parameters.AltitudeGearRatio, # 240,
                               motorstepsperrev=Parameters.AltitudeMotorStepsPerRev, # 400,
@@ -3830,7 +3837,10 @@ AltitudeControl = motorcontrol('altitude',
                               currentangle=Parameters.AltitudeRestAngle, # 0.0,
                               backlashangle=Parameters.AltitudeBacklashAngle, # 0.0,
                               orientation=Parameters.AltitudeOrientation, # -1,
-                              limitangle=Parameters.AltitudeLimitAngle)
+                              limitangle=Parameters.AltitudeLimitAngle,
+                              fasttime=Parameters.FastTime,
+                              slowtime=Parameters.SlowTime,
+                              timedelta=Parameters.TimeDelta)
 MotorControls = motorcontrol.AllMotors #  Alias for the list of ALL defined motors held in the motorcontrol class.
 
 # Assign filename for the 'observation running' flag file. Thie file indicates that an observation started, but has not yet cleanly finished.
@@ -7896,7 +7906,7 @@ def ShutdownCamera(): # 9 references.
     success = True # Assume success unless we fail to shut down the handler correctly. 
     print ('\n' + textcolor.yellow('Stopping CameraHandler...')) # force newline before printing text.
     print ('The camera is currently processing the "' + str(CameraInUse.CurrentTask) + '" task.')
-    print ('Waiting for CameraHandler to confirm it has completed (telescope may continue to move until this is finished.) ...')
+    print ('Waiting for CameraHandler to confirm it has completed (telescope may continue to move until this is finished) ...')
     CameraControlQueue.put({'Stop' : True}) # Post a shutdown message to the CameraHandler
     Session.CameraTxCount += 1 # We sent another message to the camera.
     # This waits for confirmation and warn to powercycle the RPi if the STOP command is unsuccessful after xxx seconds.
@@ -8334,8 +8344,8 @@ def ObservationRun(): # 1 references.
     TerminalRows = temp[1] # Current screen rows.
     temp = colordisplay.GlobalWindowLimits() # How much screen space do all the windows required?
     if TerminalCols < temp[0] or TerminalRows < temp[1]:
-        MainLog.Log("ObservationRun: Terminal", TerminalCols,"*",TerminalRows,", Windows",temp[0],"*",temp[1],Terminal=True)
-        MainLog.Log("ObservationRun: The terminal window is not big enough to display ALL available data. Stretch if possible.",Terminal=True)
+        MainLog.Log("ObservationRun: Terminal", TerminalCols,"*",TerminalRows,", Windows",temp[0],"*",temp[1],terminal=False)
+        MainLog.Log("ObservationRun: The terminal window is not big enough to display ALL available data. Stretch if possible.",terminal=False)
     obsstart = NowUTC() # Note the start of the observation run.
     PhotoCount = 0 # How many photos have been taken? We can exit the loop when the limit is reached. If Camera is disabled, it will loop forever.
     SlowLoopCounter = 0 # Count how often we have slow processing loops, it can be the sign of storage problems. 
