@@ -1,6 +1,8 @@
 cd /home/pi
 rm pilomar.zip 
 zip pilomar.zip pilomar
+zip pilomar.zip pilomar/circuitpython
+zip pilomar.zip pilomar/circuitpython/code.py
 zip pilomar.zip pilomar/log
 zip pilomar.zip pilomar/temp
 zip pilomar.zip pilomar/data
@@ -22,8 +24,6 @@ zip pilomar.zip pilomar/fonts/Asap/Asap-MediumItalic.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-SemiBold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-Bold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-BoldItalic.ttf
-zip pilomar.zip pilomar/tiny2040/circuitpython
-zip pilomar.zip pilomar/tiny/2040/circuitpython/code.py
 zip pilomar.zip pilomar/src
 zip pilomar.zip pilomar/src/pilomar.py
 zip pilomar.zip pilomar/src/pilomarlogfile.py
