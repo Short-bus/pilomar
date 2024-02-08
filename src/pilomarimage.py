@@ -1144,10 +1144,10 @@ class pilomarimage():
                 if VMax == None or VMax < star[1]: VMax = star[1]
             self.HorizontalSpread = 100 * (HMax - HMin) / self.GetWidth()
             self.VerticalSpread = 100 * (VMax - VMin) / self.GetHeight()
-            self.ImageSpread = 100 * ((self.HorizontalSpread / 100) * (self.VerticalSpread / 100))
+            self.AreaSpread = 100 * ((self.HorizontalSpread / 100) * (self.VerticalSpread / 100))
             result = True
         else: # There's no image, or no stars were identified.
-            self.HorizontalSpread = self.VerticalSpread = self.ImageSpread = 0 # No spread to measure.
+            self.HorizontalSpread = self.VerticalSpread = self.AreaSpread = 0 # No spread to measure.
             result = False
         return result
 
@@ -1287,6 +1287,53 @@ class pilomarimage():
         if self.Log != None: self.Log("pilomarimage",self.Name,".ScaleImage: Dimensions h",height,"w",width,terminal=False)
         self.ImageBuffer = cv2.resize(self.ImageBuffer,(width,height),interpolation=self.ResizeMethod) # Note RESIZE takes (width,height) rather than usual openCV (height,width)!
         self.ActionList.append(['scale',scale,vscale,hscale,(width,height)])
+        self.ModifiedTimestamp = self.Now()
+        return True
+    
+    def HorizontalBlurImage(self,band):
+        """ Shrink the current image buffer horizontally, averaging the colors. 
+            Then return the image buffer to the correct width, blurring that average across the image. 
+            band = the pixel width that the image is horizontally compressed to. """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlurImage(",band,")",terminal=False)
+        height = int(self.ImageBuffer.shape[0])
+        originalwidth = int(self.ImageBuffer.shape[1])
+        scale = band / originalwidth
+        if scale <= 0.0:
+            print("pilomarimage.HorizontalBlurImage(scale",scale,") must be > 0.0")
+            return False
+        width = int(originalwidth * scale)
+        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
+        self.ImageBuffer = cv2.resize(self.ImageBuffer,(width,height),interpolation=cv2.INTER_AREA) # INTER_AREA better for SHRINKING.
+        self.ImageBuffer = cv2.resize(self.ImageBuffer,(originalwidth,height),interpolation=cv2.INTER_LINEAR) # INTER_LINEAR and INTER_CUBIC best for STRETCHING.
+        self.ActionList.append(['horizontalblurimage',scale,(width,height)])
+        self.ModifiedTimestamp = self.Now()
+        return True
+
+    def HorizontalBlurBuffer(self,buffer,band):
+        """ Shrink the current image buffer horizontally, averaging the colors. 
+            Then return the image buffer to the correct width, blurring that average across the image. 
+            buffer = the image buffer to work on.
+            band = the pixel width that the image is horizontally compressed to. """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlurBuffer(",band,")",terminal=False)
+        height = int(buffer.shape[0])
+        originalwidth = int(buffer.shape[1])
+        scale = band / originalwidth
+        if scale <= 0.0:
+            print("pilomarimage.HorizontalBlurBuffer(scale",scale,") must be > 0.0")
+            return False
+        width = int(originalwidth * scale)
+        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
+        buffer = cv2.resize(buffer,(width,height),interpolation=cv2.INTER_AREA) # INTER_AREA better for SHRINKING.
+        buffer = cv2.resize(buffer,(originalwidth,height),interpolation=cv2.INTER_LINEAR) # INTER_LINEAR and INTER_CUBIC best for STRETCHING.
+        self.ActionList.append(['horizontalblurimage',scale,(width,height)])
+        self.ModifiedTimestamp = self.Now()
+        return buffer
+
+    def SubtractBuffer(self,buffer):
+        """ Subtract 'buffer' from the main image buffer. """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".SubtractBuffer()",terminal=False)
+        self.ImageBuffer = cv2.subtract(self.ImageBuffer,buffer)
+        self.ActionList.append(['subtractbuffer'])
         self.ModifiedTimestamp = self.Now()
         return True
     
@@ -2022,6 +2069,18 @@ class pilomarimage():
         self.ActionList.append(['enhancestars',blurradius])
         self.ModifiedTimestamp = self.Now()
         if self.Log != None: self.Log("pilomarimage",self.Name,".EnhanceStars: End.",terminal=False)
+        return True
+
+    def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255):
+        """ Primitive 'urban skies' filter. 
+            This is used for star drift tracking. 
+            A live image is cleaned to remove common urban haze before enhancing the remaining stars. 
+            band = Blurring factor. '1' is the highest blurring. 
+            blurradius, cloudthresh, starthresh, maxval are all values for the EnhanceStars() method. """
+        buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
+        buffer = self.HorizontalBlurBuffer(buffer,band=band) # Horizontally blur the buffer.
+        self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
+        self.EnhanceStars(blurradius=blurradius,cloudthresh=cloudthresh,starthresh=starthresh,maxval=maxval) # Enhance the stars that remain.
         return True
         
     def HSV2BGR(self,hue,sat,val):

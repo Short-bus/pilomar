@@ -185,7 +185,7 @@ def NowUTC(real=False) -> datetime: # Many references.
     return dt
 
 SoftwareStartDatetime = NowUTC()
-print("SoftwareStartDatetime:",SoftwareStartDatetime,"UTC")
+# print("SoftwareStartDatetime:",SoftwareStartDatetime,"UTC")
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -746,7 +746,7 @@ class attributemaster(): # A parent class containing some common methods that ot
             nameprefix provides an optional prefix to all the fieldnames.
             It will also ignore certain datatypes which don't save well or are typically very large (numpy arrays). """
         confdict = initialdictionary # Start an empty dictionary. 
-        ignoretypes = [type(np.ndarray)]
+        ignoretypes = [type(np.ndarray),type(self),type(self.SaveToDictionary)]
         for attr, value in vars(self).items():
             if attr[0] == '_': continue # Don't send internals.
             if type(attr) in ignoretypes: continue # Don't export certain variable types.
@@ -773,13 +773,27 @@ class parameters(attributemaster): # Common # 1 references.
     def __init__(self,filename,log=None):
         if log == None: log = MainLog.Log # Default logging method that is used internally.
         self.Log = log # Handle to the logging method that this object should use. 
-        self._Dictionary = {}
+        self._Dictionary = {} # The json parameter file loaded from disc at start, saved to disc at end.
+        self._Defaults = {} # Maintain a list of default values, used to highlight changes when reviewing parameters.
         self.ParamFileName = filename # The disc copy of the parameter file. This is overwritten if the program completes correctly.
         if os.path.isfile(self.ParamFileName): # If the dictionary file exists, we'll import it now.
             with open(self.ParamFileName,'r') as f:
                 self.Log("Loading parameters from file: " + self.ParamFileName)
                 self._Dictionary = json.load(f) # Overwrite the default parameter values with anything from file.
         # Pull parameter values from the dictionary, and update the dictionary with defaults if necessary.
+        # - Define data about stepper motor driver boards and capabilities.
+        sdd = {'drv8825': 
+                {'modelist':
+                   { '1' : {'power' : 100, 'modesignals' : 'nnn'},
+                     '2' : {'power' :  70, 'modesignals' : 'ynn'},
+                     '4' : {'power' :  40, 'modesignals' : 'nyn'},
+                     '8' : {'power' :  20, 'modesignals' : 'yyn'},
+                    '16' : {'power' :  10, 'modesignals' : 'nny'},
+                    '32' : {'power' :   5, 'modesignals' : 'yyy'}
+                   }
+                }
+              }
+        self.StepperDriverData = self.GetParmVal('StepperDriverData',sdd) # Dictionary containing stepper driver types and parameters.
         self.BoardType = self.GetParmVal('BoardType',None) # Define alternative motorcontroller board type here. Changes behaviour of board/microcontroller.
         self.BatchSize = self.GetParmVal('BatchSize',100) # How many photos to take in a batch.
         self.ControlBatchSize = self.GetParmVal('ControlBatchSize',20) # How many images to capture in each 'control set' (DARK, BIAS etc). High values offer limited gains.
@@ -798,9 +812,11 @@ class parameters(attributemaster): # Common # 1 references.
         # Azimuth motor parameters.
         self.MinAzimuthAngle = self.GetParmVal('MinAzimuthAngle',0)
         self.MaxAzimuthAngle = min(self.GetParmVal('MaxAzimuthAngle',360),360)
+        self.AzimuthDriver = self.GetParmVal('AzimuthDriver','drv8825') # Which steppermotor driver does the Azimuth motor use?
         self.AzimuthGearRatio = self.GetParmVal('AzimuthGearRatio',240)
-        self.AzimuthMotorStepsPerRev = self.GetParmVal('AzimuthMotorStepsPerRev',400)
-        self.AzimuthMicrostepRatio = self.GetParmVal('AzimuthMicrostepRatio',1) 
+        self.AzimuthMotorStepsPerRev = self.GetParmVal('AzimuthMotorStepsPerRev',400) # Full step count for the motor (ignore any microstepping multiplier)
+        #self.AzimuthModeSignals = self.GetParmVal('AzimuthModeSignals',[False,False,False]) # How are the 3 mode pins set?
+        self.AzimuthMicrostepRatio = self.GetParmVal('AzimuthMicrostepRatio',1) # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps.
         self.AzimuthRestAngle = self.GetParmVal('AzimuthRestAngle',180.0)
         self.AzimuthBacklashAngle = self.GetParmVal('AzimuthBacklashAngle',0.0)
         self.AzimuthOrientation = self.GetParmVal('AzimuthOrientation',-1)
@@ -808,9 +824,11 @@ class parameters(attributemaster): # Common # 1 references.
         # Altitude motor parameters.
         self.MinAltitudeAngle = self.GetParmVal('MinAltitudeAngle',0) # Fixed Issue #38
         self.MaxAltitudeAngle = min(self.GetParmVal('MaxAltitudeAngle',90),90) # Fixed Issue #38
+        self.AltitudeDriver = self.GetParmVal('AltitudeDriver','drv8825') # Which steppermotor driver does the Altitude motor use?
         self.AltitudeGearRatio = self.GetParmVal('AltitudeGearRatio',240)
-        self.AltitudeMotorStepsPerRev = self.GetParmVal('AltitudeMotorStepsPerRev',400)
-        self.AltitudeMicrostepRatio = self.GetParmVal('AltitudeMicrostepRatio',1)
+        self.AltitudeMotorStepsPerRev = self.GetParmVal('AltitudeMotorStepsPerRev',400) # Full step count for the motor (ignore any microstepping multiplier)
+        #self.AltitudeModeSignals = self.GetParmVal('AltitudeModeSignals',[False,False,False]) # How are the 3 mode pins set?
+        self.AltitudeMicrostepRatio = self.GetParmVal('AltitudeMicrostepRatio',1) # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps.
         self.AltitudeRestAngle = self.GetParmVal('AltitudeRestAngle',0.0)
         self.AltitudeBacklashAngle = self.GetParmVal('AltitudeBacklashAngle',0.0)
         self.AltitudeOrientation = self.GetParmVal('AltitudeOrientation',-1)
@@ -846,11 +864,12 @@ class parameters(attributemaster): # Common # 1 references.
         else: self.Log("No image types are saved according to the parameters.",level='warning')
         
         # The following parameters control DriftTracking activity.
-        self.TrackingInterval = self.GetParmVal('TrackingInterval',600) # How many seconds between each target tracking check?
-        self.TrackingStarRadius = self.GetParmVal('TrackingStarRadius',3) # Pixel radius of stars in clean targetting images.
-        self.TrackingExposureSeconds = self.GetParmVal('TrackingExposureSeconds',5.0) # How long is the exposure when capturing a tracking photo. It must be standardised rather than using the variable 'light' image exposure time.
         self.UseTracking = self.GetParmVal('UseTracking',True) # TRUE = Use image tracking. FALSE = No tracking.
         self.PrepImagesForTracking = self.GetParmVal('PrepImagesForTracking',False) # TRUE = latest image is simplified. FALSE = latest image is used as is.
+        self.TrackingInterval = self.GetParmVal('TrackingInterval',600) # How many seconds between each target tracking check?
+        self.TrackingUrbanFilter = self.GetParmVal('TrackingUrbanFilter',False) # Apply the 'UrbanFilter' method to live images before passing to the drift tracking calculation.
+        self.TrackingStarRadius = self.GetParmVal('TrackingStarRadius',3) # Pixel radius of stars in clean targetting images.
+        self.TrackingExposureSeconds = self.GetParmVal('TrackingExposureSeconds',5.0) # How long is the exposure when capturing a tracking photo. It must be standardised rather than using the variable 'light' image exposure time.
         self.GeneratePreview = self.GetParmVal('GeneratePreview',True) # TRUE = Preview images are generated periodically, and can be turned into AVI file when observation ends.
         self.InitialGoTo = self.GetParmVal('InitialGoTo',True) # Perform initial GOTO before downloading the trajectory. (Eases comms with microcontroller.)
         self.TargetInclusionRadius = self.GetParmVal('TargetInclusionRadius',15) # Angle (radius) for inclusion of neighbouring stars when generating target image.
@@ -867,15 +886,15 @@ class parameters(attributemaster): # Common # 1 references.
         self.LocalTZ = self.GetParmVal('LocalTZ','Europe/London') # What's the local timezone (pytz values). pytz.all_timezones() lists all available. Info only at present.
         self.HomeLat = self.GetParmVal('HomeLat',None) # Latitude of the observer.
         self.HomeLon = self.GetParmVal('HomeLon',None) # Longitude of the observer.
-        self.HomeLatVal = 0.0
+        self._HomeLatVal = 0.0
         if self.HomeLat != None:
-            self.HomeLatVal = float(self.HomeLat.split(" ")[0]) # Convert to float value.
-            if self.HomeLat.split(" ")[1] == "S": self.HomeLatVal = self.HomeLatVal * -1 # -ve for southern hemisphere in Skyfield.
-        self.HomeLonVal = 0.0
+            self._HomeLatVal = float(self.HomeLat.split(" ")[0]) # Convert to float value.
+            if self.HomeLat.split(" ")[1] == "S": self._HomeLatVal = self._HomeLatVal * -1 # -ve for southern hemisphere in Skyfield.
+        self._HomeLonVal = 0.0
         if self.HomeLon != None:
-            self.HomeLonVal = float(self.HomeLon.split(" ")[0]) # Convert to float value.
-            if self.HomeLon.split(" ")[1] == "W": self.HomeLonVal = self.HomeLonVal * -1 # -ve for western hemisphere in Skyfield.
-        self.Log("Parameters: Home:", self.HomeLat, self.HomeLon, ":", self.HomeLatVal, self.HomeLonVal,terminal=False)
+            self._HomeLonVal = float(self.HomeLon.split(" ")[0]) # Convert to float value.
+            if self.HomeLon.split(" ")[1] == "W": self._HomeLonVal = self._HomeLonVal * -1 # -ve for western hemisphere in Skyfield.
+        self.Log("Parameters: Home:", self.HomeLat, self.HomeLon, ":", self._HomeLatVal, self._HomeLonVal,terminal=False)
         
         # The following parameters dictate how various graphical images are generated.
         self.MarkupInterval = self.GetParmVal('MarkupInterval',300) # How often do we generate a preview image (seconds).
@@ -898,14 +917,14 @@ class parameters(attributemaster): # Common # 1 references.
         
         # The following parameters dictate the color scheme for the user interface.
         # Display colorscheme.
-        self.MenuTitleFG = self.GetParmVal('MenuTitleFG',textcolor.BLACK)
-        self.MenuTitleBG = self.GetParmVal('MenuTitleBG',textcolor.GRAY)
+        self.MenuTitleFG = self.GetParmVal('MenuTitleFG',textcolor.LIME)
+        self.MenuTitleBG = self.GetParmVal('MenuTitleBG',textcolor.DARKGREEN)
         self.MenuSubtitleFG = self.GetParmVal('MenuSubtitleFG',textcolor.BLACK)
-        self.MenuSubtitleBG = self.GetParmVal('MenuSubtitleBG',textcolor.GREY30)
+        self.MenuSubtitleBG = self.GetParmVal('MenuSubtitleBG',textcolor.GREEN)
         # - ObservationStatusWindow
-        self.TitleFG = self.GetParmVal('TitleFG',textcolor.WHITE)
-        self.TitleBG = self.GetParmVal('TitleBG',textcolor.GRAY)
-        self.TextFG = self.GetParmVal('TextFG',textcolor.WHITE)
+        self.TitleFG = self.GetParmVal('TitleFG',textcolor.LIME)
+        self.TitleBG = self.GetParmVal('TitleBG',textcolor.DARKGREEN)
+        self.TextFG = self.GetParmVal('TextFG',textcolor.GREEN)
         self.TextBG = self.GetParmVal('TextBG',textcolor.BLACK)
         self.TextGood = self.GetParmVal('TextGood',textcolor.LIGHTGREEN)
         self.TextPoor = self.GetParmVal('TextPoor',textcolor.YELLOW)
@@ -917,11 +936,25 @@ class parameters(attributemaster): # Common # 1 references.
         self.ScanForMeteors = self.GetParmVal('ScanForMeteors',True) # Scan light images for streaks, report them if found.
         self.MinSatelliteAltitude = self.GetParmVal('MinSatelliteAltitude',30) # Satellite's are only considered to RISE if they will culminate above this altitude. (Else too brief and low to see)
         
-    def GetParmVal(self,name,default):
+    def GetParmVal(self,name,default,oldnames=None):
         """ Get a value from the parameter file. 
+        
+            name: The parameter name.
+            default: The default parameter value if it is not in the dictionary yet.
+            oldnames: optional list of previous parameter names, these are used to migrate values from old parameter names to new ones.
+            
             If the value does not exist, create it with the default value. 
             If the value is different to the default value, report that in the log file. """
-        result = self._Dictionary.get(name,default)
+        self._Defaults[name] = default # Maintain a list of default values, used to highlight changes when reviewing parameters.
+        result = default
+        if type(oldnames) == list: # Check for earlier parameter values.
+            for oldname in oldnames: # Check each name in turn.
+                if oldname in self._Dictionary: # oldname exists in the dictionary (can migrate from oldname to new name).
+                    result = self._Dictionary[oldname] # Retrieve the value from the oldname entry.
+                    if self.Log != None: self.Log("parameters.GetParmVal(",name,") migrating from",oldname,"with value",result,terminal=False)
+                    break # Look no further.
+        # Now get/initialise the current parameter name.
+        result = self._Dictionary.get(name,result)
         if result != default: # Default value has been overridden.
             if self.Log != None: self.Log("parameters.GetParmVal(",name,") default",default,"overridden with",result,terminal=False)
         return result
@@ -1063,11 +1096,23 @@ class parameters(attributemaster): # Common # 1 references.
 
     def Show(self):
         """ List parameters. """
-        print (textcolor.yellow("List parameters:"))
-        tempd = vars(self) # Load variables into a temporary dictionary.
+        print (textcolor.yellow("List parameters",ProgramTitle,VERSION,":"))
+        print (textcolor.red("(*)"),"indicates a modified parameter value.")
+        tempd = vars(self) # Load instance variables into a temporary dictionary.
         for key,value in tempd.items():
             if key.startswith('_'): continue # Ignore internals.
-            print (textcolor.yellow(key.rjust(30)) + " : " + str(value))
+            if key == 'Log': continue # Ignore the link to the Log instance.
+            defaultflag = '' # Mark if the value is not the default.
+            if type(value) == dict: # Don't show dictionaries, they can be large.
+                if key in self._Defaults: # A default value is known. 
+                    if self._Defaults[key] != value: # The default is different to the current value.
+                        defaultflag = textcolor.red(' (*) Has changed from default.')
+                print (textcolor.yellow(key.rjust(30)) + " : dictionary " + defaultflag + "(for detail open in editor)")
+            else:
+                if key in self._Defaults: # A default value is known.
+                    if self._Defaults[key] != value: # The default is different to the current value.
+                        defaultflag = textcolor.red(' (*) Was ' + str(self._Defaults[key]))
+                print (textcolor.yellow(key.rjust(30)) + " : " + str(value) + defaultflag)
         input(textcolor.cyan("Press [enter] to continue:"))
 
 # Establish the filename of the parameters file that will be loaded.
@@ -1078,28 +1123,39 @@ if Parameters.HomeLat == None or Parameters.HomeLon == None:
     # Home location is not yet set. Save the parameter file for editing then quit.
     # The user has to manually enter the home latitude and longitude into the paramter file.
     Parameters.SaveAttributes(Parameters.ParamFileName) # Write current operating parameters back to disc.
-    print(textcolor.red('Home location is not set in ' + Parameters.ParamFileName))
+    lines = ['Home location is not set in ' + Parameters.ParamFileName,
+             ' ',
+             'Edit the HomeLat and HomeLon values in the parameter file.',
+             'Give the co-ordinates of your location.',
+             'Then restart this program.']
+    textcolor.TextBox(lines,fg=textcolor.WHITE,bg=textcolor.RED)
     print(' ')
-    print(textcolor.yellow('Eg: Paris, France : "HomeLat" : "48.864716 N",'))
-    print(textcolor.yellow('                    "HomeLon" : "2.349014 E",'))
+    print(textcolor.yellow('Eg: Paris, France :'))
+    print(textcolor.yellow('            "HomeLat" : "48.864716 N",'))
+    print(textcolor.yellow('            "HomeLon" : "2.349014 E",'))
     print(' ')
-    print(textcolor.yellow('    Atlanta, USA  : "HomeLat" : "33.753746 N",'))
-    print(textcolor.yellow('                    "HomeLon" : "84.386330 W",'))
+    print(textcolor.yellow('    Atlanta, USA :'))
+    print(textcolor.yellow('            "HomeLat" : "33.753746 N",'))
+    print(textcolor.yellow('            "HomeLon" : "84.386330 W",'))
     print(' ')
-    print(textcolor.yellow('    Tokyo, Japan  : "HomeLat" : "35.652832 N",'))
-    print(textcolor.yellow('                    "HomeLon" : "139.839478 E",'))
+    print(textcolor.yellow('    Tokyo, Japan :'))
+    print(textcolor.yellow('            "HomeLat" : "35.652832 N",'))
+    print(textcolor.yellow('            "HomeLon" : "139.839478 E",'))
     print(' ')
-    textcolor.TextBox('Please edit the HomeLat and HomeLon parameters, then restart this program.',fg=textcolor.WHITE,bg=textcolor.RED)
+    print(textcolor.yellow('    Alice Springs, Australia :'))
+    print(textcolor.yellow('            "HomeLat" : "23.8102 S",'))
+    print(textcolor.yellow('            "HomeLon" : "133.9026 E",'))
+    print(' ')
     exit() # Quit the program.
     
-if Parameters.HomeLatVal < 0: # We're in the Southern Hemisphere. The software isn't tested for that.
-    linelist = ["Home Latitude (" + str(Parameters.HomeLatVal) + ") is in the Southern Hemisphere.",
+if Parameters._HomeLatVal < 0: # We're in the Southern Hemisphere. The software isn't tested for that.
+    linelist = ["Home Latitude (" + str(Parameters._HomeLatVal) + ") is in the Southern Hemisphere.",
                 "NOTE: Pi-lomar may perform an unwinding manoeuvre as targets pass through due North.",
                 "      This is normal behaviour, but will pause image capture while it happens."]
     textcolor.TextBox(linelist,fg=textcolor.YELLOW,bg=textcolor.BLACK)
     # exit() # Quit the program.
-if Parameters.HomeLatVal >= 90.0: # Things break down at the poles.
-    linelist = ["Home Latitude (" + str(Parameters.HomeLatVal) + ") is the North Pole.",
+if Parameters._HomeLatVal >= 90.0: # Things break down at the poles.
+    linelist = ["Home Latitude (" + str(Parameters._HomeLatVal) + ") is the North Pole.",
                 "Please use the 0deg longitude line as due South."]
     textcolor.TextBox(linelist,fg=textcolor.WHITE,bg=textcolor.RED)
 
@@ -1598,7 +1654,7 @@ SessionWindow.PlaceString('  Messages:Rx queued:[RQ]     Rx tot:[RT   ]       Tx
 SessionWindow.PlaceString('     State:   Resets:[SR]    DevFail:[DF ]           Last Rx:[LR         ]     ',row=2,col=0)
 SessionWindow.PlaceString(' RPi Bytes:Rx:[BX    ]            Tx:[TX    ]         RxErrs:[RE]              ',row=3,col=0)
 SessionWindow.PlaceString('MCtl Bytes:Rx:[MRX   ] [MRXR ]    Tx:[MTX   ] [MTXR ] RxErrs:[R2] TxDrops:[TD] ',row=4,col=0)
-SessionWindow.PlaceString('      MCtl:  AutoCtl:[AC ]        RemCtl:[RCL]        ClkSyn:[CS ]             ',row=5,col=0)
+SessionWindow.PlaceString('      MCtl:  AutoCtl:[AC ]        RemCtl:[RCL]        ClkSyn:[CS ] Exc:[EXCEPT]',row=5,col=0)
 SessionWindow.PlaceString('            Restarts:Forced:[FR]  Remote:[RR]          Alive:[ALIVE    ]       ',row=6,col=0)
 SessionWindow.PlaceString('   azimuth:Conf:[ZC ]     Angle:[ZA     ] [CAZA  ]  OnTarget:[ZT ] [ZDPS    ]/s',row=7,col=0)
 SessionWindow.PlaceString('                [ZMODE           ]:[ZD]   Expires:[ZU    ] UTC [ZRM         ]  ',row=8,col=0)
@@ -2122,7 +2178,7 @@ class astrocamera(attributemaster): # 1 references.
         SecondsPerAS = 24 * 60 * 60 / float(FullRotationAS) # How many seconds does a single arcsecond last before earth rotation has moved on.
         self.Log("astrocamera.ModeChange(): Seconds per arcsecond: " + str(SecondsPerAS),terminal=False)
         self.SecondsPerPixel = float(ArcSecondsPerPixel) * SecondsPerAS
-        self.Log("astrocamera.ModeChange(): Static camera image will blur if exposure exceeds " + str(round(self.SecondsPerPixel,3)) + "seconds.",terminal=False)
+        self.Log("astrocamera.ModeChange(): To avoid blurring the camera needs to move every",round(self.SecondsPerPixel,3),"seconds.",terminal=False)
         self.Log("astrocamera.ModeChange(): Mode " + str(self.Sensor.Mode) + " selected.",terminal=False)
         self.PixelFoV() # Calculate field of view of an individual pixel (very approximate).
 
@@ -2755,7 +2811,6 @@ class microcontroller(attributemaster): # 1 references.
                 mctl = microcontroller(port='/dev/serial0',resetpin=Parameters.MctlResetPin) # Create communication with microcontroller over uart0 serial port.
                 mctl.Log = MainLog.Log # Tell which Logging function to use for main logfile messages.
                 mctl.Initiate() # Initiate communication.
-
         """
     def __init__(self,port='/dev/serial0',resetpin=4):
         self.uart = serial.Serial(port,115200,timeout=0,exclusive=True)
@@ -3146,7 +3201,6 @@ class microcontroller(attributemaster): # 1 references.
     def MctlRestarted(self):
         """ If microcontroller reports a restart, this routine resets the buffers and 
             acknowledges the restart back to the microcontroller. """
-        self.ReadFlush() # Scrap the contents of the read buffer. We're starting again.
         self.WriteFlush(send=False) # Scrap the contents of the write buffer. We're starting again.
         self.Write('# Hello controller') # Acknowledge to the microcontroller that we're restarting the conversation too.
         self.SetLedStatus(self.LedStatus) # Turn on/off the status led on the microcontroller.
@@ -3167,7 +3221,7 @@ class microcontroller(attributemaster): # 1 references.
             MctlTxWindow.Print(line)
             self.WriteQueue.append(self.AddChecksum(line)) # Add to send queue with Checksum.
             self.Log('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line,terminal=False)
-            if self.PrintComms: print(textcolor.yellow('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line))
+            if self.PrintComms: print(textcolor.green('RPi queueing (Q# ' + str(len(self.WriteQueue)) + '): ' + line))
 
 
     def CommsLoop(self,commandqueue): # Runs as own thread.
@@ -3277,14 +3331,29 @@ class motorcontrol(attributemaster): # 2 references.
         
     AllMotors = [] # A list of all sibling motors which is common to all instances of motorcontrol. So any single motor instance can refer to all the other motors if needed via motorcontrol.AllMotors.
 
-    def __init__(self,name,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1,limitangle=None,fasttime=0.002,slowtime=0.05,timedelta=0.003):
+    def __init__(self,name,gearratio,fullstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,backlashangle,orientation=1,limitangle=None,fasttime=0.002,slowtime=0.05,timedelta=0.003,driver='drv8825'):
         """ Initialize with values that we know from the physical construction of the motor.
             Other values can be configured later by the remote server. """
         self.Log = MainLog.Log # Handle to logging function/method to be used by this class.
-        self.MotorName = name
+        # Validate microstepratio. Reset to 'full steps' if not recognised.
+        if driver in Parameters.StepperDriverData: # Driver is recognised.
+            modelist = Parameters.StepperDriverData[driver]['modelist'] # Pull the driver's modelist.
+            if not str(microstepratio) in modelist: # Keys are strings, not integers.
+                self.Log("motorcontrol(",name,") microstepratio",microstepratio,"is not in",driver,"modelist.",level='error',terminal=True)
+                raise Exception("motorcontrol(" + str(name) + ") microstepratio " + str(microstepratio) + " is not in " + str(driver) + "modelist.")
+            # microstep ratio is recognised. Pull the modepin settings.
+            modesignals = modelist[str(microstepratio)]['modesignals']
+            self.Log("motorcontrol(",name,") microstepratio",microstepratio,"for",driver,"uses mode settings",modesignals,terminal=False)
+        else: # Driver is not recognised.
+            self.Log("motorcontrol(",name,") steppermotor driver",driver,"is not recognised.",level='error',terminal=True)
+            raise Exception("Steppermotor driver " + str(driver) + " is not recognised.")
+        self.MotorName = name # A unique name to identify the motor, should be the same as the motor's name in the microcontroller side too.
+        self.Driver = driver # What driver board is being used?
         self.GearRatio = gearratio
-        self.MotorStepsPerRev = motorstepsperrev
-        self.MicrostepRatio = microstepratio # *Q* Does this apply to MotorStepsPerRev and AxisStepsPerRev etc too?
+        motorstepsperrev = fullstepsperrev * microstepratio # Calculate motorstepsperrev to include microstep ratio.
+        self.MotorStepsPerRev = motorstepsperrev # FullStepsPerRev of the motor * any microstepping multiplier.
+        self.ModeSignals = modesignals # What are the settings for the mode pins to the driver board?
+        self.MicrostepRatio = microstepratio # Just for documentation from this point onwards.
         self.WarningAngle = 10 # Can warn if position is within this angle of a limit.
         self.MinAngle = minangle
         self.MinWarningAngle = minangle + self.WarningAngle # Can warn if within xx degrees of minimum position.
@@ -3297,8 +3366,10 @@ class motorcontrol(attributemaster): # 2 references.
         self.PreviousAngle = None # Holds angle from previous status message.
         self.PreviousMctlTimestamp = None # Says when the previous angle was set.
         self.RestAngle = restangle
-        self.MotorStepsPerAxisDegree = self.MicrostepRatio * self.MotorStepsPerRev / 360.0
-        self.AxisStepsPerRev = self.MicrostepRatio * self.MotorStepsPerRev * self.GearRatio 
+        #self.MotorStepsPerAxisDegree = self.MicrostepRatio * self.MotorStepsPerRev / 360.0
+        self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
+        #self.AxisStepsPerRev = self.MicrostepRatio * self.MotorStepsPerRev * self.GearRatio 
+        self.AxisStepsPerRev = self.MotorStepsPerRev * self.GearRatio 
         self.MotorConfigured = False
         self.FastTime = fasttime # Fastest pulse to the motor STEP signal. (Full speed in large move.) # Was 0.0005
         self.SlowTime = slowtime # Slowest pulse to the motor STEP signal. (Initial speed at start of move.)
@@ -3332,11 +3403,13 @@ class motorcontrol(attributemaster): # 2 references.
     def ShowMotorStatus(self):
         """ Print general status of the motor. """
         print("Motor:",self.MotorName)
+        print("Driver:",self.Driver)
         print("CurrentAngle:",Deg3dp(self.CurrentAngle,DegreeSymbol))
         print("Position:",self.AngleToStep(self.CurrentAngle),"steps")
         print("GearRatio:",self.GearRatio)
         print("MotorStepsPerRev:",self.MotorStepsPerRev)
-        print("MicrostepRatio:",self.MicrostepRatio)
+        print("MicrostepRatio:",self.MicrostepRatio,"(included in MotorStepsPerRev)")
+        print("ModeSignals:",self.ModeSignals)
         print("MinAngle:",Deg3dp(self.MinAngle,DegreeSymbol))
         print("MinWarningAngle:",Deg3dp(self.MinWarningAngle,DegreeSymbol))
         print("MaxAngle:",Deg3dp(self.MaxAngle,DegreeSymbol))
@@ -3350,13 +3423,13 @@ class motorcontrol(attributemaster): # 2 references.
         print("FastTime:",self.FastTime,"s")
         print("SlowTime:",self.SlowTime,"s")
         print("TimeDelta:",self.TimeDelta,"s")
-        print("MotorSpeed:",self.MotorSpeed,"s/step")
-        print("TrajectorySegmentSize:",self.TrajectorySegmentSize)
+        print("Latest MotorSpeed:",str(round(self.MotorSpeed,4)) + DegreeSymbol + "/s")
+        print("TrajectorySegmentSize:",self.TrajectorySegmentSize,"s")
         print("TrajectoryValid:",self.TrajectoryValid)
         print("TrajectoryEntries:",self.TrajectoryEntries)
-        print("TrajectoryValidUntil:",self.TrajectoryValidUntil)
+        print("TrajectoryValidUntil:",self.TrajectoryValidUntil,"UTC")
         print("OnTarget:",self.OnTarget)
-        print("LatestTuneTime:",self.LatestTuneTime)
+        print("LatestTuneTime:",self.LatestTuneTime,"UTC")
         print("LatestTuneSteps:",self.LatestTuneSteps)
         print("RecoveryFileName:",self.RecoveryFileName)
         print("")
@@ -3460,11 +3533,12 @@ class motorcontrol(attributemaster): # 2 references.
                         f.write((UtcTimeStamp() + ";" + str(self.CurrentAngle) + "\n").encode()) # Convert text to bytes.
                     self.LastRecoveryAngle = self.CurrentAngle
                     success = True
+                    #self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") Updated to",self.CurrentAngle,"from",self.LastRecoveryAngle,"in the recovery file.",terminal=False)
+                    break # Success, so don't try again.
                 except Exception as e:
                     self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") to", self.RecoveryFileName, ". File conflict", str(e), "waiting to retry.",level='warning')
                     time.sleep(0.3)
-            if not success:
-                self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") to", self.RecoveryFileName, ". Failed to write data.",level='error')
+            if not success: self.Log("steppermotor.StoreRecoveryAngle (", self.MotorName, ") to", self.RecoveryFileName, ". Failed to write data.",level='error')
 
     def GoToAngle(self,newangle):
         """ Trigger 'goto angle' movement of the motor via the remote microcontroller. 
@@ -3669,8 +3743,10 @@ class motorcontrol(attributemaster): # 2 references.
         line += str(self.LimitAngle) + ' ' # Field 15: Movement limit, motor will reverse around rather than crossing this limit.
         line += str(self.GearRatio) + ' ' # Field 16: GearRatio.
         line += str(self.MotorStepsPerRev) + ' ' # Field 17 MotorStepsPerRev
-        line += str(self.MicrostepRatio) + ' ' # Field 18 MicrostepRatio
+        # line += str(self.MicrostepRatio) + ' ' # Field 18 MicrostepRatio
+        line += '1 ' # Field 18 MicrostepRatio / Nolonger used.
         line += str(self.RestAngle) + ' ' # Field 19 RestAngle
+        line += self.ModeSignals + ' ' # Field 20 Steppermotor mode signals for microstepping.
         
         Mctl.Write(line)
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') end',terminal=False)
@@ -3814,9 +3890,9 @@ class motorcontrol(attributemaster): # 2 references.
 #AzimuthControl = motorcontrol('azimuth',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAzimuthAngle,maxangle=Parameters.MaxAzimuthAngle,restangle=180.0,currentangle=180.0,backlashangle=0.0,orientation=-1,limitangle=Parameters.AzimuthLimitAngle)
 #AltitudeControl = motorcontrol('altitude',gearratio=240,motorstepsperrev=400,microstepratio=1,minangle=Parameters.MinAltitudeAngle,maxangle=Parameters.MaxAltitudeAngle,restangle=0.0,currentangle=0.0,backlashangle=0.0,orientation=-1,limitangle=Parameters.AltitudeLimitAngle)
 AzimuthControl = motorcontrol('azimuth',
-                              gearratio=Parameters.AzimuthGearRatio, # 240
-                              motorstepsperrev=Parameters.AzimuthMotorStepsPerRev, # 400
-                              microstepratio=Parameters.AzimuthMicrostepRatio, # 1 
+                              gearratio=Parameters.AzimuthGearRatio, # 240 # Gearing of the drive system ignoring motor steps.
+                              fullstepsperrev=Parameters.AzimuthMotorStepsPerRev, # 400 # FullStep count of the motor before microstepping added.
+                              microstepratio=Parameters.AzimuthMicrostepRatio, # 1 # Level of microstepping to be added. 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps etc.
                               minangle=Parameters.MinAzimuthAngle, # 0 
                               maxangle=Parameters.MaxAzimuthAngle, # 360
                               restangle=Parameters.AzimuthRestAngle, # 180.0,
@@ -3829,8 +3905,8 @@ AzimuthControl = motorcontrol('azimuth',
                               timedelta=Parameters.TimeDelta)
 AltitudeControl = motorcontrol('altitude',
                               gearratio=Parameters.AltitudeGearRatio, # 240,
-                              motorstepsperrev=Parameters.AltitudeMotorStepsPerRev, # 400,
-                              microstepratio=Parameters.AltitudeMicrostepRatio, # 1
+                              fullstepsperrev=Parameters.AltitudeMotorStepsPerRev, # 400 # FullStep count of the motor before microstepping added.
+                              microstepratio=Parameters.AltitudeMicrostepRatio, # 1 # Level of microstepping to be added. 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps etc.
                               minangle=Parameters.MinAltitudeAngle, # 0
                               maxangle=Parameters.MaxAltitudeAngle, # 90
                               restangle=Parameters.AltitudeRestAngle, # 0.0,
@@ -3945,6 +4021,7 @@ class sessionstatus(attributemaster): # 1 references.
         self.MctlRxErrors = 0 # How many messages has the Microcontroller rejected? (Checksum errors)
         self.MctlRxBytes = 0 # How many bytes has the Microcontroller received?
         self.MctlTxBytes = 0 # How many bytes has the Microcontroller sent?
+        self.MctlExceptionCount = 0 # How many exceptions has the Microcontroller handled?
         self.TrajectorySafetyFlushes = 0 # How many times has the microcontroller flushed a valid trajectory because of a communication break?
         self.CameraTxCount = 0 # Number of messages SENT from RPi to Camera
         self.CameraRxCount = 0 # Number of messages RECEIVED by RPi from Camera
@@ -3967,6 +4044,7 @@ class sessionstatus(attributemaster): # 1 references.
         self.MctlRxErrors = 0 # How many messages has the Microcontroller rejected? (Checksum errors)
         self.MctlRxBytes = 0 # How many bytes has the Microcontroller received?
         self.MctlTxBytes = 0 # How many bytes has the Microcontroller sent?
+        self.MctlExceptionCount = 0 # How many exceptions has the Microcontroller handled?
         self.MctlLifeSeconds = 0 # How many seconds has the Microcontroller been running for?        
         self.MctlWriteDrops = 0 # How many messages were dropped from send buffer on Microcontroller due to overflow?
         self.MotorControlMode = 'idle' # What mode are we in? 'idle'/'remote'/'autonomous'. This controls the responses to some automated status messages.
@@ -4034,6 +4112,9 @@ class sessionstatus(attributemaster): # 1 references.
             self.TrajectorySafetyFlushes = int(lineitems[7])
         else:
             self.TrajectorySafetyFlushes = 0
+        # lineitems[8] contains reason codes, for documentation rather than function.
+        if len(lineitems) > 9: # Exception count is included in the message.
+           self.MctlExceptionCount = int(lineitems[9])
         if self.ClockSynchronised == False: # Clock has not yet been synchronised.
             # Synchronise clocks.
             line = 'set time ' + CleanDatetimeString(str(NowUTC()))
@@ -4252,6 +4333,9 @@ class sessionstatus(attributemaster): # 1 references.
         SessionWindow.RangeFieldColor('RR',lowlow=-100,low=-10,high=1,highhigh=100) # Anything >= 1 is a POOR value.
         SessionWindow.FieldValue('ALIVE',HRSeconds(self.MctlLifeSeconds)) # How long since last microcontroller restart.
         SessionWindow.FieldValue('MTSF',self.TrajectorySafetyFlushes) # How many times has the microcontroller flushed valid trajectorys due to comms problems?
+        SessionWindow.FieldValue('EXCEPT',self.MctlExceptionCount) # How many code exceptions have been reported by the microcontroller.
+        if self.MctlExceptionCount > 0: SessionWindow.FieldColor('EXCEPT',fg=OSW_TEXT_POOR) # The microcontroller has handled some exceptions in the code.
+        else: SessionWindow.FieldColor('EXCEPT',fg=OSW_TEXT_GOOD) # The microcontroller has not encountered any code exceptions.
         if self.TrajectorySafetyFlushes > 0: SessionWindow.FieldColor('MTSF',fg=OSW_TEXT_BAD)
         else: SessionWindow.FieldColor('MTSF',fg=OSW_TEXT_GOOD)
         if Mctl.PoweredByUsb: # There's a USB connection as well as a GPIO connection to the microcontroller. BEWARE!
@@ -4500,7 +4584,9 @@ class imagetracker(attributemaster): # 1 references.
         
     def SaveTrackingAnalysis(self,latestlist=None,targetlist=None):
         """ Combine LATEST, TARGET star lists and show which stars were matched up in FindTransform.
-            This is a debug/development feature, but shows how the drift tracking is actually interpreting the images. """
+            This is a debug/development feature, but shows how the drift tracking is actually interpreting the images. 
+            If latestlist and targetlist are provided by the calling routine those are used for markup.
+            Otherwise the existing values from the imagetracker instance are used. """
         self.Log("ImageTracker.SaveTrackingAnalysis: Begin",terminal=False)
         if type(latestlist) == type(None): latestlist = self.LatestImage.StarList
         if type(targetlist) == type(None): targetlist = self.TargetImage.StarList
@@ -4510,14 +4596,16 @@ class imagetracker(attributemaster): # 1 references.
         NewImageBuffer.New(height,width,imagetype='bgr',datatype=np.uint8)
         NewImageBuffer.FillColor(BGRBlack)
         # Match lists must be the same length.
-        if len(self.LatestStarMatchList) == len(self.TargetStarMatchList) and type(self.LatestStarMatchList) != type(None) and type(self.TargetStarMatchList) != type(None):
+        if type(self.LatestStarMatchList) != type(None) and \
+           type(self.TargetStarMatchList) != type(None) and \
+           len(self.LatestStarMatchList) == len(self.TargetStarMatchList):
             # Mark the matched stars first, and an arrow linking the TARGET and LATEST locations.
             for i, lstar in enumerate(self.LatestStarMatchList): 
                 tstar = self.TargetStarMatchList[i]
-                lx = int(lstar[0])
-                ly = int(lstar[1])
-                tx = int(tstar[0])
-                ty = int(tstar[1])
+                lx = int(lstar[0]) # Latest star X
+                ly = int(lstar[1]) # Latest star Y
+                tx = int(tstar[0]) # Target star X
+                ty = int(tstar[1]) # Target star Y
                 if self.ValidStarValues(tstar): NewImageBuffer.DrawCircle(tx,ty,15,BGRGreen,thickness=2) # Green circle around matched Target stars.
                 else: self.Log("imagetracker.SaveTrackingAnalysis: TargetStarMatchList. tstar",tstar,"bad values.",terminal=True)
                 if self.ValidStarValues(lstar): NewImageBuffer.DrawCircle(lx,ly,15,BGRRed,thickness=2) # Red circle around matched Latest stars.
@@ -4554,6 +4642,11 @@ class imagetracker(attributemaster): # 1 references.
         NewImageBuffer.AddText(str(self.TargetImage.StarCount) + " Target stars",100,100,size=1,color=BGRGreen,bgcolor=BGRBlack)
         NewImageBuffer.AddText(str(self.LatestImage.StarCount) + " Latest stars",100,140,size=1,color=BGRRed,bgcolor=BGRBlack)
         NewImageBuffer.AddText(str(len(self.LatestStarMatchList)) + " Matches",100,180,size=1,color=BGRYellow,bgcolor=BGRBlack)
+        # Program ID in bottom right corner.
+        xpos = int(width - 10)
+        ypos = int(height - 10)
+        NewImageBuffer.AddText(ProgramTitle + " " + VERSION,xpos,ypos,color=BGRWhite,bgcolor=BGRBlack,hjust='r')
+        # Save the file.
         filename = FolderList['tracking'] + "TrackingAnalysis_" + UtcTimeStamp() + ".jpg"
         CameraWindow.Print(NowHMS() + " " + filename.split('/')[-1]) # Note the filename that's been generated.
         DriftWindow.Print(NowHMS() + " Drift analysis image done.") # Note analysis done.
@@ -4578,8 +4671,13 @@ class imagetracker(attributemaster): # 1 references.
         self.Log("ImageTracker.SetLatestImage: Contrast measures",contrast_m, contrast_s,terminal=False)
         folder = FolderList.get('tracking')
         self.LatestImage.ChangeType('grayscale')
+        if Parameters.TrackingUrbanFilter: # Apply the 'UrbanFilter' algorithm to the image. This tries to remove haze, and sometimes even trees.
+            self.Log("ImageTracker.SetLatestImage: Applying UrbanFilter to image",terminal=False)
+            DriftWindow.Print(NowHMS() + ' Applying UrbanFilter.')
+            self.LatestImage.UrbanFilter()
         if Parameters.PrepImagesForTracking: # Simplify the images if option selected.
             self.Log("ImageTracker.SetLatestImage: Preparing image",terminal=False)
+            DriftWindow.Print(NowHMS() + ' Enhancing image.')
             self.LatestImage.PrepareImage()
         self.Log("ImageTracker.SetLatestImage: Prepared image:","type", str(type(self.LatestImage.ImageBuffer)),"shape", self.LatestImage.GetHeight(), "x", self.LatestImage.GetWidth(),"depth", self.LatestImage.GetDepth(),terminal=False)
         self.LatestTimeStamp = timestamp # The image is now prepared, update the timestamp.
@@ -6523,7 +6621,9 @@ def TargetSelection(): # 2 references.
 
     while option == None:
         obstarget = None
-        option = TargetMenu.Prompt() # As the user to select an option from the menu.
+        option = TargetMenu.Prompt() # Ask the user to select an option from the menu.
+        # option contains the selected target, or None.
+        if option == None: option = 'LAST' # If the user quit the menu without selecting anything, default to the last target.
         if option == "LAST": obstarget = ChooseLastTarget()
         elif option == "HISTORY": obstarget = ChooseHistory()
         elif option == "SOLAR": obstarget = ChooseSolar()
@@ -6552,7 +6652,7 @@ def TargetSelection(): # 2 references.
                 temp = AskYesNo(textcolor.cyan("Do you want to continue ?[y/N]"),False)
                 if not temp: option = None # User wants to try a different target, ask the user again.
         if obstarget == None: option = None # No target selected, so ask the user again.
-        if option == None: print(textcolor.red("? Try again.")) # No success, so ask the user again.
+        if option == None: print(textcolor.red("No target selected: Please try again.")) # No success, so ask the user again.
 
     return obstarget
 
@@ -6563,6 +6663,7 @@ Session.Target = None # No target yet.
 if ResumeObservation: # Try to resume with last known target.
     Session.Target = ChooseLastTarget()
 if Session.Target == None: # Still no valid target. Ask the user.
+    print(textcolor.yellow("You must select a target to start the program."))
     Session.Target = TargetSelection()
 CameraInUse.SetObservationParameters() # Set target specific parameters for the camera.
 # Create some other major objects to be included in the SkyChart window.
@@ -6708,7 +6809,7 @@ def TunePositionAltitude(): # 2 references. # For menu call
 
 def SetExposureTime(p): # 1 references.
     print (textcolor.yellow("SetExposureTime (Currently " + str(p)+ " seconds)."))
-    print ("Some blurring may occur if exposures exceed " + str(round(CameraInUse.SecondsPerPixel,3)) + "seconds.")
+    MainLog.Log("To minimise blurring the camera needs to move every ",round(CameraInUse.SecondsPerPixel,3),"seconds.",terminal=False)
     v = input(textcolor.cyan("New exposure time in seconds (or RETURN) : ")) # Python3
     if len(v) > 0:
         v = TextToFloat(v)
@@ -6738,6 +6839,8 @@ def MenuSetExposureTime(): # 1 references. # For menu
 def SetBatchSize(p): # 1 references.
     print (textcolor.yellow("SetBatchSize (Currently " + str(p)+ " frames)."))
     print ("This is the number of frames to capture when taking LIGHT images.")
+    print ("These are the actual observation images.")
+    print ("This does not change the number of CONTROL images taken for FLAT, DARK or BIAS images.")
     v = input(textcolor.cyan("Light images batch size (or RETURN) : ")) # Python3 
     if len(v) > 0:
         v = TextToInt(v)
@@ -6751,6 +6854,7 @@ def SetBatchSize(p): # 1 references.
 def SetControlBatchSize(p): # 1 references. 
     print (textcolor.yellow("SetControlBatchSize (Currently " + str(p)+ " frames)."))
     print ("This is the number of frames to capture when taking FLAT, DARK & BIAS images.")
+    print ("This does not change the number of LIGHT (observation) images taken.")
     print ("HINT: A good number is around 15-20 images.")
     v = input(textcolor.cyan("Control batch size (or RETURN) : ")) # Python3 
     if len(v) > 0:
@@ -7215,6 +7319,10 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
         ypos = int(height - 10)
         text = "File: " + filename
         NewImageBuffer.AddText(text,xpos,ypos,color=BGRWhite,bgcolor=BGRBlack)
+        # Program ID in bottom right corner.
+        xpos = int(width - 10)
+        ypos = int(height - 10)
+        NewImageBuffer.AddText(ProgramTitle + " " + VERSION,xpos,ypos,color=BGRWhite,bgcolor=BGRBlack,hjust='r')
         # Camera options in top left corner.
         xpos = int(200)
         ypos = int(40)
@@ -7236,7 +7344,7 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None): # 2 r
         for i in MotorControls:
             text = "Motor: " + i.MotorName + " "
             text += Deg3dp(i.CurrentAngle) + "deg, " # DegreeSymbol 
-            text += "position " + str(i.AngleToStep(i.CurrentAngle))
+            text += "position " + str(i.AngleToStep(i.CurrentAngle)) + " of " + str(i.AxisStepsPerRev)
             NewImageBuffer.AddText(text,xpos,NewImageBuffer.PrevTextY,color=BGRGreen,bgcolor=BGRBlack,hjust='r')
         text = "Marking objects above magnitude " + str(round(Parameters.TargetMinMagnitude,1)) # Object magnitude filter.
         NewImageBuffer.AddText(text,xpos,NewImageBuffer.PrevTextY,color=BGRGold,bgcolor=BGRBlack,hjust='r') 
@@ -7613,7 +7721,7 @@ def CameraHandler(outboundqueue,inboundqueue): # 1 references.
     CameraWindow.Print(NowHMS() + ' CameraHandler started.')
     ReadyToObserve = False # When True the handler can start taking photographs. 
     CamLog.Log('CameraHandler.initial: ReadyToObserve = False',terminal=False)
-    PrevReadyToObserve = None # Detect when the ReadyToObserve status changes.
+    PrevReadyToObserve = False # Detect when the ReadyToObserve status changes.
     PhotoCount = 0 # Counter of completed photographs. 
     CameraInUse.BatchCount = 0 # Counter of completed photographs.
     AzDriftSteps = 0
@@ -7714,7 +7822,7 @@ def CameraHandler(outboundqueue,inboundqueue): # 1 references.
         
         if ReadyToObserve:
             # Calculate drift.
-            if LoopTask == 'tracking': # Time to consider a tracking check.
+            if LoopTask == 'tracking': # Time to consider a tracking check, and it's enabled.
                 if DriftTracker.TrackingAge() == None or DriftTracker.TrackingAge() > DriftTracker.TrackingInterval: TrackingDue = True
                 else: TrackingDue = False
                 if Parameters.UseTracking == False: # Tracking currently disabled. (User can dynamically change this switch during observation).
@@ -7905,7 +8013,8 @@ def ShutdownCamera(): # 9 references.
     global CameraControlQueue
     success = True # Assume success unless we fail to shut down the handler correctly. 
     print ('\n' + textcolor.yellow('Stopping CameraHandler...')) # force newline before printing text.
-    print ('The camera is currently processing the "' + str(CameraInUse.CurrentTask) + '" task.')
+    if CameraInUse.CurrentTask != None:
+        print ('The camera is currently processing the "' + str(CameraInUse.CurrentTask) + '" task.')
     print ('Waiting for CameraHandler to confirm it has completed (telescope may continue to move until this is finished) ...')
     CameraControlQueue.put({'Stop' : True}) # Post a shutdown message to the CameraHandler
     Session.CameraTxCount += 1 # We sent another message to the camera.
@@ -8087,6 +8196,26 @@ def RestartMicrocontroller(): # 2 references. # For menu
 
 # ------------------------------------------------------------------------------------------------------
 
+
+def MotorStatusOff(): # 1 references.
+    """ Turn motor status messages off.
+        Feature to support 'fast' configuration of a complete trajectory for a motor. """
+    MainLog.Log("MotorStatusOff: Turn off motor status messages.",terminal=False)
+    print ("Microcontroller will not send motor status messages back to the RPi.")
+    Mctl.Write('sendstatus ' + CleanDatetimeString(str(NowUTC())) + ' n ') # Turn off motor status responses.
+
+# ------------------------------------------------------------------------------------------------------
+
+def MotorStatusOn(): # 1 references.
+    """ Turn motor status messages on.
+        Feature to support 'fast' configuration of a complete trajectory for a motor. """
+    MainLog.Log("MotorStatusOff: Turn on motor status messages.",terminal=False)
+    print ("Microcontroller will send motor status messages back to the RPi.")
+    Mctl.Write('sendstatus ' + CleanDatetimeString(str(NowUTC())) + ' y ') # Turn on motor status responses.
+
+
+# ------------------------------------------------------------------------------------------------------
+
 def MicrocontrollerLedsOff(): # 1 references. # For menu
     Parameters.MctlLedStatus = False
     SetGlobalLedStatus()
@@ -8113,6 +8242,48 @@ def MicrocontrollerLedsOn(): # 1 references. # For menu
 
 # ------------------------------------------------------------------------------------------------------
 
+def TrackingOn():
+    """ Turn drift tracking on. """
+    MainLog.Log("Turning drift tracking on.",terminal=True)
+    Parameters.UseTracking = True
+
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingOff():
+    """ Turn drift tracking off. """
+    MainLog.Log("Turning drift tracking off.",terminal=True)
+    Parameters.UseTracking = False
+
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingEnhanceOn():
+    """ Turn drift tracking image enhancement ofn. """
+    MainLog.Log("Turning drift tracking image enhancement on.",terminal=True)
+    Parameters.PrepImagesForTracking = True
+
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingEnhanceOff():
+    """ Turn drift tracking image enhancement off. """
+    MainLog.Log("Turning drift tracking image enhancement off.",terminal=True)
+    Parameters.PrepImagesForTracking = False
+
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingUrbanOn():
+    """ Turn drift tracking urban filter on. """
+    MainLog.Log("Turning drift tracking urban filter on.",terminal=True)
+    Parameters.TrackingUrbanFilter = True
+
+# ------------------------------------------------------------------------------------------------------
+
+def TrackingUrbanOff():
+    """ Turn drift tracking urban filter off. """
+    MainLog.Log("Turning drift tracking urban filter off.",terminal=True)
+    Parameters.TrackingUrbanFilter = False
+
+# ------------------------------------------------------------------------------------------------------
+
 def ObservationSubmenu(drifttracker=None): # 1 references. 
     """ Submenu of options that can be used DURING an observation. """
     ClearScreen() # Clear the screen and force window refresh.
@@ -8120,13 +8291,19 @@ def ObservationSubmenu(drifttracker=None): # 1 references.
     if drifttracker == None: temp = None # There is no drifttracker object to call.
     else: temp = drifttracker.Reset # There is a drifttracker object to call.
     SubMenuOptions = {
-        'ProgramStatus':          {'label':'Status',                  'call':ProgramStatus},
-        'TuneAzimuth':            {'label':'Tune azimuth',            'call':TunePositionAzimuth},
-        'TuneAltitude':           {'label':'Tune altitude',           'call':TunePositionAltitude},
-        'MctlLedsOff':            {'label':'Microcontroller LEDS off','call':MicrocontrollerLedsOff},
-        'MctlLedsOn':             {'label':'Microcontroller LEDS on', 'call':MicrocontrollerLedsOn},
-        'ResetDriftTracking':     {'label':'Reset drift tracking',    'call':temp},
-        'RestartMicrocontroller': {'label':'Restart microcontroller', 'call':RestartMicrocontroller}
+        'ProgramStatus':          {'label':'Status',                    'call':ProgramStatus, 'break':True},
+        'TuneAzimuth':            {'label':'Tune azimuth',              'call':TunePositionAzimuth},
+        'TuneAltitude':           {'label':'Tune altitude',             'call':TunePositionAltitude, 'break':True},
+        'MctlLedsOff':            {'label':'Microcontroller LEDS off',  'call':MicrocontrollerLedsOff},
+        'MctlLedsOn':             {'label':'Microcontroller LEDS on',   'call':MicrocontrollerLedsOn},
+        'RestartMicrocontroller': {'label':'Restart microcontroller',   'call':RestartMicrocontroller, 'break':True},
+        'TrackingOn':             {'label':'Tracking on',               'call':TrackingOn},
+        'TrackingOff':            {'label':'Tracking off',              'call':TrackingOff},
+        'TrackingEnhanceOn':      {'label':'Tracking enhancement on',   'call':TrackingEnhanceOn},
+        'TrackingEnhanceOff':     {'label':'Tracking enhancement off',  'call':TrackingEnhanceOff},
+        'TrackingUrbanOn':        {'label':'Tracking urban filter on',  'call':TrackingUrbanOn},
+        'TrackingUrbanOff':       {'label':'Tracking urban filter off', 'call':TrackingUrbanOff},
+        'ResetDriftTracking':     {'label':'Reset drift tracking',      'call':temp}
     }
     SubMenu = proceduremenu(SubMenuOptions,'Pilomar observation submenu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
@@ -8418,7 +8595,7 @@ def ObservationRun(): # 1 references.
     CameraAlt = None # The current altitude of the camera (reported by the motor microcontroller). Unknown at first.
     CameraAz = None # The current azimuth of the camera (reported by the motor microcontroller). Unknown at first.
     PrevAlt = None # The previous altitude of the telescope. Uninitialised until the main loop has started. 
-    PrevReadyToObserve = None # We are not ready to observe until the whole telescope is synchronised and on target.
+    PrevReadyToObserve = False # We are not ready to observe until the whole telescope is synchronised and on target.
     ObservationStartUTC = None # The UTC timestamp when the image capture begins.
     LoopTimeList = [] # Show how quickly recent loops have completed. 
     cumulativelooptime = 0 # Cumulative total of all the loop times.
@@ -9046,7 +9223,11 @@ def EditParameters(): # 1 references. # For menu
     os.system("nano " + Parameters.ParamFileName) # Edit
     Parameters = parameters(filename=ParameterFileName,log=MainLog.Log) # Create and load parameters.
     Parameters.Show()
-    print(textcolor.yellow("It is advisable to restart the software after changing the parameter file."))
+    lines = ["If  you  have  changed  values  in the  parameter  file",
+             "you should restart this program and the microcontroller",
+             "to be sure that all changes take effect."]
+    textcolor.TextBox(line,fg=textcolor.YELLOW,bg=textcolor.BLACK)    
+    #print(textcolor.yellow("It is advisable to restart the software after changing the parameter file."))
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9171,6 +9352,26 @@ def MenuStartMessage():
 
 # ------------------------------------------------------------------------------------------------------
 
+def CommunicationWarnings():
+    """ Quick check that communication is up and running.
+        Report to the terminal if not. """    
+    try:
+        temp = int((NowUTC() - Mctl.LastRxTime).total_seconds())
+        if temp >= Parameters.MctlCommsTimeout: # Line has been open long enough to expect some traffic.
+            print(textcolor.fgbgcolor(textcolor.WHITE,textcolor.ORANGERED1," WARNING: No data received from microcontroller for " + str(temp) + " seconds. "))
+    except Exception as e:
+        MainLog.Log("CommunicationWarnings(): Failed to calculate Rx age.",Mctl.LineOpenedTime,Parameters.MctlCommsTimeout,terminal=False)
+        MainLog.RecordTraceback(None) # Record the stack at this point.
+    try:
+        if Mctl.BytesReceived <= 0 or Mctl.LinesReceived <= 0:
+            print(textcolor.yellow("No data received from microcontroller since last startup."))
+    except Exception as e:
+        MainLog.Log("CommunicationWarnings(): Failed to report Rx volume.",Mctl.BytesReceived,Mctl.LinesReceived,terminal=False)
+        MainLog.RecordTraceback(None) # Record the stack at this point.
+
+
+# ------------------------------------------------------------------------------------------------------
+
 def ProgramStatus(): # 1 references. # For menu
     """ Show a status summary of the telescope and session.
         What's the target?
@@ -9191,9 +9392,10 @@ def ProgramStatus(): # 1 references. # For menu
     listlines.extend(StorageStrings())
     listlines.extend(ProgramStartStrings())
     listlines.extend(MicrocontrollerStrings())
-    temp = " Observer's location: Latitude: " + Deg3dp(Parameters.HomeLatVal,DegreeSymbol) + " Longitude: " + Deg3dp(Parameters.HomeLonVal,DegreeSymbol)
+    temp = " Observer's location: Latitude: " + Deg3dp(Parameters._HomeLatVal,DegreeSymbol) + " Longitude: " + Deg3dp(Parameters._HomeLonVal,DegreeSymbol)
     listlines.extend([temp])
     textcolor.TextBox(listlines,fg=MENU_SUBTITLE_FG,bg=MENU_SUBTITLE_BG)
+    CommunicationWarnings() # Add some warnings if the communication doesn't look healthy.
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9207,7 +9409,7 @@ def ScanForMeteors(): # 1 references. # For menu
 def ShowFolderList():
     """ Show FolderList contents. """
     for key,value in FolderList.items():
-        print(key,value)
+        print(key.rjust(20," "),":",value)
     
 # ------------------------------------------------------------------------------------------------------
 
@@ -9231,6 +9433,7 @@ def MonitorComms():
     print(textcolor.yellow("MonitorComms"))
     print("This will show communication traffic.")
     print("Press 'x' to return to the menu.")
+    print("Press 'r' to reset microcontroller.")
     if Mctl.PowerIsOn() or Mctl.PoweredByUsb: # Warn if the microcontroller is not powered. 
         print(textcolor.green("The microcontroller power is ON. Communication should be running."))
     else:
@@ -9239,6 +9442,9 @@ def MonitorComms():
     while True:
         keypress = Keyboard.Check().lower()
         if keypress == 'x': break
+        elif keypress == 'r': 
+            print(textcolor.yellow("Restarting microcontroller."))
+            RestartMicrocontroller() # Force the microcontroller to restart.
         time.sleep(0.5)
     Mctl.EndMonitor() # Turn off replication to the terminal.
 
@@ -9260,31 +9466,31 @@ def ShowMotorStatus():
 
 # ------------------------------------------------------------------------------------------------------
 
-def CalculateStarSpread(image): # *Q* Also available in pilomarimage.py
-    """ Given an image handle, calculate an approximation for the % of the frame that contains stars. 
-        LOW values mean that the stars are not spread out evenly across the frame. 
-        HIGH values mean that the stars are spread out more evenly across the frame.
-        image is a pilomarimage object.
-        Returns a % value for each axis and the total image. """
-    if image.ImageExists(): # There's an image loaded.
-        HMin = None # Lowest 'X' position of a star.
-        HMax = None # Highest 'X' position of a star.
-        VMin = None # Lowest 'Y' position of a star.
-        VMax = None # Highest 'Y' position of a star.
-        for star in image.StarList: # Each star is a list of [x, y, radius]
-            if HMin == None or HMin > star[0]: HMin = star[0]
-            if HMax == None or HMax < star[0]: HMax = star[0]
-            if VMin == None or VMin > star[1]: VMin = star[1]
-            if VMax == None or VMax < star[1]: VMax = star[1]
-        HorizontalSpread = 100 * (HMax - HMin) / image.GetWidth()
-        VerticalSpread = 100 * (VMax - VMin) / image.GetHeight()
-        ImageSpread = 100 * ((HorizontalSpread / 100) * (VerticalSpread / 100))
-    else: # There's no image.
-        HorizontalSpread = VerticalSpread = ImageSpread = 0 # No spread to measure.
-    HorizontalSpread = round(HorizontalSpread,0) # Integer values only.        
-    VerticalSpread = round(VerticalSpread,0) # Integer values only.        
-    ImageSpread = round(ImageSpread,0) # Integer values only.        
-    return HorizontalSpread, VerticalSpread, ImageSpread
+#def CalculateStarSpread(image): # *Q* Use the copy in pilomarimage.py
+#    """ Given an image handle, calculate an approximation for the % of the frame that contains stars. 
+#        LOW values mean that the stars are not spread out evenly across the frame. 
+#        HIGH values mean that the stars are spread out more evenly across the frame.
+#        image is a pilomarimage object.
+#        Returns a % value for each axis and the total image. """
+#    if image.ImageExists() and len(image.StarList) > 0: # There's an image loaded and stars exist.
+#        HMin = None # Lowest 'X' position of a star.
+#        HMax = None # Highest 'X' position of a star.
+#        VMin = None # Lowest 'Y' position of a star.
+#        VMax = None # Highest 'Y' position of a star.
+#        for star in image.StarList: # Each star is a list of [x, y, radius]
+#            if HMin == None or HMin > star[0]: HMin = star[0]
+#            if HMax == None or HMax < star[0]: HMax = star[0]
+#            if VMin == None or VMin > star[1]: VMin = star[1]
+#            if VMax == None or VMax < star[1]: VMax = star[1]
+#        HorizontalSpread = 100 * (HMax - HMin) / image.GetWidth()
+#        VerticalSpread = 100 * (VMax - VMin) / image.GetHeight()
+#        ImageSpread = 100 * ((HorizontalSpread / 100) * (VerticalSpread / 100))
+#    else: # There's no image.
+#        HorizontalSpread = VerticalSpread = ImageSpread = 0 # No spread to measure.
+#    HorizontalSpread = round(HorizontalSpread,0) # Integer values only.        
+#    VerticalSpread = round(VerticalSpread,0) # Integer values only.        
+#    ImageSpread = round(ImageSpread,0) # Integer values only.        
+#    return HorizontalSpread, VerticalSpread, ImageSpread
     
 # ------------------------------------------------------------------------------------------------------
 
@@ -9300,27 +9506,34 @@ def TrackingStatus():
     print("This shows tracking system parameters and any recent tracking results.")
     print("Use this information to finetune tracking performance.")
     print("")
+    
+    if Parameters.UseTracking: print(textcolor.green("Tracking is currently enabled."),textcolor.blue("(UseTracking parameter)"))
+    else: print(textcolor.red("Tracking is currently disabled."),textcolor.blue("(UseTracking parameter)"))
+    print("")
+
     print(textcolor.white("Camera"))
     print("      Image size:",CameraInUse.Sensor.PixelWidth,"w","*",CameraInUse.Sensor.PixelHeight,"h","pixels")
     print("            Lens:",CameraInUse.Lens.Length,"mm","(35mm equiv:",CameraInUse.Lens.EquivLength,"mm)")
     print("   Field of View:","Horizontal",Deg3dp(CameraInUse.Lens.FovHorizontal,DegreeSymbol),
                               "Vertical",Deg3dp(CameraInUse.Lens.FovVertical,DegreeSymbol))
+    print("")
+
     print(textcolor.white("Target parameters (calculated image)"))
     if Parameters.LocalStarsMagnitude < Parameters.TargetMinMagnitude:
         bNote = textcolor.red("Clipped to mag",Parameters.LocalStarsMagnitude,"in Hipparcos selection.")
     else:
         bNote = ""
-    print("      Brightness: mag",Parameters.TargetMinMagnitude,bNote)
+    print("      Brightness: mag",Parameters.TargetMinMagnitude,textcolor.blue("(TargetMinMagnitude parameter)"),bNote)
     print("                  mag",Parameters.TargetMinMagnitude - 0.2,"would generate fewer stars.")
     print("                  mag",Parameters.TargetMinMagnitude + 0.2,"would generate more stars.")
-    print(textcolor.blue("                     (TargetMinMagnitude parameter)"))
-    print(" Hipparcos limit: mag",Parameters.LocalStarsMagnitude) # Cannot exceed this value without reloading LocalStars list.
-    print(textcolor.blue("                     (LocalStarsMagnitude parameter)"))
+    print(" Hipparcos limit: mag",Parameters.LocalStarsMagnitude,textcolor.blue("(LocalStarsMagnitude parameter)")) # Cannot exceed this value without reloading LocalStars list.
+    print("")
+
     print(textcolor.white("Latest parameters (captured image)"))
-    print("   Exposure time:",Parameters.TrackingExposureSeconds,"s")
+    print("   Exposure time:",Parameters.TrackingExposureSeconds,"s",textcolor.blue("(TrackingExposureSeconds parameter)"))
     print("                 ",round(Parameters.TrackingExposureSeconds / 2,1),"s would capture fewer stars.")
     print("                 ",round(Parameters.TrackingExposureSeconds * 2,1),"s would capture more stars.")
-    print(textcolor.blue("                     (TrackingExposureSeconds parameter)"))
+    print("")
     
     # Results of latest drift calculation.
     print(textcolor.white("Drift calculation"))
@@ -9333,17 +9546,34 @@ def TrackingStatus():
         print("  Drift dx,dy,rot:",round(DriftTracker.dx,0),",",round(DriftTracker.dy,0),",",Deg3dp(DriftTracker.rotation,DegreeSymbol))
     else:
         print("  Drift dx,dy,rot: NOT CALCULATED YET.")
+    print("")
+
     print(textcolor.white("Star generation/detection"))
-    
     # Star detection.
-    print("  Enhance images:",Parameters.PrepImagesForTracking)
-    print(textcolor.blue("                     (PrepImagesForTracking parameter)"))
+    print("  Enhance images:",Parameters.PrepImagesForTracking,textcolor.blue("(PrepImagesForTracking parameter)"))
+    if Parameters.PrepImagesForTracking: # What does this parameter do?
+        print("                     The target image is generated in grayscale.")
+        print("                     The latest image has contrast enhanced.")
+    else:
+        print("                     The target image is generated in color.")
+        print("                     The latest image has no contrast enhancement.")
+    print("Apply Urban filter:",Parameters.TrackingUrbanFilter,textcolor.blue("(TrackingUrbanFilter parameter)"))
+    if Parameters.TrackingUrbanFilter: # What does this parameter do?
+        print("                     The latest image has general haze reduced.")
+        print("                     The latest image has contrast enhanced.")
+    else:
+        print("                     The latest image has no haze reduction.")
+        print("                     The latest image has no contrast enhancement.")
     
     # Processing of the TARGET image.
     print("     Target image: Loaded",DriftTracker.TargetImage.ImageExists(),DriftTracker.TargetTimeStamp)
     BadThreshold = 50
     PoorThreshold = 70
-    hs,vs,imgs = CalculateStarSpread(DriftTracker.TargetImage) # Calculate the spread of stars in the target image.
+    #hs,vs,imgs = CalculateStarSpread(DriftTracker.TargetImage) # Calculate the spread of stars in the target image.
+    DriftTracker.TargetImage.CalculateStarSpread() # Calculate the spread of stars in the target image.
+    hs = round(DriftTracker.TargetImage.HorizontalSpread,0)
+    vs = round(DriftTracker.TargetImage.VerticalSpread,0)
+    imgs = round(DriftTracker.TargetImage.AreaSpread,0)
     hs_fg = vs_fg = imgs_fg = OSW_TEXT_GOOD # What color to show for GOOD star spread percentages?
     if hs < BadThreshold: hs_fg = OSW_TEXT_BAD # Horizontal star spread is BAD.
     elif hs < PoorThreshold: hs_fg = OSW_TEXT_POOR # Horizontal star spread is POOR.
@@ -9358,7 +9588,11 @@ def TrackingStatus():
           
     # Processing of the LATEST image.          
     print("     Latest image: Loaded",DriftTracker.LatestImage.ImageExists(),DriftTracker.LatestTimeStamp)
-    hs,vs,imgs = CalculateStarSpread(DriftTracker.LatestImage) # Calculate the spread of stars in the latest image.
+    #hs,vs,imgs = CalculateStarSpread(DriftTracker.LatestImage) # Calculate the spread of stars in the latest image.
+    DriftTracker.LatestImage.CalculateStarSpread() # Calculate the spread of stars in the target image.
+    hs = round(DriftTracker.LatestImage.HorizontalSpread,0)
+    vs = round(DriftTracker.LatestImage.VerticalSpread,0)
+    imgs = round(DriftTracker.LatestImage.AreaSpread,0)
     hs_fg = vs_fg = imgs_fg = OSW_TEXT_GOOD # What color to show for GOOD star spread percentages?
     if hs < BadThreshold: hs_fg = OSW_TEXT_BAD # Horizontal star spread is BAD.
     elif hs < PoorThreshold: hs_fg = OSW_TEXT_POOR # Horizontal star spread is POOR.
@@ -9378,32 +9612,70 @@ def MicrocontrollerStatus():
     print(textcolor.yellow("Microcontroller status"))
     
     print("Board type:",Parameters.BoardType)
+    if Session.ValidControllerVersion():
+        print("Microcontroller program version:",textcolor.green(Session.ControllerVersion),"(good)") # We like this version.
+    else:
+        print("Microcontroller program version:",textcolor.red(Session.ControllerVersion),"(check)") # We don't trust this version.
+    print("Acceptable microcontroller versions:",ACCEPTABLECONTROLLERVERSIONS) # What microcontroller versions are acceptable?
     print("Reset PIN:",Mctl.ResetPin) # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
     print("Received line queue:",len(Mctl.Lines)) # No lines received yet.
     print("Write chunk size:",Mctl.WriteChunkBytes,"bytes")
     print("Write chunk gap:",Mctl.WriteChunkSeconds,"s") # Seconds between chunks written to microcontroller.
     print("Current receiving line:",Mctl.InputLine)
     print("Write queue length:",len(Mctl.WriteQueue))
-    print("Lines received:",Mctl.LinesReceived)
+    temp = str(Mctl.LinesReceived)
+    if Mctl.LinesReceived < 1:
+        temp = textcolor.red(temp) # Highlight in RED that nothing received.
+    print("Lines received:",temp)
     print("Lines sent:",Mctl.LinesSent)
-    print("Bytes received:",Mctl.BytesReceived)
+    temp = str(Mctl.BytesReceived)
+    if Mctl.BytesReceived < 1:
+        temp = textcolor.red(temp) # Highlight in RED that nothing received.
+    print("Bytes received:",temp)
     print("Bytes sent",Mctl.BytesSent)
-    print("Print communications:",Mctl.PrintComms) # When TRUE communication log is copied to the terminal, otherwise it's only written to the log file.
+    print("Monitor communications:",Mctl.PrintComms) # When TRUE communication log is copied to the terminal, otherwise it's only written to the log file.
     print("LEDs active:",Mctl.LedStatus) # LEDS on by default.
-    print("UART line opened:",Mctl.LineOpenedTime,"UTC")
-    print("UART Last Tx:",Mctl.LastTxTime,"UTC") # When was data last sent?
-    print("UART Last Rx:",Mctl.LastRxTime,"UTC") # When was data last received?
-    print("UART Rx errors:",Mctl.RxErrors)
+    print("UART line opened:",str(Mctl.LineOpenedTime).split('.')[0],"UTC")
+    print("UART Last Tx:",str(Mctl.LastTxTime).split('.')[0],"UTC") # When was data last sent?
+    temp = str(Mctl.LastRxTime).split('.')[0]
+    if Mctl.LastRxTime == None or Mctl.LastRxTime <= Mctl.LineOpenedTime: # Nothing received.
+        temp = textcolor.red(temp) # Highlight nothing received.
+    print("UART Last Rx:",temp,"UTC") # When was data last received?
+    temp = str(Mctl.RxErrors)
+    if Mctl.RxErrors > 10:
+        temp = textcolor.red(temp) # Lots of errors.
+    elif Mctl.RxErrors > 0:
+        temp = textcolor.yellow(temp) # A few errors.
+    print("UART Rx errors:",temp)
     print("Comms timeout:",Mctl.CommsTimeout,"s") # Seconds. microcontroller is restarted if no data received after this period.
-    print("Forced restarts:",Mctl.ForcedRestarts) # How many restarts have been forced by this software?
-    print("Remote restarts:",Mctl.RemoteRestarts) # How many restarts have been registered by the remote device itself?
-    print("Reset attempts:",Mctl.ResetAttempts) # Increment for each sequential attempt to reset communication with the remote microcontroller board.
+    temp = str(Mctl.ForcedRestarts)
+    if Mctl.ForcedRestarts > 4:
+        temp = textcolor.red(temp)
+    elif Mctl.ForcedRestarts > 0:
+        temp = textcolor.yellow(temp)
+    print("Forced restarts:",temp) # How many restarts have been forced by this software?
+    temp = str(Mctl.RemoteRestarts)
+    if Mctl.RemoteRestarts > 4:
+        temp = textcolor.red(temp)
+    elif Mctl.RemoteRestarts > 0:
+        temp = textcolor.yellow(temp)
+    print("Remote restarts:",temp) # How many restarts have been registered by the remote device itself?
+    temp = str(Mctl.ResetAttempts)
+    if Mctl.ResetAttempts > 4:
+        temp = textcolor.red(temp)
+    elif Mctl.ResetAttempts > 0:
+        temp = textcolor.yellow(temp)
+    print("Reset attempts:",temp) # Increment for each sequential attempt to reset communication with the remote microcontroller board.
     print("Powered by USB:",Mctl.PoweredByUsb) # Don't allow GPIO power pin to be used.
-    print("Device failure:",Mctl.DeviceFailure) # Set to TRUE if device seems to be irrecoverably lost.
-    print("Write queue prohibit:",Mctl.WriteProhibited) # OK to write again to the write queue.
+    if Mctl.DeviceFailure: temp = textcolor.red(str(Mctl.DeviceFailure))
+    else: temp = str(Mctl.DeviceFailure)
+    print("Device failure:",temp) # Set to TRUE if device seems to be irrecoverably lost.
+    print("Write queue prohibit:",Mctl.WriteProhibited) # OK to add to the write queue.
+    if Session.MctlExceptionCount != 0: # The microcontroller has handled some exceptions.
+        print("Exceptions handled:",textcolor.yellow(Session.MctlExceptionCount))
+    else: # No exceptions have been caught by the microcontroller.
+        print("Exceptions handled:",Session.MctlExceptionCount)
     print("Outbound message counter:",Mctl.SendId) # Incremental counter, the message number being sent to the microcontroller.
-
-
     
 # ------------------------------------------------------------------------------------------------------
 
@@ -9534,6 +9806,10 @@ MiscMenuOptions = {
     'EditParameters':         {'label':'Edit parameters',           'call':EditParameters},
     'ReloadParameters':       {'label':'Reload parameters',         'call':ReloadParameters},
     'TrackingStatus':         {'label':'Tracking status',           'call':TrackingStatus},
+    'TrackingEnhanceOn':      {'label':'Tracking enhancement on',   'call':TrackingEnhanceOn},
+    'TrackingEnhanceOff':     {'label':'Tracking enhancement off',  'call':TrackingEnhanceOff},
+    'TrackingUrbanOn':        {'label':'Tracking urban filter on',  'call':TrackingUrbanOn},
+    'TrackingUrbanOff':       {'label':'Tracking urban filter off', 'call':TrackingUrbanOff},
     'SetLocalTZ':             {'label':'Set local timezone',        'call':DefineLocalTZ},
     'ZipTrajectories':        {'label':'Zip trajectory log',        'call':ZipTrajectoryLog},
     'ShowFolderList':         {'label':'Show folder list',          'call':ShowFolderList},

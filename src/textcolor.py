@@ -41,6 +41,10 @@ class keyboardscanner():
     def Check(self):
         curses.wrapper(self.Scan)
         return self.CurrentCharacter
+        
+    def Flush(self):
+        """ Flush any pending keypresses from the buffer. """
+        while self.Check() != '': pass
 
 # ------------------------------------------------------------------------------------------------
 
@@ -2547,13 +2551,20 @@ class optionmenu():
         """ Execute the menu. 
             This paints the menu on the terminal and deals with user selections. 
             Menu items are numbered dynamically, the user selects an item by selecting the number.
+            
             If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
             The method closes when the user selects the 'x' option. 
-            
-            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
+            '>' key makes the menu 1 column wider.
+            '<' key makes the menu 1 column narrower.
+
+            Return values are :
+                result: Returns the option value that was chosen, or None if no option was chosen.
+
+            """
         # Now paint the menu and ask the user what to do.
         self.Draw(menuprefix=menuprefix) # Paint the menu.
-        result = None
+        result = None # The actual choice. None if nothing chosen.
+        found = False # Set to True if a choice is successfully made, else False is returned.
         while True: # Loop until explicitly told to terminate.
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
@@ -2584,14 +2595,15 @@ class optionmenu():
                 found = False # Have we found and executed the menu option?
                 for key,value in self.Dictionary.items():
                     if value['id'] == menuid:
-                        result = self.Select(key) # Execute the option.
-                        found = True # We have found and executed the option. OK to return to ask user for new input.
+                        result = self.Select(key) # Choose the selected value to return.
+                        found = True # We have found and selected the option.
                         break # Next
                 if found: break
             if answer.lower() == '?': # Refresh option chosen.
                 self.Draw() # Refresh the menu.
                 continue # Next user input.
-            if answer.lower() == 'x': # User chose to quit the menu. Terminate the loop.
+            if answer.lower() == 'x': # User chose to quit without selecting anything. Terminate the loop.
+                found = None # Nothing was chosen.
                 break # Go UP a level, quit if at root.
             # User input was not recognised. Try again.
             print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
