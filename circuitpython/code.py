@@ -136,14 +136,13 @@ class statusled():
                          'rx': (False,False,True), # Blue - Flashes when clearing input from UART
                          'altitude': (False,True,False), # green - Flashes when ALTITUDE motor is moving.
                          'azimuth': (False,True,False), # green - Flashes when AZIMUTH motor is moving.
-                         'move': (False,True,False), # green - Flashes when motor is moving (If no specific motor colour).
+                         'move': (False,True,False), # green - Flashes when motor is moving (If no motor specific colour).
                          'error': (True,False,False), # Red - Indicates failure/fault.
                          'pulse': (True,False,True), # Pink - Heartbeat signal (if used).
                          'init': (False,True,True)} # cyan - System is initializing.
-        # self.Led.brightness = 0.01
         self.Enabled = True # If set to FALSE, the LED is permanently off except for ERROR conditions.
+        self.ErrorExpiry = 0 # microsecond count when any error status can be cleared.
         self.Task('idle')
-        #print(dir(self.LedR))
 
     def Enable(self):
         self.Enabled = True
@@ -152,9 +151,27 @@ class statusled():
         self.Enabled = False
         self.Task('idle')
 
+    def MonoSeconds(self):
+        """ Return the CPU monotonic clock value as whole seconds. """
+        return int(time.monotonic_ns() / 1000000000) # Seconds. Reduce by 1.0e9 to get seconds.
+
     def Task(self,task):
-        if self.Enabled or task == 'error':
-            if task in self.TaskList:
+        """ Set LED color according to the task assigned. 
+            ERROR tasks always win, and an ERROR setting stays illuminated for at least 1 second 
+            before any other task can set any other colors. """
+        ErrorTask = 'error'
+        if self.MonoSeconds() < self.ErrorExpiry: # Error code is still valid. No other setting can be used yet.
+            t = self.TaskList[ErrorTask]
+            if t[0]: self.LedR.On()
+            else: self.LedR.Off()
+            if t[1]: self.LedG.On()
+            else: self.LedG.Off()
+            if t[2]: self.LedB.On()
+            else: self.LedB.Off()
+        elif self.Enabled or task == ErrorTask: # No current ERROR status, so we can consider whether to set the new status.
+            if task == ErrorTask: # Setting a new error status. Set the timeout for 1 second ahead.
+                self.ErrorExpiry = self.MonoSeconds() + 1 # Set 1 second expiry on error codes.
+            if task in self.TaskList: # Pull the color codes for the selected task.
                 t = self.TaskList[task]
                 if t[0]: self.LedR.On()
                 else: self.LedR.Off()
@@ -162,7 +179,7 @@ class statusled():
                 else: self.LedG.Off()
                 if t[2]: self.LedB.On()
                 else: self.LedB.Off()
-            else:
+            else: # If the task is not recognised, the LEDs are turned off.
                 self.LedR.Off()
                 self.LedG.Off()
                 self.LedB.Off()
@@ -173,7 +190,33 @@ class statusled():
 
 StatusLed = statusled()
 StatusLed.Task('init') # System is initializing...
-time.sleep(3)
+time.sleep(1)
+
+class exceptioncounter():
+    """ Keep a count of how many exceptions have been raised during operation. 
+        All exceptions should be reported back to the RPi in the log messages
+        however a simple counter also ensures we know when things are having
+        problems. Implemented as a class so that it can be called consistently
+        from inside other methods and objects. 
+        This will also automatically set the LED to the error color. """
+    def __init__(self):
+        self.Count = 0 # Initialize the counter. 
+
+    def Reset(self):
+        """ Reset the exception count. """
+        self.Count = 0 # Initialize the counter.
+        
+    def Raise(self):
+        try:
+            self.Count += 1 # Increment the count. 
+            StatusLed.Task('error') # Set the LED to show an error was trapped.
+            print("Exception trapped.")
+        except Exception as e:
+            print("exceptioncounter.Raise() failed:",str(e))
+
+ExceptionCounter = exceptioncounter() # Create instance.
+# Increment exception count with ExceptionCounter.Raise()
+# Reset with ExceptionCounter.Reset()
 
 button = digitalio.DigitalInOut(board.USER_SW) # Built in button.
 button.switch_to_input(pull=digitalio.Pull.DOWN)
@@ -241,6 +284,7 @@ def ValidateAngleString(angle):
         temp = None
         LogFile.Log('error: ValidateAngleString(' + angle + ') is invalid.')
         print('error: ValidateAngleString(' + angle + ') is invalid.')
+        ExceptionCounter.Raise() # Increment exception count for the session.
     if temp != None:
         if temp >= -360.0 and temp <= 360.0:
             result = True
@@ -257,6 +301,7 @@ def IsFloat(text):
         result = True
     except ValueError:
         pass
+        # Don't increment exception count for this one.
     return result
 
 class timer():
@@ -416,6 +461,7 @@ class uarthost():
             print ('UART TX=', board.GP0, 'UART RX=', board.GP1)
         else: # UART1
             raise Exception('uarthost on Tiny2040 not configued for UART channel 1. Use channel 0 only.')
+            # Don't increment exception count because we quit here. No communication can be established if this fails.
             # We can quit here because without a UART channel there's no way to report the error back to the RPi.
         self.WriteChunk = 32 # 32 seems OK on Circuitpython.
         self.ReceivedLines = [] # No lines received yet.
@@ -440,12 +486,13 @@ class uarthost():
         """ Reset communications (flush output buffers). """
         self.WriteQueue = [] # Empty the write queue.
         self.ReceivedLines = [] # Empty the input queue.
+        ExceptionCounter.Reset() # Reset the ExceptionCounter also.
         for i in range(2): self.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
-        self.Write('controller started') # Tell the remote device we're up and running.
-        self.Write('controller version ' + VERSION) # Tell the remote device which software version is running.
         self.Write('# CP env ' + str(Bootline)) # Show the circuitpython environment.
         self.Write('# CP ver ' + str(CircuitPythonVersion)) # Tell what version of circuitpython is in use.
         self.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
+        self.Write('controller started') # Tell the remote device we're up and running.
+        self.Write('controller version ' + str(VERSION)) # Tell the remote device which software version is running.
         
     def ticks_ms(self):
         """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
@@ -516,6 +563,7 @@ class uarthost():
                     LogFile.Log('uarthost.BufferInput: Ignored bad char (', str(bchar), "/", str(nchar), ')')
             except Exception as e:
                 LogFile.Log('uarthost.BufferInput: Error:', str(e))
+                ExceptionCounter.Raise() # Increment exception count for the session.
             if cchar == '\n': # End of line
                 self.LinesRead += 1
                 if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
@@ -673,6 +721,7 @@ class clock():
             self.UpdateClockFromInt(result)
         except:
             LogFile.Log("UpdateClockFromString(",TimeString,") failed.")
+            ExceptionCounter.Raise() # Increment exception count for the session.
         return result
 
     def CheckTimeDelta(self,now):
@@ -702,6 +751,7 @@ class clock():
             result = self.SetTimeFromInt(TimeStringToInt(TimeString))
         except Exception as e:
             LogFile.Log('clock.SetTimeFromString: Invalid timestamp string (', TimeString, ')')
+            ExceptionCounter.Raise() # Increment exception count for the session.
         return result
 
     def Now(self):
@@ -801,6 +851,7 @@ class trajectory():
             result = True # Entry creation was successful.
         except Exception as e:
             LogFile.Log('trajectory.Add(', self.MotorName ,'): ' + str(line) + ': Failed to create new trajectory point: ' + str(e))
+            ExceptionCounter.Raise() # Increment exception count for the session.
         self.Validate() # Is the trajectory useable?
         return result
 
@@ -868,6 +919,7 @@ def VMot():
             result = 0 # No ADC value supported.
     except Exception as e:
         print('VMot() failed:',e)
+        ExceptionCounter.Raise() # Increment exception count for the session.
     return result
 
 class steppermotor():
@@ -887,7 +939,7 @@ class steppermotor():
         self.FastTime = 0.0005 # The fastest pulse time for moving the motor.
         self.SlowTime = 0.05 # The slowest pulse time for moving the motor.
         self.DeltaTime = 0.003 # The acceleration amount moving from SlowTime to FastTime as the motor gets going.
-        self.UseMicrostepping = False
+        # self.UseMicrostepping = False Obsolete parameter.
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.Orientation = 1 # 1=Fwd, -1=Bkwd. This sets the overall orientation of motion. Compensate for gearing reversing the direction of motion here! It's applied to the DirectionBCM pin when the move is made.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
@@ -895,12 +947,13 @@ class steppermotor():
         self.BacklashAngle = 0.0 # This is the angle the motor must move to overcome backlash in the gearing when changing direction.
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
         self.MotorStepsPerRev = None
-        self.MicrostepRatio = None
+        self.ModeSignals = [False,False,False] # The setting of the 3 mode signals to the driver chip. Defines full/microstep value.
+        #self.MicrostepRatio = None # Obsolete parameter.
         self.MotorPower = None
-        self.MicrosteppingMode0 = 0
-        self.MicrosteppingMode1 = 0
-        self.MicrosteppingMode2 = 0
-        self.MotorStepsPerAxisDegree = None
+        self.MicrosteppingMode0 = False
+        self.MicrosteppingMode1 = False
+        self.MicrosteppingMode2 = False
+        #self.MotorStepsPerAxisDegree = None
         self.GearRatio = None # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
         self.AxisStepsPerRev = None
         self.MinAngle = None # Max anticlockwise movement.
@@ -982,6 +1035,15 @@ class steppermotor():
         self.RequestedAngle = None
         self.MotorConfigured = False
         self.SendStatus = True 
+        self.ModeSignals = [False,False,False]
+        self.MotorStepsPerRev = None
+        self.MotorPower = None
+        self.MicrosteppingMode0 = False
+        self.MicrosteppingMode1 = False
+        self.MicrosteppingMode2 = False
+        #self.MotorStepsPerAxisDegree = None
+        self.GearRatio = None # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
+        self.AxisStepsPerRev = None        
         self.SendMotorStatus(immediate=True,codes='rst')
         return True
 
@@ -990,6 +1052,7 @@ class steppermotor():
             self.Trajectory.Add(entry)
         except Exception as e:
             LogFile.Log('steppermotor(' + self.MotorName + ').AddTrajectoryPoint: ' + str(entry) + ': Failed. ' + str(e))
+            ExceptionCounter.Raise() # Increment exception count for the session.
         self.SendMotorStatus(immediate=True,codes='atp') # This triggers the next trajectory point faster than waiting for the regular status message will.
 
     def ClearTrajectory(self):
@@ -1155,10 +1218,12 @@ class steppermotor():
         self.FaultBCM = faultBCM # Pin(faultBCM, Pin.IN) # Set pin to INPUT. Will EARTH when triggered.
         #LogFile.Log("#", self.MotorName, 'Fault pin', self.FaultBCM.PinNumber)
 
-    def SetConfig(self,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,orientation,backlashangle):
+    #def SetConfig(self,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,orientation,backlashangle,modesignals=[False,False,False]):
+    def SetConfig(self,gearratio,motorstepsperrev,minangle,maxangle,restangle,currentangle,orientation,backlashangle,modesignals=[False,False,False]):
         self.GearRatio = gearratio
         self.MotorStepsPerRev = motorstepsperrev
-        self.MicrostepRatio = microstepratio
+        self.ModeSignals = modesignals # The 3 mode pin values to control full/micro stepping.
+        # self.MicrostepRatio = microstepratio # Obsolete parameter
         self.MinAngle = minangle
         self.MaxAngle = maxangle
         self.RestAngle = restangle
@@ -1166,50 +1231,55 @@ class steppermotor():
         self.Orientation = orientation
         self.BacklashAngle = backlashangle
         # Reapply dependent calculations.
-        if self.MicrostepRatio != 1: self.UseMicrostepping = True # Allow microstepping to be used. Increases resolution 32times, but let torque.
-        else: self.UseMicrostepping = False
-        if self.UseMicrostepping: # Microstepping function is not currently tested because it's not used in the current project. Warn!
-            LogFile.Log("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
-            print("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
+        # Microstepratio and UseMicrostepping now obsolete parameters.
+        #if self.MicrostepRatio != 1: self.UseMicrostepping = True # Allow microstepping to be used. Increases resolution 32times, but less torque.
+        #else: self.UseMicrostepping = False
+        #if self.UseMicrostepping: # Microstepping function is not currently tested because it's not used in the current project. Warn!
+        #    LogFile.Log("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
+        #    print("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
         self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. This may be useful for handling gear backlash. Starts at ZERO (No direction)
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
         # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
-        # Officially a NEMA17 motor has 200 (1.8Deg), or 400 steps (0.9deg) steps (each has XX substeps available, but with reduced accuracy/power)
-        # - If using MICROSTEPPING, the precision is increased by up to 32x . Which is 0.056 degrees. The 16mm lens on the HQ Camera has 0.01 degree per pixel. So some gearing is probably needed, but not too strong.
-        # - OR switch back to FULL STEPS and using higher gearing!! Needs to be 1:200 gearing in FULL STEP mode to match pixel resolution...
-        # WARNING!!! MICROSTEPPING Typically reduces torque dramatically.
-        # An example of the effect is shown here from https://www.machinedesign.com/archive/article/21812154/microstepping-myths
-        # Full step     100.00% torque
-        # 2 microsteps  70.71%
-        # 4      -"-    38.27%
-        # 8      -"-    19.51%
-        # 16     -"-    9.80%
-        # 32     -"-    4.91% <- Max on NEMA17, and probably too weak to achieve movement.
-        # 64     -"-    2.45%
-        # 128    -"-    1.23%
-        # 256    -"-    0.61%
-        # If we activate Microstepping, how do we set the Mode pins (Mode0,1,2) on the DRV8825 chip?
-        steppinglist = {1 : {'power' : 100, 'mode0' : False, 'mode1' : False, 'mode2' : False},
-                        2 : {'power' : 70, 'mode0' : True, 'mode1' : False, 'mode2' : False},
-                        4 : {'power' : 40, 'mode0' : False, 'mode1' : True, 'mode2' : False},
-                        8 : {'power' : 20, 'mode0' : True, 'mode1' : True, 'mode2' : False},
-                        16 : {'power' : 10, 'mode0' : False, 'mode1' : False, 'mode2' : True},
-                        32 : {'power' : 5, 'mode0' : True, 'mode1' : True, 'mode2' : True}}
-        if self.UseMicrostepping: # If we're using microstepping, then we have 32 times more positions for a NEMA17 motor in each revolution, but only 5% of the power!
-            self.MotorStepsPerRev = self.MotorStepsPerRev * self.MicrostepRatio
-            try:
-                self.MotorPower = steppinglist[self.MicrostepRatio]['power']
-                self.MicrosteppingMode0 = steppinglist[self.MicrostepRatio]['mode0']
-                self.MicrosteppingMode1 = steppinglist[self.MicrostepRatio]['mode1']
-                self.MicrosteppingMode2 = steppinglist[self.MicrostepRatio]['mode2']
-                if self.MicrostepRatio != 1:
-                    LogFile.Log("Configure(" + self.MotorName + ") MicrostepRatio " + str(self.MicrostepRatio) + " " + str(self.MotorPower) + "% torque.")
-            except Exception as e:
-                LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") MicrostepRatio failed: " + str(e))
-                LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") invalid MicrostepRatio (" + str(self.MicrostepRatio) + "). Please correct it.")
-        self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
+        ## Officially a NEMA17 motor has 200 (1.8Deg), or 400 steps (0.9deg) steps (each has XX substeps available, but with reduced accuracy/power)
+        ## - If using MICROSTEPPING, the precision is increased by up to 32x . Which is 0.056 degrees. The 16mm lens on the HQ Camera has 0.01 degree per pixel. So some gearing is probably needed, but not too strong.
+        ## - OR switch back to FULL STEPS and using higher gearing!! Needs to be 1:200 gearing in FULL STEP mode to match pixel resolution...
+        ## WARNING!!! MICROSTEPPING Typically reduces torque dramatically.
+        ## An example of the effect is shown here from https://www.machinedesign.com/archive/article/21812154/microstepping-myths
+        ## Full step     100.00% torque
+        ## 2 microsteps  70.71%
+        ## 4      -"-    38.27%
+        ## 8      -"-    19.51%
+        ## 16     -"-    9.80%
+        ## 32     -"-    4.91% <- Max on NEMA17, and probably too weak to achieve movement.
+        ## 64     -"-    2.45%
+        ## 128    -"-    1.23%
+        ## 256    -"-    0.61%
+        ## If we activate Microstepping, how do we set the Mode pins (Mode0,1,2) on the DRV8825 chip?
+        #steppinglist = {1 : {'power' : 100, 'mode0' : False, 'mode1' : False, 'mode2' : False},
+        #                2 : {'power' : 70, 'mode0' : True, 'mode1' : False, 'mode2' : False},
+        #                4 : {'power' : 40, 'mode0' : False, 'mode1' : True, 'mode2' : False},
+        #                8 : {'power' : 20, 'mode0' : True, 'mode1' : True, 'mode2' : False},
+        #                16 : {'power' : 10, 'mode0' : False, 'mode1' : False, 'mode2' : True},
+        #                32 : {'power' : 5, 'mode0' : True, 'mode1' : True, 'mode2' : True}}
+        #if self.UseMicrostepping: # If we're using microstepping, then we have 32 times more positions for a NEMA17 motor in each revolution, but only 5% of the power!
+        #    self.MotorStepsPerRev = self.MotorStepsPerRev * self.MicrostepRatio
+        #    try:
+        #        self.MotorPower = steppinglist[self.MicrostepRatio]['power']
+        #        self.MicrosteppingMode0 = steppinglist[self.MicrostepRatio]['mode0']
+        #        self.MicrosteppingMode1 = steppinglist[self.MicrostepRatio]['mode1']
+        #        self.MicrosteppingMode2 = steppinglist[self.MicrostepRatio]['mode2']
+        #        if self.MicrostepRatio != 1:
+        #            LogFile.Log("Configure(" + self.MotorName + ") MicrostepRatio " + str(self.MicrostepRatio) + " " + str(self.MotorPower) + "% torque.")
+        #    except Exception as e:
+        #        LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") MicrostepRatio failed: " + str(e))
+        #        LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") invalid MicrostepRatio (" + str(self.MicrostepRatio) + "). Please correct it.")
+        #        ExceptionCounter.Raise() # Increment exception count for the session.
+        self.MicrosteppingMode0 = self.ModeSignals[0]
+        self.MicrosteppingMode1 = self.ModeSignals[1]
+        self.MicrosteppingMode2 = self.ModeSignals[2]
+        #self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
         self.AxisStepsPerRev = self.MotorStepsPerRev * self.GearRatio
         # AngleToStep and StepToAngle only work from here on!
         self.RestPosition = self.AngleToStep(self.RestAngle)
@@ -1235,15 +1305,6 @@ class steppermotor():
             lineitems = line.split(' ')
             lc = len(lineitems)
             if lc > 2: Clock.UpdateClockFromString(lineitems[2]) # Check that the clock is as synchronised as possible.
-            if lc > 4 and lineitems[4].lower() != 'none': # To apply to live copy.
-                self.CurrentAngle = float(lineitems[4]) # Restore current position of the motor from the RPi's memory.
-                self.CurrentPosition = self.AngleToStep(self.CurrentAngle)
-            if lc > 5 and lineitems[5].lower() != 'none':
-                self.MinAngle = float(lineitems[5]) # Set new minimum angle for motor.
-                self.MinPosition = self.AngleToStep(self.MinAngle)
-            if lc > 6 and lineitems[6].lower() != 'none':
-                self.MaxAngle = float(lineitems[6]) # Set new maximum angle for motor.
-                self.MaxPosition = self.AngleToStep(self.MaxAngle)
             if lc > 7 and lineitems[7].lower() != 'none':
                 self.BacklashAngle = float(lineitems[7]) # Set new backlash angle for motor.
             if lc > 8 and lineitems[8].lower() != 'none':
@@ -1265,6 +1326,32 @@ class steppermotor():
                 self.FaultSensitive = StringToBool(lineitems[13])
             if lc > 14 and lineitems[14].lower() != 'none': # Enable/disable move optimisation.
                 self.OptimiseMoves = StringToBool(lineitems[14])
+            if lc > 16 and lineitems[16].lower() != 'none': # Define GearRatio.
+                self.GearRatio = float(lineitems[16])
+            if lc > 17 and lineitems[17].lower() != 'none': # Define motorstepsperrev
+                self.MotorStepsPerRev = int(lineitems[17])
+                #self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
+                self.AxisStepsPerRev = self.MotorStepsPerRev * self.GearRatio
+            #if lc > 18 and lineitems[18].lower() != 'none': # Define microstepratio # Obsolete parameter.
+            #    self.MicrostepRatio = int(lineitems[18])
+            if lc > 19 and lineitems[19].lower() != 'none': # Define restangle
+                self.RestAngle = float(lineitems[19])
+            if lc > 20: # Load mode signals to select full or microstepping ratio.
+                temp = lineitems[20] + 'nnn'
+                self.ModeSignals = [StringToBool(temp[0]),StringToBool(temp[1]),StringToBool(temp[2])]
+                self.MicrosteppingMode0 = self.ModeSignals[0] # True or False
+                self.MicrosteppingMode1 = self.ModeSignals[1]
+                self.MicrosteppingMode2 = self.ModeSignals[2]
+            # Restore min/max/current/limit position only after the MotorStepsPerRev is known, if microstepping has changed above these will be different.
+            if lc > 4 and lineitems[4].lower() != 'none': # To apply to live copy.
+                self.CurrentAngle = float(lineitems[4]) # Restore current position of the motor from the RPi's memory.
+                self.CurrentPosition = self.AngleToStep(self.CurrentAngle)
+            if lc > 5 and lineitems[5].lower() != 'none':
+                self.MinAngle = float(lineitems[5]) # Set new minimum angle for motor.
+                self.MinPosition = self.AngleToStep(self.MinAngle)
+            if lc > 6 and lineitems[6].lower() != 'none':
+                self.MaxAngle = float(lineitems[6]) # Set new maximum angle for motor.
+                self.MaxPosition = self.AngleToStep(self.MaxAngle)
             if lc > 15: # Define movement limit on the motor. The motor will reverse around a limit rather than crossing it.
                 if lineitems[15].lower() != 'none': # Set a movement limit.
                     self.LimitAngle = float(lineitems[15])
@@ -1272,18 +1359,11 @@ class steppermotor():
                 else:
                     self.LimitAngle = None 
                     self.LimitPosition = None
-            if lc > 16 and lineitems[16].lower() != 'none': # Define GearRatio.
-                self.GearRatio = float(lineitems[16])
-            if lc > 17 and lineitems[17].lower() != 'none': # Define motorstepsperrev
-                self.MotorStepsPerRev = int(lineitems[17])
-            if lc > 18 and lineitems[18].lower() != 'none': # Define microstepratio
-                self.MicrostepRatio = int(lineitems[18])
-            if lc > 19 and lineitems[19].lower() != 'none': # Define restangle
-                self.RestAngle = float(lineitems[19])
             self.MotorConfigured = True
         except Exception as e:
             LogFile.Log("steppermotor.ConfigureMotor(line) failed: " + str(e))
             print("steppermotor.ConfigureMotor() failed.")
+            ExceptionCounter.Raise() # Increment exception count for the session.
         self.ConfigEndTime = Clock.Now()
         self.ReportMotorConfig() # Report the configuration back to the RPi.
         return self.MotorConfigured
@@ -1320,21 +1400,24 @@ class steppermotor():
         if self.StepDir != self.LastStepDir: # We have a change of direction.
             LogFile.Log('MoveFullStep: ' + self.MotorName + ' changed direction (' + str(self.StepDir) + ' vs ' + str(self.LastStepDir) + '). Backlash?')
         self.LastStepDir = self.StepDir # Record the direction that the motor is moving in. This may be useful for handling gear backlash etc.
-        # Set DRV8825 driver mode to FULL STEPPING.
-        if self.UseMicrostepping: # We can switch between FULL and MICRO steps to have both speed and fine control.
-            if stepsize > 1:
-                self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-                self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-                self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-            else:
-                self.Mode0BCM.SetValue(self.MicrosteppingMode0) # value(self.MicrosteppingMode0) # Micro steps set Mode pins.
-                self.Mode1BCM.SetValue(self.MicrosteppingMode1) # value(self.MicrosteppingMode1) # Micro steps set Mode pins.
-                self.Mode2BCM.SetValue(self.MicrosteppingMode2) # value(self.MicrosteppingMode2) # Micro steps set Mode pins.
-        else: # We use full steps only. Less fine control, but faster and stronger movement.
-            self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-            self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-            self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        ## Set DRV8825 driver mode to FULL STEPPING.
+        #if self.UseMicrostepping: # We can switch between FULL and MICRO steps to have both speed and fine control.
+        #    if stepsize > 1:
+        #        self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        #        self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        #        self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        #    else:
+        #        self.Mode0BCM.SetValue(self.MicrosteppingMode0) # value(self.MicrosteppingMode0) # Micro steps set Mode pins.
+        #        self.Mode1BCM.SetValue(self.MicrosteppingMode1) # value(self.MicrosteppingMode1) # Micro steps set Mode pins.
+        #        self.Mode2BCM.SetValue(self.MicrosteppingMode2) # value(self.MicrosteppingMode2) # Micro steps set Mode pins.
+        #else: # We use full steps only. Less fine control, but faster and stronger movement.
+        #    self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        #    self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        #    self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
         # Send MOVE pulse to controller.
+        self.Mode0BCM.SetValue(self.MicrosteppingMode0) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        self.Mode1BCM.SetValue(self.MicrosteppingMode1) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
+        self.Mode2BCM.SetValue(self.MicrosteppingMode2) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
         if self.MotorEnabled: # If we've disabled the motor, then perform everything except the move pulse.
             self.StepBCM.SetValue(True) # value(1)
             time.sleep(self.WaitTime)
@@ -1342,11 +1425,11 @@ class steppermotor():
             time.sleep(self.WaitTime)
         self.CurrentPosition = (self.CurrentPosition + (self.StepDir * stepsize)) % self.AxisStepsPerRev
         self.CurrentAngle = self.StepToAngle(self.CurrentPosition)
-        if self.UseMicrostepping:
-            if self.CurrentPosition % self.MicrostepRatio == 0: # We're on a full-step-boundary.
-                self.FullStepBoundary = True
-            else:
-                self.FullStepBoundary = False
+        #if self.UseMicrostepping:
+        #    if self.CurrentPosition % self.MicrostepRatio == 0: # We're on a full-step-boundary.
+        #        self.FullStepBoundary = True
+        #    else:
+        #        self.FullStepBoundary = False
         # Else. FullStepBoundary remains True all the time.
         # Accelerate the motor.
         if self.WaitTime > self.FastTime: # We can still accelerate
@@ -1416,19 +1499,21 @@ class steppermotor():
         while MotorSteps != 0:
             # If supporting microstepping: If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
             StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
-            if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
-                if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary: # Full steps work for this move.
-                    # We have a long way to go, and we are at a safe point, so move a FULL STEP.
-                    # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
-                    MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
-                    self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
-                else: # Only microsteps work for this move.
-                    # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
-                    MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-                    self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-            else: # We're not using microstepping, so we're just moving full steps.
-                MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-                self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
+            #if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
+            #    if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary: # Full steps work for this move.
+            #        # We have a long way to go, and we are at a safe point, so move a FULL STEP.
+            #        # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
+            #        MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
+            #        self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
+            #    else: # Only microsteps work for this move.
+            #        # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
+            #        MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
+            #        self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
+            #else: # We're not using microstepping, so we're just moving full steps.
+            #    MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
+            #    self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
+            MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
+            self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
             self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
             for i in range(1): # *Q* does this need to be twice anymore? UART seems more reliable in latest version of Micropython. Could use larger buffers instead?
                 RPi.BufferInput() # Keep polling for input from the RPi.
@@ -1464,6 +1549,7 @@ class steppermotor():
         line += "MaxP " + str(self.MaxPosition) + " " 
         line += "LimA " + str(self.LimitAngle) + " " 
         line += "LimP " + str(self.LimitPosition) + " " 
+        line += "RestA " + str(self.RestAngle) + " " 
         RPi.Write(line) # Send over UART to RPi.
         line = "# Motor " + self.MotorName + " conf 2: "
         line += "FastT " + str(self.FastTime) + " " 
@@ -1476,11 +1562,11 @@ class steppermotor():
         RPi.Write(line) # Send over UART to RPi.
         line = "# Motor " + self.MotorName + " conf 3: "
         line += "GearRat " + str(self.GearRatio) + " " 
-        line += "Steps/Rev " + str(self.MotorStepsPerRev) + " " 
-        line += "ustepRat " + str(self.MicrostepRatio) + " " 
-        line += "MStp/AxDeg " + str(int(self.MotorStepsPerAxisDegree)) + " " 
+        line += "uS/Rev " + str(self.MotorStepsPerRev) + " " 
+        #line += "ustepRat " + str(self.MicrostepRatio) + " " # Obsolete parameter now.
+        line += "usMode " + BoolToString(self.MicrosteppingMode0) + BoolToString(self.MicrosteppingMode1) + BoolToString(self.MicrosteppingMode2) + " " # Microstepping mode pin settings. 
+        #line += "MStp/AxDeg " + str(int(self.MotorStepsPerAxisDegree)) + " " 
         line += "AxStp/Rev " + str(int(self.AxisStepsPerRev)) + " "
-        line += "RestA " + str(self.RestAngle) + " " 
         line += "MtrCnf " + str(self.MotorConfigured) + " " 
         RPi.Write(line) # Send over UART to RPi.
         
@@ -1550,10 +1636,12 @@ AltitudeFaultBCM.pull = digitalio.Pull.UP
 # Configure Motors.
 Azimuth = steppermotor('azimuth')
 Azimuth.SetPins(stepBCM=AzimuthStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AzimuthFaultBCM) # Direct control over Azimuth motor.
-Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
+#Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
+Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
 Altitude = steppermotor('altitude')
 Altitude.SetPins(stepBCM=AltitudeStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AltitudeFaultBCM) # Direct control over Altitude motor.
-Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
+#Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
+Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
 Motors = [Azimuth, Altitude] # Control over 'all' motors.
 
 class picosession():
@@ -1599,6 +1687,7 @@ class picosession():
         except:
             elapsed = 0
             LogFile.Log('TrajectorySafety: elapsed calculation failed.',RPi.ticks_ms(),RPi.LastRxms)
+            ExceptionCounter.Raise() # Increment exception count for the session.
         if self.TrajectorySafetyms != None and elapsed > self.TrajectorySafetyms: # No messages received recently.
             for i in Motors:
                 if i.Trajectory.Valid: # There's a trajectory underway.
@@ -1618,6 +1707,10 @@ class picosession():
             a single large packet of everything. Smaller messages work more reliably.
             codes: Optional extra flags added to status message (dev/test/debug etc)
             """
+        if CircuitPythonVersion.startswith('7.2.'): pass # Expected CircuitPython version.
+        else: # Unexpected CircuitPython version, report it back.
+            line = '# Expecting CircuitPython 7.2, found ' + str(CircuitPythonVersion)
+            RPi.Write(line) # Send over UART to RPi.
         line = "session status "
         i = time.time() - RPi.StartTime # Alive seconds. Use CPU clock not synchronised clock.
         line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
@@ -1627,6 +1720,7 @@ class picosession():
         line += str(i) + ' ' # Alive seconds. Use CPU clock, not synchronised clock.
         line += str(self.TrajectorySafetyFlushes) + ' ' # How many times has the trajectory been flushed for safety when comms failed?
         line += str(codes) + ' ' # Add optional extra codes.
+        line += str(ExceptionCounter.Count) + ' ' # Append count of exceptions raised during operation.
         RPi.Write(line) # Send over UART to RPi.
         line = "comms status "
         line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
@@ -1691,6 +1785,9 @@ def ProcessInput(line):
         RPi.Write('# ' + line)
         for i in Motors:
             i.SendStatus = StringToBool(lineitems[2])
+    elif line.startswith('raise exception'): # Generate example exception to prove status LED workds as expected.
+        ExceptionCounter.Raise()
+        RPi.Write('# Raised artificial exception for testing.')
     elif lineitems[0] == 'tune':
         for i in Motors:
             if i.MotorName == lineitems[2]: i.TunePosition(int(lineitems[3]))
@@ -1746,13 +1843,6 @@ class memorymanager():
 MemMgr = memorymanager()
 
 print ('Starting...')
-# *Q* Following code could be merged/replaced by RPi.Reset() ?
-#for i in range(2): RPi.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
-#RPi.Write('controller started') # Tell the remote device we're up and running.
-#RPi.Write('controller version ' + VERSION) # Tell the remote device which software version is running.
-#RPi.Write('# CP env ' + str(Bootline)) # Show the circuitpython environment.
-#RPi.Write('# CP ver ' + str(CircuitPythonVersion)) # Tell what version of circuitpython is in use.
-#RPi.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
 RPi.Reset() # Reset comms and send initial header.
 # Report back which motors are defined.
 line = "defined motors "
@@ -1768,6 +1858,7 @@ try:
         except Exception as e:
             LogFile.Log("Main:LogFile.SendCheck failed.",e)
             print("Main:LogFile.SendCheck failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
 
         line = ''
         try:
@@ -1776,6 +1867,7 @@ try:
             LogFile.Log("Main:RPi.Read failed.",e)
             print("Main:RPi.Read failed.",e)
             print("Main:Failed on",line)
+            ExceptionCounter.Raise() # Increment exception count for the session.
 
         try:
             if len(line) != 0: ProcessInput(line) # Process it.
@@ -1783,12 +1875,14 @@ try:
             LogFile.Log("Main:ProcessInput failed.",e)
             print("Main:ProcessInput failed.",e)
             print("Main:Failed on",line)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             Session.TrajectorySafety() # If no recent receipt from RPi, assume comms break take precautions... Clear trajectories?
         except Exception as e:
             LogFile.Log("Main: SessionTrajectorySafety() failed.",e)
             print("Main: SessionTrajectorySafety() failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         if Session.Quit: break 
         
@@ -1797,46 +1891,55 @@ try:
         except Exception as e:
             LogFile.Log("Main: SessionTimer failed.",e)
             print("Main: SessionTimer failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             if CpuTimer.Due(): MicroControllerLog() # Send microcontroller status message.
         except Exception as e:
             LogFile.Log("Main: CpuTimer failed.",e)
             print("Main: CpuTimer failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             Session.SendMotorStatus('azimuth',codes='tmr') # Send azimuth status message.
         except Exception as e:
             LogFile.Log("Main: Azimuth status failed.",e)
             print("Main: Azimuth status failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             Session.SendMotorStatus('altitude',codes='tmr') # Send altitude status message.
         except Exception as e:
             LogFile.Log("Main: Altitude status failed.",e)
             print("Main: Altitude status failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             RPi.WritePoll() # Send anything in the transmit buffer if it's safe.
         except Exception as e:
             LogFile.Log("Main: RPi.WritePoll() failed.",e)
             print("Main: RPi.WritePoll() failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
         try:
             Session.AutoMoveMotors() # Move motors if allowed to. 
         except Exception as e:
             LogFile.Log("Main: AutoMoveMotors failed.",e)
             print("Main: AutoMoveMotors failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
+
         try:
             MemMgr.Poll() # Check memory condition.
         except Exception as e:
             LogFile.Log("Main: MemMgr.Poll() failed.",e)
             print("Main:MemMgr.Poll() failed.",e)
+            ExceptionCounter.Raise() # Increment exception count for the session.
             
 except Exception as e:
         neatprint('Mainloop failed:', str(e))
         StatusLed.Task('error')
         neatprint(e.args)
+        ExceptionCounter.Raise() # Increment exception count for the session.
 
 # Shutdown procedure...
 RPi.Write('controller stopping')
@@ -1855,5 +1958,3 @@ while len(RPi.WriteQueue) > 0:
         print ('Flushing incomplete.')
         break
 print ('controller stopped')
-
-
