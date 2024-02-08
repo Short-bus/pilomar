@@ -1,8 +1,6 @@
 cd /home/pi
 rm pilomar.zip 
 zip pilomar.zip pilomar
-zip pilomar.zip pilomar/circuitpython
-zip pilomar.zip pilomar/circuitpython/code.py
 zip pilomar.zip pilomar/log
 zip pilomar.zip pilomar/temp
 zip pilomar.zip pilomar/data
@@ -24,13 +22,15 @@ zip pilomar.zip pilomar/fonts/Asap/Asap-MediumItalic.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-SemiBold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-Bold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-BoldItalic.ttf
+zip pilomar.zip pilomar/circuitpython
+zip pilomar.zip pilomar/circuitpython/code.py
 zip pilomar.zip pilomar/src
-zip pilomar.zip pilomar/src/pilomar.py
-zip pilomar.zip pilomar/src/pilomarlogfile.py
-zip pilomar.zip pilomar/src/pilomartimer.py
-zip pilomar.zip pilomar/src/pilomardisc.py
-zip pilomar.zip pilomar/src/pilomaroscommand.py
-zip pilomar.zip pilomar/src/pilomarcelestrak.py
-zip pilomar.zip pilomar/src/pilomarimage.py
-zip pilomar.zip pilomar/src/textcolor.py
 zip pilomar.zip pilomar/src/pilomar
+zip pilomar.zip pilomar/src/pilomar.py
+zip pilomar.zip pilomar/src/pilomarcelestrak.py
+zip pilomar.zip pilomar/src/pilomardisc.py
+zip pilomar.zip pilomar/src/pilomarimage.py
+zip pilomar.zip pilomar/src/pilomarlogfile.py
+zip pilomar.zip pilomar/src/pilomaroscommand.py
+zip pilomar.zip pilomar/src/pilomartimer.py
+zip pilomar.zip pilomar/src/textcolor.py
