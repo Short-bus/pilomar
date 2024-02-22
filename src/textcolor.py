@@ -62,7 +62,7 @@ class textcolor:
         It includes various constants such as names of colors.
         It also makes some unicode symbols available via a dictionary so you can refer to them by name. """
 
-    __version__ = '0.0.4'
+    __version__ = '0.0.5'
     TermType = None
     Mode = 'putty' # 'putty' = full colour remote terminal, 'simple' = No colour, 'local' = Direct connection colour.
     # Some standard color names (XTERM names & a couple of common aliases).
@@ -2145,7 +2145,7 @@ class proceduremenu():
         You can directly run a menu option without user input via the Run() method.
         """
 
-    __version__ = '0.0.2'
+    __version__ = '0.0.3'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None,labelwidth=23):
         """ Create the menu, load the dictionary.
@@ -2439,7 +2439,7 @@ class optionmenu():
         You can directly run a menu option without user input via the Run() method.
         """
 
-    __version__ = '0.0.1'
+    __version__ = '0.0.2'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
         """ Create the menu, load the dictionary.
@@ -2559,6 +2559,7 @@ class optionmenu():
 
             Return values are :
                 result: Returns the option value that was chosen, or None if no option was chosen.
+                found:  Returns TRUE if an option was selected, returns FALSE if nothing was chosen.
 
             """
         # Now paint the menu and ask the user what to do.
@@ -2607,7 +2608,7 @@ class optionmenu():
                 break # Go UP a level, quit if at root.
             # User input was not recognised. Try again.
             print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
-        return result
+        return result, found
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
@@ -2619,7 +2620,7 @@ class listchooser():
         '?' to show list. 
         'x' to return to previous selection. """
 
-    __version__ = '0.0.1'
+    __version__ = '0.0.4'
         
     def __init__(self,inputlist,title=None,default=None,compress=True):
         self.FullList = inputlist
@@ -2663,7 +2664,9 @@ class listchooser():
                 if inputtext == i.lower(): 
                     choice = [i] # Exact match.
                     break # Look no further.
-            if len(choice) < 1: continue # Nothing matched, ask again.
+            if len(choice) < 1: 
+                print(textcolor.red("'" + inputtext + "' is not in the list."))
+                continue # Nothing matched, ask again.
             if len(choice) > 1 and choice != inputlist: choice = self.Filter(choice) # Refine the list further.
             if len(choice) == 1: break # Choice made, return.
         return choice

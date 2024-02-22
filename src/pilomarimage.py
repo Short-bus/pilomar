@@ -78,7 +78,7 @@ class fd_edge():
 class pilomarimage():
 
     # Constants.
-    __version__ = '0.0.1'
+    __version__ = '0.0.2'
     IMAGETYPES = ['bgr','bgra','grayscale']
     COLORPOINTS = [(-0.33,[0x70,0x6f,0xfe]),
                    (-0.3,[0x51,0x9f,0xfe]),
@@ -753,9 +753,107 @@ class pilomarimage():
     BGRHalfWhite = (250,254,255)
     BGRWhite = (255,255,255)
     
+    # Define default filter scripts.
+    # - You can overwrite this with your own set of scripts by assigning pilomarimage.FILTERSCRIPTS = {.....}
+    # - This default script includes some example scripts to test, and also some specific scripts designed to achieve specific image enhancements.
+    # - To run a script against the current image buffer call self.RunFilterScript( filtername )
+    # -  eg self.RunFilterScript('ExampleThreshold') to run the ExampleThreshold script.
+    # The scripts consist of a series of opencv actions that you can run against the current image buffer.
+    # A script contains at least 1 action. Actions are executed their sequence in the script. The result is always stored in the current image buffer.
+    # Where an action supports parameters those can be defined inside each step in this script.
+    # If parameters are not given, defaults will be used.
+    FILTERSCRIPTS = {
+        'ExampleThreshold':{ # Example script to perform thresholding on an image. Call this with self.RunFilterScript('ExampleThreshold')
+            'ThresholdStep':{
+                'method':'threshold',
+                'threshold':100,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY,
+                'comment': 'Use simple binary threshold to detect any pixels > 100 and consider them to be stars.',
+                } # /ThresholdStep
+            }, # /ExampleThreshold
+        'ExampleDehaze':{ # Example script to remove haze from the background of an image. Call this with self.RunFilterScript('ExampleDehaze')
+            'DeHaze': {
+                'method': 'dehaze',
+                'samples': 1,
+                'strength': 100,
+                'comment': 'Remove urban haze from the image background.'
+                } # /ExampleDehaze
+            },
+        'ExampleBlur':{ # Example script to perform gaussian blurring on the image. Call this with self.RunFilterScript('ExampleBlur')
+            'BlurStep':{
+                'method':'gaussianblur',
+                'radius':100,
+                'comment':'Apply Gaussian blur to widen remaining items',
+                } # /BlurStep
+            }, # /ExampleBlur
+        'ExampleGrayscale':{ # Example script to convert an image to grayscale. Call this with self.RunFilterScript('ExampleGrayscale')
+            'GrayStep':{
+                'method':'grayscale',
+                'comment':'Reduce an image to grayscale.',
+                } # /GrayStep
+            }, # /ExampleGrayscale
+        'EnhanceClouds':{ # Enhance clouds in the image.  Call this with self.RunFilterScript('EnhanceClouds')
+            'CloudThreshold':{
+                'method':'threshold',
+                'threshold':100,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY,
+                'comment': 'Use simple binary threshold to detect any pixels > 100 and consider them to be potential clouds.',
+                } # /CloudThreshold
+            }, # /CloudDetection
+        'EnhanceStars':{ # Enhance stars in the image.  Call this with self.RunFilterScript('EnhanceStars')
+            'ToGrayscale':{ # Convert to grayscale image.
+                'method':'grayscale',
+                }, # /ToGrayscale
+            'EliminateClouds':{ # Set low threshold to remove clouds and low level light.
+                'method':'threshold',
+                'threshold':100,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY,
+                'comment':'Apply low threshold to remove dim objects such as clouds.',
+                }, # /EliminateClouds
+            'BlurStars':{ # Use blur to enlarge remaining stars.
+                'method':'gaussianblur',
+                'radius':13,
+                'comment':'Apply Gaussian blur to widen remaining items',
+                }, # /BlurStars
+            'BoostStars':{ # Enhance remaining stars.
+                'method':'threshold',
+                'threshold':16,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                'comment':'Apply adaptive threshold to boost remaining stars.',
+                } # /BoostStars
+            }, # /EnhanceStars
+        'UrbanFilter':{ # UrbanFilter script. Reduce haze and enhance stars. Call this with self.RunFilterScript('UrbanFilter')
+            'ToGrayscale':{ # Convert to grayscale image.
+                'method':'grayscale',
+                }, # /ToGrayscale
+            'DeHaze':{ # Reduce haze across the image.
+                'method':'dehaze',
+                'samples':1, # Just a single sample value is generated from the entire width of the line.
+                'strength':100,
+                'comment': 'Remove urban haze from the image background.',
+                }, # /DeHaze
+            'BlurStars':{ # Use blur to enlarge remaining stars.
+                'method':'gaussianblur',
+                'radius':2,
+                'comment':'Apply Gaussian blur to widen remaining items',
+                }, # /BlurStars
+            'BoostStars':{ # Enhance remaining stars.
+                'method':'threshold',
+                'threshold':16,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                'comment':'Apply adaptive threshold to boost remaining stars.',
+                } # /BoostStars
+            } # /UrbanFilter
+    } # /FILTERSCRIPTS
+    
     def __init__(self,name=None,logger=None):
         """ Create new image item. 
-            name is any arbitrary name for the image.
+            name = any arbitrary name for the image.
             width = pixel width.
             height = pixel height.
             depth = image depth (2 = Grayscale, 3 = BGR, 4 = BGRA) 
@@ -1232,7 +1330,9 @@ class pilomarimage():
         return filename.split('.')[-1].lower()
 
     def SaveFile(self,filename):
-        """ Save image buffer to disc. """
+        """ Save image buffer to disc.
+            To specify the quality for jpeg files you can use a call like this...
+                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), 90] # 90% image quality. """
         if self.Log != None: self.Log("pilomarimage",self.Name,".SaveFile(",filename,")",terminal=False)
         if self.ImageExists():
             cv2.imwrite(filename,self.ImageBuffer) # Doesn't report errors very well, beware.
@@ -1329,6 +1429,16 @@ class pilomarimage():
         self.ModifiedTimestamp = self.Now()
         return buffer
 
+    def PercentageBuffer(self,buffer,percentage):
+        """ Dim a buffer to input percentage. 
+            percentage = 0 : Buffer is fully black. 
+            percentage = 50 : Buffer is reduced by 50%. 
+            percentage = 100 : Buffer is returned unchanged. """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".PercentageBuffer()",terminal=False)
+        pc = percentage / 100
+        buffer = cv2.multiply(buffer,(pc,pc,pc,1.0))
+        return buffer 
+        
     def SubtractBuffer(self,buffer):
         """ Subtract 'buffer' from the main image buffer. """
         if self.Log != None: self.Log("pilomarimage",self.Name,".SubtractBuffer()",terminal=False)
@@ -1497,9 +1607,10 @@ class pilomarimage():
                 linereturn.append([x1,y1,x2,y2]) # Add to the list of detected lines.
         return linereturn
 
-    def CloudDetection(self): # In pilomarimage
+    def CloudDetection(self,threshold=127): # In pilomarimage
         """ Detect clouds in image. 
-            *Q* UNDER DEVELOPMENT """
+            *Q* UNDER DEVELOPMENT 
+            threshold = minimum brightness at which a pixel could be a cloud. """
         cloudlist = []
         mincloudpixels = 400
         # Simplify image
@@ -1510,7 +1621,7 @@ class pilomarimage():
         imagebuffer = cv2.GaussianBlur(imagebuffer,(5,5),0)
         cv2.imwrite('/home/pi/pilomar/data/CloudDetectionBlurred.jpg',imagebuffer)
         # - Threshold
-        ret,imagebuffer = cv2.threshold(imagebuffer,127,255,0)
+        ret,imagebuffer = cv2.threshold(imagebuffer,threshold,255,0)
         cv2.imwrite('/home/pi/pilomar/data/CloudDetectionThreshold.jpg',imagebuffer)
         # Analyse image
         contours = cv2.findContours(imagebuffer,1,2)
@@ -1863,16 +1974,21 @@ class pilomarimage():
             self.ActionList.append(['rotateimage',angle])
         return True
         
-    def CountStars(self,minval=3,maxval=650,maxstars=500):
+    def CountStars(self,minval=3,maxval=650,maxstars=500,threshold=100):
         """ Count the number of stars in an image. 
             From: https://stackoverflow.com/questions/48154642/how-to-count-number-of-dots-in-an-image-using-python-and-opencv
-            minval, maxval are the pixel area limits for stars. Anything smaller/bigger is ignored.
-            Doesn't modify ImageBuffer. """
+
+            Doesn't modify ImageBuffer. 
+            
+            minval = Minimum area of stars. 
+            maxval = Maximum area of stars. 
+            maxstars = Maximum number of stars to return .
+            threshold = The brightness level (0-255) above which something is considered a star. """
             
         if self.Log != None: self.Log("pilomarimage",self.Name,".CountStars(",minval,',',maxval,")",terminal=False)
         cvimagebuffer = self.NewBufferType('grayscale') # Return a copy of the image buffer in grayscale.
         # Threshold the image to make it more crisp.
-        temp, threshed = cv2.threshold(cvimagebuffer, 100, 255, cv2.THRESH_BINARY_INV|cv2.THRESH_OTSU)
+        temp, threshed = cv2.threshold(cvimagebuffer, threshold, 255, cv2.THRESH_BINARY_INV|cv2.THRESH_OTSU)
         # findcontours to identify 'dots' (contours) in the image. This will recognise STARS and also some patterns made by stars. So it needs filtering.
         dots = cv2.findContours(threshed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[-2]
         # filter the 'dots' by their area. Small ones are stars, large ones are some other artifact.
@@ -2052,9 +2168,10 @@ class pilomarimage():
             Was 'SimplifyImage' and 'PrepareImage' in earlier pilomar versions.
             - blurradius is the GaussianBlur radius.
             - cloudthresh is the threshold to remove cloud (experimental).
-            - starthresh is the threshold to single out the stars.            """
+            - starthresh is the threshold to single out the stars.    
+            - maxval is the saturated value set for cells above the threshold. """
         if self.Log != None: 
-            self.Log("pilomarimage",self.Name,".EnhanceStars: cloudthresh",cloudthresh,"starthresh",starthresh,"maxval",maxval,terminal=False)
+            self.Log("pilomarimage",self.Name,".EnhanceStars: blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,"maxval",maxval,terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.EnhanceStars: No image in the buffer.')
         self.ChangeType('grayscale') # Convert to grayscale.
         retval, self.ImageBuffer = cv2.threshold(self.ImageBuffer,cloudthresh,maxval,cv2.THRESH_BINARY) # 100 should ignore clouds more easily and just recognise brighter stars.
@@ -2071,15 +2188,171 @@ class pilomarimage():
         if self.Log != None: self.Log("pilomarimage",self.Name,".EnhanceStars: End.",terminal=False)
         return True
 
-    def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255):
+    def FS_Save(self,filterdata):
+        """ Save the current image buffer and write the current filter data on it. 
+            A debugging feature.
+            
+            filterdata is the data you want writing as a dictionary. 
+            'saveas' entry must exist in the filterdata.
+                """
+        if 'saveas' in filterdata: # There is a filename to use.
+            filename = filterdata['saveas']
+            if filename != None and len(filename) > 0:
+                # Add filterdata information to the image.
+                self.AddText("filterdata:",x=10,y=int(self.GetHeight() / 2),color=pilomarimage.BGRWhite,bgcolor=pilomarimage.BGRBlack)
+                for key,value in filterdata.items():
+                    self.AddText(" " + str(key) + ":" + str(value),x=10,y=self.NextTextY,color=pilomarimage.BGRWhite,bgcolor=BGRBlack)
+                self.Save(filename)
+        return True
+        
+    def FS_Grayscale(self,filterdata):
+        """ Convert buffer to grayscale.
+            {'method':'grayscale',
+             'comment':''}            """
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if self.Log != None: 
+            if comment != '': self.Log("pilomarimage",self.Name,".FS_Grayscale: Comment:",comment,terminal=False)
+            self.Log("pilomarimage",self.Name,".FS_Grayscale:",terminal=False)
+        self.ChangeType('grayscale') # Convert to grayscale.
+        self.ActionList.append(['FS_Grayscale'])
+        self.ModifiedTimestamp = self.Now()
+        return True
+             
+    def FS_Threshold(self,filterdata):
+        """ Run OpenCV threshold filter on current image buffer using input parameters. 
+            filterdata = dictionary of parameters. 
+            
+            {'method':'threshold',
+             'threshold': 127,
+             'maxval': 255,
+             'type': cv2.THRESH_BINARY,
+             'comment': ''}
+            
+            """
+        threshold = filterdata.get('threshold',127) # Get threshold level, default 127.
+        maxval = filterdata.get('maxval',255) # Get output value for pixels above the threshold, default 255.
+        threshold_type = filterdata.get('type',cv2.THRESH_BINARY) # Get threshold calculation type, default THRESH_BINARY.
+        if threshold_type == None: threshold_type = cv2.THRESH_BINARY
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if self.Log != None: 
+            if comment != '': self.Log("pilomarimage",self.Name,".FS_Threshold: Comment:",comment,terminal=False)
+            self.Log("pilomarimage",self.Name,".FS_Threshold(",threshold,",",maxval,",",threshold_type,")",terminal=False)
+        calculatedthreshold, self.ImageBuffer = cv2.threshold(self.ImageBuffer,threshold,maxval,threshold_type)
+        self.ActionList.append(['FS_Threshold',threshold,maxval,threshold_type])
+        self.ModifiedTimestamp = self.Now()
+        return True
+        
+    def FS_GaussianBlur(self,filterdata):
+        """ Run OpenCV gaussianblur filter on current image buffer using input parameters. 
+            filterdata = dictionary of parameters. 
+            
+            {'method':'gaussianblur',
+             'radius': 5, # Must be 0 or an odd integer.
+             'comment': ''}
+            
+            """
+        radius = filterdata.get('radius',5) # Get blur radius, default 5.
+        if radius < 0: radius = 0 # Cannot be negative.
+        if radius > 0 and radius % 2 == 0: radius += 1 # Must be odd if > 0.
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if self.Log != None: 
+            if comment != '': self.Log("pilomarimage",self.Name,".FS_GaussianBlur: Comment:",comment,terminal=False)
+            self.Log("pilomarimage",self.Name,".FS_GaussianBlur(",radius,")",terminal=False)
+        self.ImageBuffer = cv2.GaussianBlur(self.ImageBuffer,(radius,radius),0)    
+        self.ActionList.append(['FS_GaussianBlur',radius])
+        self.ModifiedTimestamp = self.Now()
+        return True
+
+    def FS_Dehaze(self,filterdata):
+        """ Remove general haze gradient from an image buffer. 
+            filterdata = dictionary of parameters.
+            
+            {'method':'dehaze',
+             'samples':1, # Compress horizontal pixel values down to this number of samples per line.
+             'strength':100 # 0 - 100 (%) strength. How much of the identified haze will be removed.
+             'comment': ''}
+             """
+        samples = filterdata.get('samples',1) # Number of samples along each image row, default 1
+        strength = filterdata.get('strength',100) # How strong is the filter, default 100 (%).
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if self.Log != None: 
+            if comment != '': self.Log("pilomarimage",self.Name,".FS_Dehaze: Comment:",comment,terminal=False)
+            self.Log("pilomarimage",self.Name,".FS_Dehaze(",samples,",",strength,")",terminal=False)
+        # Create a working buffer to construct the haze filter.
+        buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
+        buffer = self.HorizontalBlurBuffer(buffer,band=samples) # Horizontally blur the buffer.
+        if strength > 0: # There needs to be some effect.
+            if strength != 100: # Multiply all the channels appropriately.
+                buffer = self.PercentageBuffer(buffer,strength) # Reduce the strength of the buffer.
+            self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
+        self.ActionList.append(['FS_Dehaze',samples,strength])
+        self.ModifiedTimestamp = self.Now()
+        return True
+
+    def RunFilterScript(self,scriptname):
+        """ Given a script name, apply the filters and parameters defined in the script.
+            filterrules is a dictionary """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
+        if not type(scriptname) == str: # Nothing useful set.
+            if self.Log != None: self.Log("RunFilterScript(): No valid script name.",terminal=False)
+            else: print("RunFilterScript(): No valid script name.")
+            return False 
+        if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
+            if self.Log != None: self.Log("RunFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
+            print("RunFilterScript(",scriptname,"). Script does not exist.")
+            return False
+        filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
+            
+        filtercount = 0
+        result = True
+        
+        for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
+            if self.Log != None: self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running script...",terminal=False) # Report the name of the filter
+            # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
+            filtermethod = filterdata['method']
+            result = True
+            if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
+            elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
+            elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
+            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Apply a threshold filter.
+            elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
+            else: # Filter method is not recognised.
+                if self.Log != None: self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
+                else: print("**ERROR** pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
+                result = False
+            if not result: break # Failure.
+            filtercount += 1 # Increment count.
+        if not result:
+            if self.Log != None: self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
+            else: print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
+        return result
+
+    #def UrbanFilterScript(self):
+    #    """ Experimental usage of RunFilterScript to replicate hardcoded filter solution. """
+    #    if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilterScript(): start",terminal=False)
+    #    result = self.RunFilterScript('UrbanFilter') # Fund the UrbanFilter script against the current image buffer.
+    #    if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilterScript(): result",result,terminal=False)
+    #    return result
+    
+    def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255,strength=100):
         """ Primitive 'urban skies' filter. 
             This is used for star drift tracking. 
             A live image is cleaned to remove common urban haze before enhancing the remaining stars. 
             band = Blurring factor. '1' is the highest blurring. 
-            blurradius, cloudthresh, starthresh, maxval are all values for the EnhanceStars() method. """
+            blurradius, cloudthresh, starthresh, maxval are all values for the EnhanceStars() method. 
+            strength is the percentage strength of the haze filter. 
+            0 = No haze reduction.
+            50 = 50% haze reduction.
+            100 = Full haze reduction. """
+        if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilter(): band",band,
+                                      "blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,
+                                      "maxval",maxval,"strength",strength,terminal=False)
         buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
         buffer = self.HorizontalBlurBuffer(buffer,band=band) # Horizontally blur the buffer.
-        self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
+        if strength > 0: # There needs to be some effect.
+            if strength != 100: # Multiply all the channels appropriately.
+                buffer = self.PercentageBuffer(buffer,strength) # Reduce the strength of the buffer.
+            self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
         self.EnhanceStars(blurradius=blurradius,cloudthresh=cloudthresh,starthresh=starthresh,maxval=maxval) # Enhance the stars that remain.
         return True
         

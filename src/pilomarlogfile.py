@@ -24,6 +24,9 @@ class logfile(): # 2 references.
     """ An object to maintain a log file recording the activities and events in the program.
         This writes to a disc file and flushes the write buffers as quickly as it can.
         It can also copy ERROR messages to any nominated error window object (which must support a 'Print()' method. )        """
+
+    __version__ = '0.1.0'
+
     def __init__(self,filename : str, clockoffset=None):
         self.FileName = filename
         self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
@@ -111,7 +114,7 @@ class logfile(): # 2 references.
                 if errorprompt: # User has to acknowledge the error. 
                     #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
                     input(textcolor.cyan("Press [ENTER] to continue: "))
-            if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.BLACK,bg=textcolor.RED) # Error color.
+            if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.RED,bg=textcolor.BLACK) # Error color.
         elif level[0] == 'w':
             if terminal: # We're allowed to display on the terminal.
                 print(textcolor.yellow('WARNING: reported in LogFile: ') + printline)
