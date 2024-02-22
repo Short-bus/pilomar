@@ -17,7 +17,7 @@
 #           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
 #           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
 #           cc = Bugfix, no feature changes. Will not require changes on RPi side.
-VERSION = '0.3.0' # Software version reported to the RPi.
+VERSION = '0.3.2' # Software version reported to the RPi.
 ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
@@ -141,7 +141,7 @@ class statusled():
                          'pulse': (True,False,True), # Pink - Heartbeat signal (if used).
                          'init': (False,True,True)} # cyan - System is initializing.
         self.Enabled = True # If set to FALSE, the LED is permanently off except for ERROR conditions.
-        self.ErrorExpiry = 0 # microsecond count when any error status can be cleared.
+        self.StatusExpiry = 0 # microsecond count when any error status can be cleared.
         self.Task('idle')
 
     def Enable(self):
@@ -160,17 +160,18 @@ class statusled():
             ERROR tasks always win, and an ERROR setting stays illuminated for at least 1 second 
             before any other task can set any other colors. """
         ErrorTask = 'error'
-        if self.MonoSeconds() < self.ErrorExpiry: # Error code is still valid. No other setting can be used yet.
-            t = self.TaskList[ErrorTask]
-            if t[0]: self.LedR.On()
-            else: self.LedR.Off()
-            if t[1]: self.LedG.On()
-            else: self.LedG.Off()
-            if t[2]: self.LedB.On()
-            else: self.LedB.Off()
+        if self.MonoSeconds() < self.StatusExpiry: # Error code is still valid. No other setting can be used yet.
+            pass
+            #t = self.TaskList[ErrorTask]
+            #if t[0]: self.LedR.On()
+            #else: self.LedR.Off()
+            #if t[1]: self.LedG.On()
+            #else: self.LedG.Off()
+            #if t[2]: self.LedB.On()
+            #else: self.LedB.Off()
         elif self.Enabled or task == ErrorTask: # No current ERROR status, so we can consider whether to set the new status.
             if task == ErrorTask: # Setting a new error status. Set the timeout for 1 second ahead.
-                self.ErrorExpiry = self.MonoSeconds() + 1 # Set 1 second expiry on error codes.
+                self.StatusExpiry = self.MonoSeconds() + 1 # Set 1 second expiry on error codes.
             if task in self.TaskList: # Pull the color codes for the selected task.
                 t = self.TaskList[task]
                 if t[0]: self.LedR.On()
@@ -187,6 +188,33 @@ class statusled():
             self.LedR.Off()
             self.LedG.Off()
             self.LedB.Off()
+            
+    def SetRGB(self,line):
+        """ Receive a 'set rgb' command from the RPi and turn on 
+            the status LED in that color to acknowledge it. 
+            This is a debug/dev feature to let people prove that 
+            the Tiny2040 is indeed receiving and processing commands.
+            
+            This works even if the LED is disabled!
+            
+            set rgb yyyymmddhhmmss y y y nnn
+             0   1       2         3 4 5  6
+
+            3 = y/n = RED ON
+            4 = y/n = GREEN ON
+            5 = y/n = BLUE ON
+            6 = nnn = Minimum seconds to illuminate. """
+        lineitems = line.split(' ')
+        lli = len(lineitems)
+        if lli > 3 and lineitems[3] == 'y': self.LedR.On()
+        else: self.LedR.Off()
+        if lli > 4 and lineitems[4] == 'y': self.LedG.On()
+        else: self.LedG.Off()
+        if lli > 5 and lineitems[5] == 'y': self.LedB.On()
+        else: self.LedB.Off()
+        if lli > 6: 
+            t = int(lineitems[6]) # Get illumination time.
+            self.StatusExpiry = self.MonoSeconds() + t # Set expiry on the LED color.
 
 StatusLed = statusled()
 StatusLed.Task('init') # System is initializing...
@@ -455,14 +483,29 @@ class uarthost():
         Handles buffering of received and transmitted data over serial line. """
     def __init__(self,name=None,channel=0):
         print(dir(board))
+        try:
+            cpv = int(CircuitPythonVersion.split('.')[0])
+        except:
+            print("cpv",CircuitPythonVersion,"did not convert. Assuming 7.")
+            print("uarthost.__init__(): Parse CircuitPythonVersion",str(CircuitPythonVersion),"failed.")
+            cpv = 7
         if name == None: name = 'UART' + str(channel) # Default to useful name.
         if channel == 0: # UART0
-            self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
+            if cpv > 7:
+                self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024,timeout=0) # was 256 # Define UART0 as the serial comms channel to the host.
+            else:
+                self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
             print ('UART TX=', board.GP0, 'UART RX=', board.GP1)
         else: # UART1
             raise Exception('uarthost on Tiny2040 not configued for UART channel 1. Use channel 0 only.')
             # Don't increment exception count because we quit here. No communication can be established if this fails.
             # We can quit here because without a UART channel there's no way to report the error back to the RPi.
+        self.BufferInput = self.BufferInput7 # Pointer to BufferInput method for circuitpython version 7 and earlier.
+        if cpv > 7: # We're running CircuitPython 8 or later. UART calls are different.
+            self.BufferInput = self.BufferInput8 # Pointer to BufferInput method for circuitpython version 8 and later.
+            LogFile.Log("uarthost.__init__(): Switching to BufferInput8")
+        else:
+            LogFile.Log("uarthost.__init__(): Keeping BufferInput7")
         self.WriteChunk = 32 # 32 seems OK on Circuitpython.
         self.ReceivedLines = [] # No lines received yet.
         self.LinesRead = 0 # total number of lines received.
@@ -539,8 +582,8 @@ class uarthost():
         if self.uart.in_waiting > 0: result = True
         return result
 
-    def BufferInput(self):
-        """ Perform safe and friendly read of UART serial port.
+    def BufferInput7(self):
+        """ Read of UART serial port. For circuitpython 7 and earlier.
             Completed lines are added to the ReceivedLines list and
             are available to the rest of the program. """
         CharCounter = 0
@@ -557,12 +600,12 @@ class uarthost():
                 if nchar <= 127: # Acceptable as 7 bit ascii
                     cchar = bchar.decode('utf-8')
                     if cchar != chr(nchar):
-                        print('uarthost.BufferInput: 7bit character conversion cheat would fail.')
+                        print('uarthost.BufferInput7: 7bit character conversion cheat would fail.')
                     self.ReceivingLine += cchar
                 else:
-                    LogFile.Log('uarthost.BufferInput: Ignored bad char (', str(bchar), "/", str(nchar), ')')
+                    LogFile.Log('uarthost.BufferInput7: Ignored bad char (', str(bchar), "/", str(nchar), ')')
             except Exception as e:
-                LogFile.Log('uarthost.BufferInput: Error:', str(e))
+                LogFile.Log('uarthost.BufferInput7: Error:', str(e))
                 ExceptionCounter.Raise() # Increment exception count for the session.
             if cchar == '\n': # End of line
                 self.LinesRead += 1
@@ -579,9 +622,51 @@ class uarthost():
                                 if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
                                 LogFile.Log(report)
                         else:
-                            print('warning: receive buffer full. Ignored: ' + line)
+                            print('uarthost.BufferInput7 full. Ignored: ' + line)
                             self.ReadDrops += 1
                 self.ReceivingLine = ''
+            self.LastRxms = self.ticks_ms() # When was last message received?
+        StatusLed.Task('idle')
+    
+    def BufferInput8(self):
+        """ Read of UART serial port. For circuitpython 8 and later.
+            Completed lines are added to the ReceivedLines list and
+            are available to the rest of the program. """
+        LoopCounter = 0
+        while self.RxWaiting(): # Input waiting in Rx buffer.
+            StatusLed.Task('rx')
+            LoopCounter += 1
+            CharsToProcess = '' # No characters to process yet.
+            if LoopCounter > 20: break # Max 20 reads performed per call.
+            try:
+                bchar = self.uart.read() # Read entire waiting queue.
+                CharsToProcess = ''.join([chr(b) for b in bchar]) # Convert to string.
+                self.CharactersRead += len(CharsToProcess) # Count characters read.
+            except Exception as e:
+                LogFile.Log('uarthost.BufferInput8: uart.read() or conversion error:', str(e))
+                ExceptionCounter.Raise() # Increment exception count for the session.
+            # Process each new character in turn.
+            if len(CharsToProcess) > 0:
+                for cchar in CharsToProcess:
+                    self.ReceivingLine += cchar
+                    if cchar == '\n': # End of line
+                        self.LinesRead += 1
+                        if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
+                            line = self.ReceivingLine.strip() # Clear special characters.
+                            if len(line) > 0: # Something to process.
+                                if len(self.ReceivedLines) < 10: # Only buffer 10 lines, discard the rest. No space!
+                                    self.ReceivedLines.append(line) # Add to list of lines to handle.
+                                    line = self.RemoveChecksum(line)
+                                    report = 'rec: ' + line
+                                    print (report) # Report all receipts to serial out.
+                                    if line[0] != "#": # Acknowledge receipt of all messages except comments via the log file back to the RPi too.
+                                        x = line.split(' ')[-1] # Last entry should be message sequence number.
+                                        if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
+                                        LogFile.Log(report)
+                                else:
+                                    print('uarthost.BufferInput8 full. Ignored: ' + line)
+                                    self.ReadDrops += 1
+                        self.ReceivingLine = '' # Start a new receiving line with the next character received.
             self.LastRxms = self.ticks_ms() # When was last message received?
         StatusLed.Task('idle')
     
@@ -1180,6 +1265,7 @@ class steppermotor():
             Use this to address positioning errors or drift adjustments. """
         if self.MotorConfigured:
             self.EnableMotor()
+            tunestarttime = Clock.Now()
             old = self.CurrentPosition # Store the current position of the motor. We'll restore this when finished.
             new = self.CurrentPosition + delta # Calculate the new target position (fullsteps).
             self.SetNewTargetPosition(new,Limit=False) # Set the target in the object. Primes it for the move, No error check on limits.
@@ -1190,7 +1276,7 @@ class steppermotor():
             LogFile.Log("TunePosition(" + self.MotorName + ") set to " + str(self.CurrentPosition))
             self.LatestTuneSteps = delta # Record details of the last tune command received. So we can see it was handled.
             self.LatestTuneTime = Clock.Now()
-            RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta))
+            RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ' ' + IntToTimeString(tunestarttime))
             self.SendMotorStatus(immediate=True,codes='tup') # Tell RPi latest condition of the motor.
         else:
             RPi.Write('tune rejected ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
@@ -1707,9 +1793,9 @@ class picosession():
             a single large packet of everything. Smaller messages work more reliably.
             codes: Optional extra flags added to status message (dev/test/debug etc)
             """
-        if CircuitPythonVersion.startswith('7.2.'): pass # Expected CircuitPython version.
+        if CircuitPythonVersion.split('.')[0] in ['7','8']: pass # Supported CircuitPython version.
         else: # Unexpected CircuitPython version, report it back.
-            line = '# Expecting CircuitPython 7.2, found ' + str(CircuitPythonVersion)
+            line = '# Expecting CircuitPython 7 or 8, found ' + str(CircuitPythonVersion)
             RPi.Write(line) # Send over UART to RPi.
         line = "session status "
         i = time.time() - RPi.StartTime # Alive seconds. Use CPU clock not synchronised clock.
@@ -1785,6 +1871,9 @@ def ProcessInput(line):
         RPi.Write('# ' + line)
         for i in Motors:
             i.SendStatus = StringToBool(lineitems[2])
+    elif line.startswith('set rgb'): # A direct command to set a specific RGB LED color. (Debug support)
+        StatusLed.SetRGB(line) # Set the RGB color regardless of LED status.
+        RPi.Write("# Acknowledge set rgb :" + str(line)) # Echo the command back.
     elif line.startswith('raise exception'): # Generate example exception to prove status LED workds as expected.
         ExceptionCounter.Raise()
         RPi.Write('# Raised artificial exception for testing.')
