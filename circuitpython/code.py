@@ -1070,27 +1070,27 @@ class steppermotor():
         self.LatestTuneSteps = 0 # Record details of the last tune command received. So we can see it was handled.
         self.LatestTuneTime = None
         # Latest Start/Stop times for config and status methods.
-        self.ConfigStartTime = None
-        self.ConfigEndTime = None
-        self.StatusStartTime = None
-        self.StatusEndTime = None
+        #self.ConfigStartTime = None
+        #self.ConfigEndTime = None
+        #self.StatusStartTime = None
+        #self.StatusEndTime = None
         self.OptimiseMoves = False # When set to TRUE the motor is allowed to take a short-cut if a requested move is > 50% of the circumference.
 
-    def ReportStamps(self):
-        """ Report back start/end timestmaps for config and status methods. """
-        line = "# Timestamps: " + self.MotorName + " Config "
-        if self.ConfigStartTime == None: line += "NOT SET"
-        else: line += IntToTimeString(self.ConfigStartTime)
-        line += "-"
-        if self.ConfigEndTime == None: line += "NOT SET"
-        else: line += IntToTimeString(self.ConfigEndTime)
-        line += " Status "
-        if self.StatusStartTime == None: line += "NOT SET"
-        else: line += IntToTimeString(self.StatusStartTime)
-        line += "-"
-        if self.StatusEndTime == None: line += "NOT SET"
-        else: line += IntToTimeString(self.StatusEndTime)
-        RPi.Write(line) # Send over UART to RPi.
+    #def ReportStamps(self):
+    #    """ Report back start/end timestmaps for config and status methods. """
+    #    line = "# Timestamps: " + self.MotorName + " Config "
+    #    if self.ConfigStartTime == None: line += "NOT SET"
+    #    else: line += IntToTimeString(self.ConfigStartTime)
+    #    line += "-"
+    #    if self.ConfigEndTime == None: line += "NOT SET"
+    #    else: line += IntToTimeString(self.ConfigEndTime)
+    #    line += " Status "
+    #    if self.StatusStartTime == None: line += "NOT SET"
+    #    else: line += IntToTimeString(self.StatusStartTime)
+    #    line += "-"
+    #    if self.StatusEndTime == None: line += "NOT SET"
+    #    else: line += IntToTimeString(self.StatusEndTime)
+    #    RPi.Write(line) # Send over UART to RPi.
 
     def CheckOnTarget(self):
         """ Set the OnTarget indicator if it looks like we're on-target.
@@ -1386,7 +1386,7 @@ class steppermotor():
                 0       1         2           3       4    5  6   7  8   9     10    11  12 13 14 15   16 17  18 19
                 
             """
-        self.ConfigStartTime = Clock.Now()
+        #self.ConfigStartTime = Clock.Now()
         try:
             lineitems = line.split(' ')
             lc = len(lineitems)
@@ -1450,7 +1450,7 @@ class steppermotor():
             LogFile.Log("steppermotor.ConfigureMotor(line) failed: " + str(e))
             print("steppermotor.ConfigureMotor() failed.")
             ExceptionCounter.Raise() # Increment exception count for the session.
-        self.ConfigEndTime = Clock.Now()
+        #self.ConfigEndTime = Clock.Now()
         self.ReportMotorConfig() # Report the configuration back to the RPi.
         return self.MotorConfigured
 
@@ -1666,7 +1666,7 @@ class steppermotor():
             codes: Optional string of codes that are added to the status message. (Debug/test/dev etc)
             """
         if immediate or self.StatusTimer.Due(): # Only send the status at regular intervals, otherwise we flood communications.
-            self.StatusStartTime = Clock.Now()
+            #self.StatusStartTime = Clock.Now()
             if self.SendStatus == False: # Status message is currently disabled. Inform that we're not sending it.
                 RPi.Write('# SendMotorStatus ' + IntToTimeString(Clock.Now()) + ' ' + self.MotorName + ' disabled. ' + str(codes))
                 print("SendMotorStatus",self.MotorName,"currently disabled.",codes)
@@ -1675,19 +1675,19 @@ class steppermotor():
             line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
             line += self.MotorName + ' '
             line += BoolToString(self.Trajectory.Valid) + ' ' # TrajectoryValid
-            line += IntToTimeString(self.Trajectory.ValidUntil()) + ' '
-            line += str(len(self.Trajectory.TrajectoryList)) + ' '
-            line += str(self.CurrentPosition) + ' '
-            line += str(self.CurrentAngle) + ' '
+            line += IntToTimeString(self.Trajectory.ValidUntil()) + ' ' # When does the trajectory run out?
+            line += str(len(self.Trajectory.TrajectoryList)) + ' ' # How many segments in the trajectory?
+            line += str(self.CurrentPosition) + ' ' # Where is the camera at the moment?
+            line += str(self.CurrentAngle) + ' ' # Where is the camera at the moment?
             line += BoolToString(self.MotorConfigured) + ' ' # MotorConfigured
             line += BoolToString(self.OnTarget) + ' ' # Motor is on target or not.
             line += str(self.WaitTime * 2) + ' ' # The pulse period (indicates speed) of the motor.
             line += str(VMot()) + ' ' # Measure the motor power voltage from ADC0. Will return '0' if adc0 is not configured as an 'adc' input.
             line += str(codes) + ' ' # Optional codes added to status message.
             RPi.Write(line) # Send over UART to RPi.
-            self.StatusEndTime = Clock.Now()
+            #self.StatusEndTime = Clock.Now()
             # Reset the status timer.
-            self.StatusTimer.Reset()
+            self.StatusTimer.Reset() # We've sent the regular status message, decide when the next is due.
 
 # Define pins for motorcontroller chips.
 AzimuthStepBCM = GPIOpin(board.GP29) # Tiny RP2040
