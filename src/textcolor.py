@@ -41,6 +41,10 @@ class keyboardscanner():
     def Check(self):
         curses.wrapper(self.Scan)
         return self.CurrentCharacter
+        
+    def Flush(self):
+        """ Flush any pending keypresses from the buffer. """
+        while self.Check() != '': pass
 
 # ------------------------------------------------------------------------------------------------
 
@@ -58,7 +62,7 @@ class textcolor:
         It includes various constants such as names of colors.
         It also makes some unicode symbols available via a dictionary so you can refer to them by name. """
 
-    __version__ = '0.0.4'
+    __version__ = '0.0.5'
     TermType = None
     Mode = 'putty' # 'putty' = full colour remote terminal, 'simple' = No colour, 'local' = Direct connection colour.
     # Some standard color names (XTERM names & a couple of common aliases).
@@ -2141,7 +2145,7 @@ class proceduremenu():
         You can directly run a menu option without user input via the Run() method.
         """
 
-    __version__ = '0.0.2'
+    __version__ = '0.0.3'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None,labelwidth=23):
         """ Create the menu, load the dictionary.
@@ -2371,6 +2375,15 @@ class proceduremenu():
             if answer == '?': # Refresh the menu.
                 self.Draw() # Refresh the menu.
                 continue
+            if answer == ">": # Increase columns in display.
+                self.Columns += 1
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == "<": # Increase columns in display.
+                self.Columns -= 1
+                self.Columns = max(self.Columns,1) # must be at least 1 column.
+                self.Draw() # Refresh the menu.
+                continue
             if '?' in answer: # User wants help about an option.
                 self.ProcessHelpRequest(answer)
                 continue # Prompt again.
@@ -2426,7 +2439,7 @@ class optionmenu():
         You can directly run a menu option without user input via the Run() method.
         """
 
-    __version__ = '0.0.1'
+    __version__ = '0.0.2'
 
     def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
         """ Create the menu, load the dictionary.
@@ -2538,18 +2551,35 @@ class optionmenu():
         """ Execute the menu. 
             This paints the menu on the terminal and deals with user selections. 
             Menu items are numbered dynamically, the user selects an item by selecting the number.
+            
             If the user enters the number plus a '?' symbol then help text is displayed if it can be found.
             The method closes when the user selects the 'x' option. 
-            
-            Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
+            '>' key makes the menu 1 column wider.
+            '<' key makes the menu 1 column narrower.
+
+            Return values are :
+                result: Returns the option value that was chosen, or None if no option was chosen.
+                found:  Returns TRUE if an option was selected, returns FALSE if nothing was chosen.
+
+            """
         # Now paint the menu and ask the user what to do.
         self.Draw(menuprefix=menuprefix) # Paint the menu.
-        result = None
+        result = None # The actual choice. None if nothing chosen.
+        found = False # Set to True if a choice is successfully made, else False is returned.
         while True: # Loop until explicitly told to terminate.
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
             if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
             if answer == '?': # Refresh the menu.
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == ">": # Increase columns in display.
+                self.Columns += 1
+                self.Draw() # Refresh the menu.
+                continue
+            if answer == "<": # Increase columns in display.
+                self.Columns -= 1
+                self.Columns = max(self.Columns,1) # must be at least 1 column.
                 self.Draw() # Refresh the menu.
                 continue
             if '?' in answer: # User wants help about an option.
@@ -2566,18 +2596,19 @@ class optionmenu():
                 found = False # Have we found and executed the menu option?
                 for key,value in self.Dictionary.items():
                     if value['id'] == menuid:
-                        result = self.Select(key) # Execute the option.
-                        found = True # We have found and executed the option. OK to return to ask user for new input.
+                        result = self.Select(key) # Choose the selected value to return.
+                        found = True # We have found and selected the option.
                         break # Next
                 if found: break
             if answer.lower() == '?': # Refresh option chosen.
                 self.Draw() # Refresh the menu.
                 continue # Next user input.
-            if answer.lower() == 'x': # User chose to quit the menu. Terminate the loop.
+            if answer.lower() == 'x': # User chose to quit without selecting anything. Terminate the loop.
+                found = None # Nothing was chosen.
                 break # Go UP a level, quit if at root.
             # User input was not recognised. Try again.
             print (textcolor.red("'" + str(answer) + "' Unrecognised. Try again."))
-        return result
+        return result, found
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
@@ -2589,7 +2620,7 @@ class listchooser():
         '?' to show list. 
         'x' to return to previous selection. """
 
-    __version__ = '0.0.1'
+    __version__ = '0.0.4'
         
     def __init__(self,inputlist,title=None,default=None,compress=True):
         self.FullList = inputlist
@@ -2633,7 +2664,9 @@ class listchooser():
                 if inputtext == i.lower(): 
                     choice = [i] # Exact match.
                     break # Look no further.
-            if len(choice) < 1: continue # Nothing matched, ask again.
+            if len(choice) < 1: 
+                print(textcolor.red("'" + inputtext + "' is not in the list."))
+                continue # Nothing matched, ask again.
             if len(choice) > 1 and choice != inputlist: choice = self.Filter(choice) # Refine the list further.
             if len(choice) == 1: break # Choice made, return.
         return choice

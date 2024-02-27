@@ -24,6 +24,9 @@ class logfile(): # 2 references.
     """ An object to maintain a log file recording the activities and events in the program.
         This writes to a disc file and flushes the write buffers as quickly as it can.
         It can also copy ERROR messages to any nominated error window object (which must support a 'Print()' method. )        """
+
+    __version__ = '0.1.0'
+
     def __init__(self,filename : str, clockoffset=None):
         self.FileName = filename
         self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
@@ -111,7 +114,7 @@ class logfile(): # 2 references.
                 if errorprompt: # User has to acknowledge the error. 
                     #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
                     input(textcolor.cyan("Press [ENTER] to continue: "))
-            if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.BLACK,bg=textcolor.RED) # Error color.
+            if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.RED,bg=textcolor.BLACK) # Error color.
         elif level[0] == 'w':
             if terminal: # We're allowed to display on the terminal.
                 print(textcolor.yellow('WARNING: reported in LogFile: ') + printline)
@@ -178,26 +181,70 @@ class logfile(): # 2 references.
         for c in b:
             self.Log("logfile.RecordTraceback():",c,terminal=terminal)
 
+    def UniqueFilename(self,filename):
+        """ Given a filename, create a unique version of it. 
+            This appends '.1', '.2', '.3' etc to the filename until it finds
+            an unused name. """
+        fileelements = filename.split('.')
+        uniquefilename = filename + ".err" # Something's gone wrong if this makes it through!
+        available = False
+        counter = 0
+        while True:
+            counter += 1 # Try next available filename. 
+            if counter > 100:
+                self.Log("logfile.UniqueFilename(",filename,"). Exhausted allowed range of names.",level='error')
+                break
+            uniquefilename = fileelements[0] + "_" + str(counter) + '.' + fileelements[1] # bla/bla/bla/bla/filename_{count}.filetype
+            if os.path.exists(uniquefilename) == False: # The name is unused.
+                break
+        return uniquefilename
+
+    #def PackageSearchResultXXX(self,searchterms,ignorecase=False):
+    #    """ Generate a ZIP file with a selection of entries from the current log file. 
+    #        searchterms = the selection phrase for grep.
+    #            Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
+    #        Returns a ZIP filename. """
+    #    path = os.path.dirname(self.FileName)
+    #    timestamp = str(self.NowUTC())
+    #    for c in ['-',':','.',' ']:
+    #        timestamp = timestamp.replace(c,'')
+    #    timestamp = timestamp.split('+')[0]
+    #    resultfile = os.path.join(path,'result_' + timestamp + '.log')
+    #    zipfile = os.path.join(path,'result_' + timestamp + '.zip')
+    #    self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
+    #    if ignorecase:
+    #        # -a : Treat file as text.
+    #        # -i : ignore case.
+    #        cmd = 'egrep -a -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
+    #    else:
+    #        cmd = 'egrep -a "' + searchterms + '" ' + self.FileName + '>' + resultfile
+    #    self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
+    #    os.system(cmd)
+    #    cmd = 'zip ' + zipfile + ' ' + resultfile
+    #    self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
+    #    os.system(cmd)
+    #    return zipfile
+
     def PackageSearchResult(self,searchterms,ignorecase=False):
         """ Generate a ZIP file with a selection of entries from the current log file. 
             searchterms = the selection phrase for grep.
                 Examples: "RPi received|RPi queueing" - Lists lines containing either phrase.        
             Returns a ZIP filename. """
-        path = os.path.dirname(self.FileName)
-        timestamp = str(self.NowUTC())
-        for c in ['-',':','.',' ']:
-            timestamp = timestamp.replace(c,'')
-        resultfile = os.path.join(path,'result_' + timestamp + '.log')
-        zipfile = os.path.join(path,'result_' + timestamp + '.zip')
+        resultfile = self.UniqueFilename(self.FileName)
+        zipfile = resultfile.split('.')[0] + '.zip'
         self.Log("logfile.PackageSearchResult(",searchterms,") Begin.",terminal=False)
         if ignorecase:
-            cmd = 'egrep -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
+            # -a : Treat file as text.
+            # -i : ignore case.
+            cmd = 'egrep -a -i "' + searchterms + '" ' + self.FileName + '>' + resultfile
         else:
-            cmd = 'egrep "' + searchterms + '" ' + self.FileName + '>' + resultfile
-        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+            cmd = 'egrep -a "' + searchterms + '" ' + self.FileName + '>' + resultfile
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
         os.system(cmd)
         cmd = 'zip ' + zipfile + ' ' + resultfile
-        self.Log("logfile.PackageSearchResult:",cmd,terminal=True)
+        self.Log("logfile.PackageSearchResult:",cmd,terminal=False)
         os.system(cmd)
         return zipfile
+
+#
         

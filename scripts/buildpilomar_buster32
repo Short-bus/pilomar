@@ -1,0 +1,245 @@
+#!/bin/bash
+# ####################################################################
+# script: buildpilomar
+# Save as UNIX file.
+# 18.Aug.2022 / Rasbian Buster 32bit only
+# ####################################################################
+
+export pilomarhome='/home/pi/pilomar'
+echo home directory is: $pilomarhome
+
+# list current packages and versions.
+echo Initial packages installed>>$pilomarhome/log/buildpilomar
+echo - dpkg list:----------------------------------------------
+dpkg-query -l>>$pilomarhome/log/buildpilomar
+echo - pip3 list:----------------------------------------------
+pip3 list>>$pilomarhome/log/buildpilomar
+echo - apt list:-----------------------------------------------
+apt list --installed>>$pilomarhome/log/buildpilomar
+echo ----------------------------------------------------------
+
+# # Directory structure
+# echo
+# echo -e "\E[36;40mChecking directory structure...\E[0m"
+# echo $pilomarhome/scripts/isdirectory $pilomarhome
+# $pilomarhome/scripts/isdirectory $pilomarhome
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/data
+# $pilomarhome/scripts/isdirectory $pilomarhome/data
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/fonts
+# $pilomarhome/scripts/isdirectory $pilomarhome/fonts
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/log
+# $pilomarhome/scripts/isdirectory $pilomarhome/log
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/scripts
+# $pilomarhome/scripts/isdirectory $pilomarhome/scripts
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/src
+# $pilomarhome/scripts/isdirectory $pilomarhome/src
+# echo $pilomarhome/scripts/isdirectory $pilomarhome/temp
+# $pilomarhome/scripts/isdirectory $pilomarhome/temp
+
+# Log start of the script (AFTER checking that the target directory exists)
+sudo chmod 777 $pilomarhome/log
+echo $(date) buildpilomar script start >>$pilomarhome/log/buildpilomar
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40mGeneral update...\E[0m"
+echo $(date) General update >>$pilomarhome/log/buildpilomar
+# Update the application package directory.
+sudo apt-get update -y
+# Upgrade everything that's currently installed.
+sudo apt-get upgrade -y
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for timestamp handling/parsing...\E[0m"
+echo $(date) ISO8601 - YES >>$pilomarhome/log/buildpilomar
+sudo pip3 install iso8601
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for zip...\E[0m"
+echo $(date) zip - YES >>$pilomarhome/log/buildpilomar
+sudo apt-get install zip
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for timezone handling/parsing (Python3 - pip)...\E[0m"
+echo $(date) PYTZ - YES >>$pilomarhome/log/buildpilomar
+sudo pip3 install pytz
+
+echo
+echo -e "\E[35;40m PILOMAR: (Skyfield and Astroalign packages!) \E[0m"
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for skyfield (Python3 - pip)...\E[0m"
+echo $(date) skyfield - YES >>$pilomarhome/log/buildpilomar
+sudo pip3 install skyfield 
+echo $(date) pip3 install python-dateutil>>$pilomarhome/log/buildpilomar
+sudo pip3 install python-dateutil 
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for scipy (Python3 - pip)...\E[0m"
+echo sudo pip3 install scipy
+echo $(date) sudo pip3 install scipy>>$pilomarhome/log/buildpilomar
+sudo pip3 install scipy
+# The above tries to auto install numpy, but 1.16.2 is already in place. Ignore the warning???
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for scikit-image (Python3 - pip)...\E[0m"
+echo pip3 install scikit-image
+echo $(date) pip3 install scikit-image>>$pilomarhome/log/buildpilomar
+sudo pip3 install scikit-image 
+# The above warns that pillow 5.4.1 already in place. IGNORE ?
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for pandas (Python3 - pip)...\E[0m"
+echo sudo pip3 install pandas
+echo $(date) sudo pip3 install pandas>>$pilomarhome/log/buildpilomar
+sudo pip3 install pandas 
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for astroalign (Python3 - pip)...\E[0m"
+echo pip3 install astroalign
+echo $(date) pip3 install astroalign>>$pilomarhome/log/buildpilomar
+sudo pip3 install astroalign 
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libwebp-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libwebp-dev VP8 Image compression codec for JPEG
+echo $(date) apt-get -y install libwebp-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libwebp-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libtiff5 (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libtiff5 Support for TIFF image format
+echo $(date) apt-get -y install libtiff5>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libtiff5
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libopenjp2-7-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libopenjp2-7-dev OpenJPEG handler for JPEG2000 format
+echo $(date) apt-get -y install libopenjp2-7-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libopenjp2-7-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libjasper-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libjasper-dev Image coding and manipulation
+echo $(date) apt-get -y install libjasper-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libjasper-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libqtgui4 (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libqtgui4 QT support
+echo $(date) apt-get -y install libqtgui4>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libqtgui4 
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libqt4-test (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libqt4-test QT support
+echo $(date) apt-get -y install libqt4-test>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libqt4-test
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libhdf5-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libhdf5-dev HDF5 scientific file format
+echo $(date) apt-get -y install libhdf5-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libhdf5-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for imutils (Python3 - pip)...\E[0m"
+echo pip3 install imutils OpenCV Convenience functions to transform images
+echo $(date) pip3 install imutils>>$pilomarhome/log/buildpilomar
+sudo pip3 install imutils 
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libilmbase23 (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libilmbase23 Matrix transformation functions - Industrial Light and Magic
+echo $(date) apt-get -y install libilmbase23>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libilmbase23
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libopenexr-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libopenexr-dev Support for HDR image format from Industrial Light and Magic
+echo $(date) apt-get -y install libopenexr-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libopenexr-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libavcodec-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libavcodec-dev ffmpeg codecs
+echo $(date) apt-get -y install libavcodec-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libavcodec-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libavformat-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libavformat-dev ffmpeg de/muxers
+echo $(date) apt-get -y install libavformat-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libavformat-dev
+
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for libswscale-dev (Python3 - apt-get)...\E[0m"
+echo apt-get -y install libswscale-dev ffmpeg scaling functions
+echo $(date) apt-get -y install libswscale-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libswscale-dev
+
+echo -e "==========================================================="
+echo apt-get -y install libv4l-dev Linux video libraries
+echo -e "\E[36;40mSupport for libv4l-dev (Python3 - apt-get)...\E[0m"
+echo $(date) apt-get -y install libv4l-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libv4l-dev
+
+echo -e "==========================================================="
+echo apt-get -y install libatlas-base-dev Algebra libraries
+echo -e "\E[36;40mSupport for libatlas-base-dev (Python3 - apt-get)...\E[0m"
+echo $(date) apt-get -y install libatlas-base-dev>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install libatlas-base-dev
+
+echo -e "==========================================================="
+echo $(date) PiDNG raw extraction - YES >>$pilomarhome/log/buildpilomar
+# python3 -mpip install PiDNG 
+# Versions from 4.0 onwards are not backwards compatible for handling theoriginal JPG+RAW file format. Stick with earlier version from PyPi
+python3 -mpip install PiDNG==3.4.6
+# The above warns that it's a yanked version, but it's the only one available that is backwards compatible with older RPi builds.
+# The above updates numpy to 1.21.66, replacing 1.16.2 already in place?
+# The above installs ExifRead 3.2.3
+# Successfully installed PiDNG-3.4.6 exifread-2.3.2 numpy-1.21.6
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40mSupport for OPENCV (Python3 - apt-get)...\E[0m"
+echo $(date) OPENCV for python 3.x - YES >>$pilomarhome/log/buildpilomar
+echo $(date) apt-get install python3-opencv>>$pilomarhome/log/buildpilomar
+sudo apt-get -y install python3-opencv
+
+# For FITS file support use Astropy.
+# echo -e "==========================================================="
+# echo -e "\E[36;40mSupport for Astropy (Python3 - pip)...\E[0m"
+# echo pip3 install Astropy
+# echo $(date) pip3 install astropy>>$pilomarhome/log/buildpilomar
+# sudo pip3 install astropy 
+
+
+echo
+echo Cleanup apt-get space. 
+sudo apt autoremove
+sudo apt-get clean
+
+echo Final packages installed>>$pilomarhome/log/buildpilomar
+echo - dpkg list:----------------------------------------------
+dpkg-query -l>>$pilomarhome/log/buildpilomar
+echo - pip3 list:----------------------------------------------
+pip3 list>>$pilomarhome/log/buildpilomar
+echo - apt list:-----------------------------------------------
+apt list --installed>>$pilomarhome/log/buildpilomar
+echo ----------------------------------------------------------
+
+echo $(date) buildpilomar script end >>$pilomarhome/log/buildpilomar
+
+echo
+echo -e "***********************************************************************************************************************"
+echo -e "For PILOMAR you must also enable VNC, CAMERA, SSH and SERIAL PORT (but disable console to serial port) via raspi-config"
+echo -e "***********************************************************************************************************************"
+
+echo -e "\E[32;40m------------------------------\E[0m"
+echo -e "\E[32;40mBuild complete. Please reboot.\E[0m"
+echo -e "\E[32;40m------------------------------\E[0m"
+exit
