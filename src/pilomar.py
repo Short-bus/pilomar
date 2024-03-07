@@ -929,7 +929,7 @@ class parameters(attributemaster): # Common
         self.TrackingInterval = self.GetParmVal('TrackingInterval',600) # How many seconds between each target tracking check?
         self.TrackingStarRadius = self.GetParmVal('TrackingStarRadius',3) # Pixel radius of stars in clean targetting images.
         self.TrackingExposureSeconds = self.GetParmVal('TrackingExposureSeconds',5.0) # How long is the exposure when capturing a tracking photo. It must be standardised rather than using the variable 'light' image exposure time.
-        self.GeneratePreviewGC = self.GetParmVal('GeneratePreview',True) # TRUE = Preview images are generated periodically, and can be turned into AVI file when observation ends.
+        self.GeneratePreview = self.GetParmVal('GeneratePreview',True) # TRUE = Preview images are generated periodically, and can be turned into AVI file when observation ends.
         self.InitialGoTo = self.GetParmVal('InitialGoTo',True) # Perform initial GOTO before downloading the trajectory. (Eases comms with microcontroller.)
         self.TargetInclusionRadius = self.GetParmVal('TargetInclusionRadius',15) # Angle (radius) for inclusion of neighbouring stars when generating target image.
         self.TargetMinMagnitude = self.GetParmVal('TargetMinMagnitude',7.0) # Minimum magnitude for stars to display. At a 2 second exposure, Magnitude 5.0 is a good value, at 5 seconds, Mag 9, over 10 seconds, Mag 10 is about as good as it gets.
