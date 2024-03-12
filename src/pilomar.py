@@ -10,6 +10,7 @@
 # - The MESSIER catalog is gathered from multiple sources.
 # - The MeteorShower list is based upon the Wikipedia list (2021).
 # - Space station data comes from the celestrak.org website (using NORAD public data).
+# - The Comet list comes from the Minor Planet Center.
 
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
 # OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
@@ -78,14 +79,15 @@
 #                     SetMotorAngle() now states current motor angle.
 # 0.2.0    13.01.2024 GoToAngle, GoToTarget show progress during large moves.
 #          31.01.2024 2024-01-issues items addressed.            
+# 0.3.0    12.03.2024 2024-03-issues items addressed.
 
 # Version numbering scheme:
 #           aa.bb.cc
 #           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
 #           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
 #           cc = Bugfix, no feature changes. Will not require changes on RPi side.
-VERSION = '0.2.2' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-ACCEPTABLECONTROLLERVERSIONS = ['0.0','0.1','0.2','0.3'] # Microcontroller versions that this will work with. Ignore patch level.
+VERSION = '0.3.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+ACCEPTABLECONTROLLERVERSIONS = ['0.0','0.1','0.2','0.3','0.4'] # Microcontroller versions that this will work with. Ignore patch level.
 
 # Import required libraries
 from typing import Tuple # For type hinting.
@@ -146,9 +148,9 @@ if len(RunArgs) > 0:
     for i in RunArgs:
         print('>', i)
         if i == 'reload': ReloadData = True
-        if i == 'resume': ResumeObservation = True
-        if i.startswith('clock='): StartupClock = i.split('=')[1] # Pull ISO8601 format datetime from runtime parameters.
-        else: print (' ** Ignored **')
+        elif i == 'resume': ResumeObservation = True
+        elif i.startswith('clock='): StartupClock = i.split('=')[1] # Pull ISO8601 format datetime from runtime parameters.
+        else: print (textcolor.red('Ignored startup parameter "' + str(i) + '"'))
         
 if ReloadData:
     print(textcolor.red("ReloadData triggered. Data files will be reloaded from original sources."))
@@ -698,9 +700,13 @@ OS_systemkey = RPiNum + "/" + OS_name + "/" + str(OS_bits)
 MainLog.Log("RPi: Model:",RPIMODEL,"Num:",RPiNum,"OStype:",OS_type,"OSid:",OS_id,"OSname:",OS_name,"OSbits:",OS_bits,"OSproc:",OS_processor,"SysKey:",OS_systemkey,terminal=True)
 RASPISTILL_SYSTEMS = ['wheezy','jessie','stretch','buster'] # These all came with raspistill for camera support.
 SUPPORTED_SYSTEMS = ['3/buster/32','4/buster/32','4/bookworm/64'] # The software is designed to run under these hardware/os combinations.
+GPIO_SYSTEMS = ['wheezy','jessie','stretch','buster'] # These all use GPIO library for accessing GPIO pins.
 if OS_name in RASPISTILL_SYSTEMS: CameraDriver = 'raspistill'
 else: CameraDriver = 'libcamera' # 'bullseye' and 'bookworm' come with libcamera installed.
 MainLog.Log(OS_name,"O/S found, assuming camera driver is",CameraDriver,terminal=False)
+if OS_name in GPIO_SYSTEMS: GPIODriver = 'GPIO'
+else: GPIODriver = 'GPIOD'
+MainLog.Log(OS_name,"O/S found, assuming GPIO driver is",GPIODriver,terminal=False)
 if OS_systemkey in SUPPORTED_SYSTEMS:
     MainLog.Log(ProgramTitle,"OK to run under",OS_systemkey,terminal=False)
 else: # Cannot proceed, wrong O/S & hardware combination.
@@ -810,12 +816,14 @@ class parameters(attributemaster): # Common
         # The following parameters control hardware features.
         #self.MotorsEnabled = self.GetParmVal('MotorsEnabled',True) # Are the motors to be powered on?
         self.CameraEnabled = self.GetParmVal('CameraEnabled',True) # Is the camera on?
-        self.DisableCleanup = self.GetParmVal('DisableCleanup',True) # Set to TRUE to disable the on-chip cleanup. (More pure RAW image is captured.)
+        if CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
+            self.DisableCleanup = self.GetParmVal('DisableCleanup',True) # Set to TRUE to disable the on-chip cleanup. (More pure RAW image is captured.) #raspistill only!
         self.BacklashEnabled = self.GetParmVal('BacklashEnabled',False) # ENABLE to let the motors make extra moves to cope with gear backlash.
         self.FaultSensitive = self.GetParmVal('FaultSensitive',False) # ENABLE to make motorcontroller respect the DRV8825 'fault' signal.
         self.MctlLedStatus = self.GetParmVal('MctlLedStatus',True) # Turn on STATUS LEDs on microcontroller.
         self.ObservationResetsMctl = self.GetParmVal('ObservationResetsMctl',False) # Force a reset of the microcontroller each time a new ObservationRun begins?
         self.MctlResetPin = self.GetParmVal('MctlResetPin',4) # Which RPi4 GPIO pin is used to RESET the microcontroller?
+        self.StopPin = self.GetParmVal('StopPin',25) # Which RPi4 GPIO pin is used as a STOP button?
         self.UartRxQueueLimit = self.GetParmVal('UartRxQueueLimit',50) # How many messages can be held in the input queue from the Microcontroller? Kill older entries.
         # Azimuth motor parameters.
         self.MinAzimuthAngle = self.GetParmVal('MinAzimuthAngle',0)
@@ -863,7 +871,7 @@ class parameters(attributemaster): # Common
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
         self.SDPath = self.GetParmVal('SDPath','/') # The 'path' used by discmonitor for monitoring space on the SD card.
         self.USBPath = self.GetParmVal('USBPath','/media/pi') # The 'path' used by discmonitor for monitoring space on attached USB storage.
-
+        self.FastFlush = self.GetParmVal('FastFlush',False) # When TRUE disc writes are flushed immediately - which hits the SD card hard.
         # The following parameters control how bright the stars are if they are selected in the LocalStars or ConstellationStars lists.
         self.LocalStarsMagnitude = self.GetParmVal('LocalStarsMagnitude',7.0) # Max magnitude when selecting local stars.
         self.ConstellationStarsMagnitude = self.GetParmVal('ConstellationStarsMagnitude',7.0) # Max magnitude when selecting stars in a constellation.
@@ -996,7 +1004,7 @@ class parameters(attributemaster): # Common
         # Load/Save image filters for pilomarimage objects.
         self.FilterScripts = self.GetParmVal('FilterScripts',pilomarimage.FILTERSCRIPTS) # Default is the initial set of filter scripts defined in the pilomarimage class.
         pilomarimage.FILTERSCRIPTS = self.FilterScripts # Now assign whatever we have loaded back to pilomarimage.
-        
+
     def GetParmVal(self,name,default,oldnames=None):
         """ Get a value from the parameter file. 
         
@@ -1179,6 +1187,9 @@ class parameters(attributemaster): # Common
 # Establish the filename of the parameters file that will be loaded.
 ParameterFileName = ProjectRoot + '/data/' + ProgramTitle + '_params.json'
 Parameters = parameters(filename=ParameterFileName,log=MainLog.Log) # Create and load parameters.
+
+# Set the log file flush strategy from the parameter file.
+MainLog.FastFlush = CamLog.FastFlush = Parameters.FastFlush
 
 if Parameters.HomeLat == None or Parameters.HomeLon == None:
     # Home location is not yet set. Save the parameter file for editing then quit.
@@ -1878,6 +1889,25 @@ class astrosensor(attributemaster):
                  }
 
 
+    def DenoiseStatus(self):
+        """ With libcamera the denoise / onchip cleanup is set via the command template rather than the parameter file. """
+        if CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
+            result = not Parameters.DisableCleanup # Onchip cleanup is ENABLED unless we can prove otherwise.
+        else:
+            result = True # Denoise is ON unless explicitly turned off in the command line (checked next).
+        try:
+            elements = Parameters.CameraLightCommand.split(" ") # Check all the options.
+            for i,element in enumerate(elements):
+                if element == '--denoise': # We've found a denoise instruction in the camera command template.
+                    if elements[i + 1] == 'off': # Onchip cleanup is disabled.
+                        result = False
+                    else:
+                        result = True
+                    break # Look no further.
+        except:
+            self.Log("astrosensor.DenoiseStatus(): Command template is incomplete.",terminal=False)
+        return result
+
     def __init__(self,sensor_type='',pixel_width=4056,pixel_height=3040,max_seconds=200,min_seconds=0.0000001):
         self.Log = CamLog.Log # Handle to the method that logs messages.
         self.PixelWidth = pixel_width
@@ -1893,7 +1923,7 @@ class astrosensor(attributemaster):
             self.MinExposureSeconds=1e-6 # 1 microsecond is the fastest exposure time that raspistill can deliver.
         self.ID = str(self.PixelWidth) + "|" + str(self.PixelHeight) # Unique ID of lens features.
         self.Mode = 3 
-        self.OnChipCleanup = True # Records whether we've got the on-chip cleanup enabled or not. 
+        self.OnChipCleanup = self.DenoiseStatus() # Records whether we've got the on-chip cleanup enabled or not. Raspistill feature. Libcamera does it through the command line.
         if self.Type in astrosensor.SensorDict: self.ModeDict = astrosensor.SensorDict[self.Type] # Select mode information for the chosen sensor.
         else: self.ModeDict = astrosensor.SensorDict['imx477'] # Default sensor for the telescope design.
         #self.ModeDict = {1 : {'width' : 2028, 'height' : 1080, 'video' : True, 'image' : False, 'aspect' : '169:90',
@@ -1947,11 +1977,12 @@ class astrosensor(attributemaster):
             # According to raspberry pi forum, these can be ignored. The output is not displayed, however pilomar logs it in case other errors occur in the future.
             self.Log(cmd,terminal=False)
             osCmd(cmd)
-            self.OnChipCleanup = False
+            self.OnChipCleanup = False # raspistill feature. Libcamera does it through the command line.
+            Parameters.DisableCleanup = True # Cleanup is disabled.
             self.Log("Raspberry Pi High Quality Camera, on chip image cleanup DISABLED.",terminal=False)
             CameraWindow.Print(NowHMS() + " On Chip Cleanup - OFF")
         else: # libcamera has a command line option to disable cleanup.
-            self.Log("Raspberry Pi High Quality Camera, on chip image cleanup will be disabled during exposures.",terminal=False)
+            self.Log("astrosensor.DisableCleanup: Please check the '--denoise off ' option in the command templates in the parameter file.",terminal=False)
         return True
 
     def EnableCleanup(self):
@@ -1969,11 +2000,12 @@ class astrosensor(attributemaster):
             # According to raspberry pi forum, these can be ignored. The output is logged but not displayed in case other errors occur in the future.
             self.Log(cmd,terminal=False)
             osCmd(cmd)
-            self.OnChipCleanup = True
+            self.OnChipCleanup = True # Raspistill feature, libcamera does it through the command line.
+            Parameters.DisableCleanup = False 
             self.Log("Raspberry Pi High Quality Camera, on chip image cleanup ENABLED.",terminal=False)
             CameraWindow.Print(NowHMS() + " On Chip Cleanup - ON")
-        else:
-            self.Log("Raspberry Pi High Quality Camera, on chip image cleanup will be enabled during exposures.",terminal=False)
+        else: # libcamera has a command line option to disable cleanup.
+            self.Log("astrosensor.EnableCleanup(): Please check the '--denoise off ' option is removed in the command templates in the parameter file.",terminal=False)
         return True
 
 # ------------------------------------------------------------------------------------------------------
@@ -2375,8 +2407,13 @@ class astrocamera(attributemaster):
             #Led3.On()
             self.AstrotimeStart = ts.now()
             self.CaptureStart = Ts2Datetime(self.AstrotimeStart)
-            if Parameters.CameraEnabled: # Camera is in use. Take real photo.
+            if Parameters.CameraEnabled: # Camera is enabled. Take real photo.
                 osCmd(cmd,output='none')
+                retc = OSCommand.ReturnCode # What did the camera command exit with ?
+                self.Log("astrocamera.CaptureSetFull(): Return code:",retc,terminal=False)
+                if retc != 0: # Non zero return code. Did something go wrong?
+                    CameraWindow.Print(NowHMS() + " Return code " + str(retc),fg=textcolor.YELLOW)
+                    ErrorWindow.Print(NowHMS() + " capture returned code " + str(retc),fg=textcolor.YELLOW)
             else: # Camera is not in use. Generate fake photo.
                 self.Log("astrocamera.CaptureSetFull(): About to call FakePhoto.",terminal=False)
                 tr = False # Fake image generation failed unless we are told otherwise.
@@ -2405,31 +2442,32 @@ class astrocamera(attributemaster):
             self.Lastjpg = outputfile # The camera can remember this file as the 'last jpg taken'
             self.Log("astrocamera.CaptureSetFull(): Load image from " + outputfile,terminal=False)
             self.Image.LoadFile(outputfile)
-            if self.Image.ImageMissing(): # imread failed.
-                self.Log("astrocamera.CaptureSetFull(): imread of",outputfile,"failed.",terminal=False)
+            if self.Image.ImageMissing(): # imread failed. The capture did not succeed for some reason?
+                self.Log("astrocamera.CaptureSetFull(): imread of",outputfile,"failed.",level='error',terminal=False)
             self.LastImageDateTime = NowUTC() # *Q* This timestamp is AFTER the image has been captured. Can it be estimated better? CaptureStart + (CaptureEnd - CaptureStart) / 2 ?
             self.Log("astrocamera.CaptureSetFull(): Image loaded.",terminal=False)
             if (" -r " in camera_command + ' ' or " --raw " in camera_command + ' ') and Parameters.CameraEnabled: # The jpg contains RAW data in the file tags, extract it. Convert it.
-                # Convert to RAW. We have to extract RAW for either .dng or .fits files to be saved.
-                self.Log("astrocamera.CaptureSetFull(): Converting to RAW (.DNG) file...",terminal=False)
-                dngname = outputfile.replace('.jpg','.dng')
-                try:
-                    PiDNG.convert(outputfile) # Convert the saved .jpg file into the raw .dng format.
-                except Exception as e:
-                    CamLog.RaiseException(e,comment='astrocamera.CaptureSetFull(): PiDNG.convert failed.')
-                self.Log("astrocamera.CaptureSetFull(): Converted to RAW (.DNG) file.",terminal=False)
-                # Cleanup. Remove any intermediate files that are nolonger needed.
-                if self.CameraSaveJpg: # We should save 'JUST' the jpg data, effectively stripping out the embedded RAW data 
-                    self.Image.SaveFile(outputfile) # Save the JPG file, but remove the 'raw' data. This overwrites the original file generated by raspistill.
-                else: # We're only saving the RAW data, so just delete the original jpg file.
-                    self.Log("astrocamera.CaptureSetFull(): Deleting intermediate .jpg file...",terminal=False)
-                    self.CleanupLastjpg() # We've finished with the original .jpg on disc.
-                if not self.CameraSaveDng: # We don't need to keep the .dng file anymore.
-                    self.Log("astrocamera.CaptureSetFull(): DNG nolonger needed.",terminal=False)
-                    cmd = 'rm ' + dngname
-                    osCmd(cmd,output='log')
-                else:
-                    CameraWindow.Print(NowHMS() + " " + dngname.split('/')[-1]) # Just the dng filename.
+                if CameraDriver == 'raspistill': # We need to manually extract the DNG data.
+                    # with raspistill convert to RAW. We have to extract the raw data RAW for .dng files to be saved.
+                    self.Log("astrocamera.CaptureSetFull(): Converting to RAW (.DNG) file...",terminal=False)
+                    dngname = outputfile.replace('.jpg','.dng')
+                    try:
+                        PiDNG.convert(outputfile) # Convert the saved .jpg file into the raw .dng format.
+                    except Exception as e:
+                        CamLog.RaiseException(e,comment='astrocamera.CaptureSetFull(): PiDNG.convert failed.')
+                    self.Log("astrocamera.CaptureSetFull(): Converted to RAW (.DNG) file.",terminal=False)
+                    # Cleanup. Remove any intermediate files that are nolonger needed.
+                    if self.CameraSaveJpg: # We should save 'JUST' the jpg data, effectively stripping out the embedded RAW data 
+                        self.Image.SaveFile(outputfile) # Save the JPG file, but remove the 'raw' data. This overwrites the original file generated by raspistill.
+                    else: # We're only saving the RAW data, so just delete the original jpg file.
+                        self.Log("astrocamera.CaptureSetFull(): Deleting intermediate .jpg file...",terminal=False)
+                        self.CleanupLastjpg() # We've finished with the original .jpg on disc.
+                    if not self.CameraSaveDng: # We don't need to keep the .dng file anymore.
+                        self.Log("astrocamera.CaptureSetFull(): DNG nolonger needed.",terminal=False)
+                        cmd = 'rm ' + dngname
+                        osCmd(cmd,output='log')
+                    else:
+                        CameraWindow.Print(NowHMS() + " " + dngname.split('/')[-1]) # Just the dng filename.
             if tempfile: # Delete the temporary file.
                 cmd = 'rm ' + outputfile
                 osCmd(cmd,output='log')
@@ -2868,8 +2906,9 @@ tempresult = DetectCamera(candisable=True)
 if Parameters.CameraEnabled:
     print (textcolor.green("Camera enabled"))
     MainLog.Log("The camera can be disabled in the parameters file if you don't want to take actual photographs.",terminal=False)
-    if Parameters.DisableCleanup: SensorInUse.DisableCleanup()
-    else: MainLog.Log("NOTE: on-chip cleanup has not changed state.",terminal=True)
+    if CameraDriver == 'raspistill': # Only raspistill does this, libcamera handles denoise via the command line.
+        if Parameters.DisableCleanup: SensorInUse.DisableCleanup()
+        else: MainLog.Log("NOTE: on-chip cleanup has not changed state.",terminal=True)
 else: 
     print (textcolor.red("Camera disabled"))
     MainLog.Log("The program will generate simulated images instead.",terminal=False)
@@ -2889,42 +2928,230 @@ else:
 # GPIO must be enabled via raspi-config.
 GPIO.setmode(GPIO.BCM)
  
-# // Initialise control IO
-StopBCM = 25 # BCM pin 12 to stop an obvservation.
-GPIO.setup(StopBCM,GPIO.IN,pull_up_down=GPIO.PUD_UP) # Set pin to INPUT. Will EARTH when triggered.
+# ---------------------------------------------------------------------------------------------------------------
 
-class outputpin():
-    def __init__(self,pinbcm,name=None):
-        self.Pin = pinbcm
-        self.Enabled = True
-        self.Name = name
-        self.State = False
-        GPIO.setup(pinbcm, GPIO.OUT)
-        self.Refresh()
-    
-    def On(self):
-        self.State = True
-        self.Refresh()
+from pilomargpio import inputpin_gpio as inputpin # Use the RPi.GPIO library to handle the I/O pin.
+
+#class inputpin_xxx():
+#    """ Wrapper for GPIO input pin. 
+#        Allows different GPIO libraries to be implemented by hiding the actual implementation behind these methods. 
+#        Pin can be declared as None in which case it's a non-functional device. """
+#    
+#    InputPins = [] # List of all defined input pins.
+#    __library__ = 'RPi.GPIO' # Which GPIO library does this support?
+#    __version__ = '0.0.0' # What version of the library is this?
+#    
+#    def __init__(self,pinbcm,name=None,pull=GPIO.PUD_UP,enabled=True,invert=False):
+#        """ Define a GPIO input pin.
+#        
+#            The purpose is to present a common interface to an I/O pin regardless of the underlying
+#            GPIO package being used. You can create alternative classes which interact with different 
+#            packages and present the same interface to the program.
+#        
+#            pinbcm = the BCM pin number. 
+#            name is an optional name for the pin. 
+#            pull = GPIO.PUD_UP for pull up (default HIGH/ON), 
+#                   GPIO.PUD_DOWN for pull down. (default LOW/OFF)
+#            enabled = initial enabled(True)/disabled(False) state of the pin.
+#            invert = False: IsOn returns TRUE for HIGH signal. 
+#                            IsOff returns TRUE for a LOW signal.
+#                     True:  IsOn returns TRUE for LOW signal.
+#                            IsOff returns TRUE for a HIGH signal.
+#
+#            if pinbcm is None then this is a fake input.
+#            it behaves as a GPIO input, but doesn't actually link to a GPIO port and always returns the PULL UP/DOWN value. """
+#        self.Pin = pinbcm # The BCM number of the pin.
+#        self.Name = name # A reference name of the pin.
+#        self.Pull = pull # Is this a PULL_UP or PULL_DOWN input.
+#        self.Invert = invert # IsOn/IsOff methods invert their value. IsHigh/IsLow remain unchanged.
+#        if self.Pin != None: self.Enabled = enabled
+#        else: self.Enabled = False # Dummy pins are always disabled.
+#        # Set the PULL UP / DOWN config for the input.
+#        if pull == GPIO.PUD_UP: self.State = True # Initial state HIGH.
+#        else: self.State = False # Initial state LOW.
+#        # If it's a real pin, set it up through GPIO.
+#        if self.Pin != None: GPIO.setup(self.Pin,GPIO.IN,pull_up_down=self.Pull) # Will EARTH when triggered (by default).
+#        # Append to the global list of all input pins.
+#        inputpin.InputPins.append(self) # Add to list of input pins.
+#        
+#    def Refresh(self):
+#        """ Get and store the current state of the pin.
+#            GPIO.input() returns 0 = Low, 1 = High.
+#            Convert to 0 = False, 1 = True 
+#            DISABLED pins always return False (electrical LOW).
+#            If you want the logical state of the pin after this use IsOn() and IsOff() methods.
+#            If you want the physical state of the pin after this use IsHigh() and IsLow() methods. """
+#        if self.Enabled and GPIO.input(self.Pin) != 0: self.State = True # High
+#        else: self.State = False # Low
+#        
+#    def IsHigh(self):
+#        """ Return TRUE if input is HIGH.
+#            This is the true electrical state of the pin.
+#            It does NOT respect the self.Invert flag, use IsOn() for that. """
+#        self.Refresh() # Get current electrical state of the pin.
+#        return self.State # Return True/False.
+#        
+#    def IsLow(self):
+#        """ Return TRUE if input is LOW.
+#            This is the true electrical state of the pin.
+#            It does NOT respect the self.Invert flag, use IsOff() for that. """
+#        self.Refresh() # Get current electrical state of the pin.
+#        return not self.State # Return True/False.
+#
+#    def IsOn(self):
+#        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+#            If you want the true electrical state of the pin use self.IsHigh() """
+#        result = self.IsHigh()
+#        if self.Invert: result = not result
+#        return result # Return True/False.
+#
+#    def IsOff(self):
+#        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+#            If you want the true electrical state of the pin use self.IsLow() """
+#        result = self.IsLow()
+#        if self.Invert: result = not result
+#        return result # Return True/False.
+#
+#    def Enable(self):
+#        """ Enable the pin and set the output accordingly. 
+#            Can only enable real GPIO pins. """
+#        if self.Pin != None: self.Enabled = True # Can only enable if it's a real pin.
+#        self.Refresh() # Get current electrical state of the pin.
+#        
+#    def Disable(self):
+#        """ Disable the pin and set the state to LOW. """
+#        self.Enabled = False
+#        self.Refresh() # Get current electrical state of the pin.
+#        
+#    def Status(self):
+#        """ Return a string describing the current status of the pin. """
+#        temp = "Pin:" + str(self.Pin) + ", IN:" + \
+#               " Ena:" + str(StopPin.Enabled).rjust(5) + \
+#               " Inv:" + str(StopPin.Invert).rjust(5) + \
+#               " IsOn:" + str(StopPin.IsOn()).rjust(5) + \
+#               " IsOff:" + str(StopPin.IsOff()).rjust(5) + \
+#               " IsHigh:" + str(StopPin.IsHigh()).rjust(5) + \
+#               " IsLow:" + str(StopPin.IsLow()).rjust(5)
+#        return temp
+
+# ---------------------------------------------------------------------------------------------------------------
+
+from pilomargpio import outputpin_gpio as outputpin # Use the RPi.GPIO library to handle the I/O pin.
+
+#class outputpin_xxx():
+#    """ Define a GPIO output pin.
+#        
+#            The purpose is to present a common interface to an I/O pin regardless of the underlying
+#            GPIO package being used. You can create alternative classes which interact with different 
+#            packages and present the same interface to the program.
+#        
+#
+#        Allows different GPIO libraries to be implemented by hiding the actual implementation behind these methods.
+#        PIN can be declared as None, in which case it's a non-functional device. """
+#    
+#    OutputPins = [] # List of all defined output pins. 
+#    __library__ = 'RPi.GPIO' # Which GPIO library does this support?
+#    __version__ = '0.0.0' # What version of the library is this?
+#    
+#    def __init__(self,pinbcm,name=None,enabled=True,state=False,invert=False):
+#        """ Create a new pin. 
+#            pinbcm is the BCM number of the GPIO pin. 
+#            name is an optional name for the pin. 
+#            enabled = initial enabled/disabled condition of the pin. 
+#            state = initial on(True)/off(False) condition of the pin.
+#            invert = Switch HIGH/LOW electrical states for the on/off status. """
+#        self.Pin = pinbcm # The BCM pin number.
+#        self.Name = name # Reference name for the pin.
+#        self.State = state # It's logical on/off state.
+#        self.Invert = invert # Flips electrical state to be opposite of logical state. LOW=ON, HIGH=OFF.
+#        # Only real pins can be enabled.
+#        if self.Pin != None: self.Enabled = enabled
+#        else: self.Enabled = False # If no real pin, force it to 'disabled'.
+#        # Only real pins are connected to a GPIO pin.
+#        if self.Pin != None: GPIO.setup(self.Pin, GPIO.OUT)
+#        outputpin.OutputPins.append(self) # Add to list of output pins.
+#        self.Refresh()
+#    
+#    def On(self):
+#        """ Turn on (HIGH) the output pin. """
+#        self.State = True
+#        self.Refresh() # Set electrical state of the pin.
+#        
+#    def Off(self):
+#        """ Turn off (LOW) the output pin. """
+#        self.State = False
+#        self.Refresh() # Set the electrical state of the pin.
+#
+#    def IsOn(self):
+#        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+#            If you want the true electrical state of the pin use self.IsHigh() """
+#        result = self.IsHigh() # Get the current electrical state of the pin.
+#        if self.Invert: result = not result # Consider the Invert flag.
+#        return result # REturn True/False for logical state of the pin.
+#
+#    def IsOff(self):
+#        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+#            If you want the true electrical state of the pin use self.IsLow() """
+#        result = self.IsLow() # Get the current electrical state of the pin.
+#        if self.Invert: result = not result # Consider the Invert flag.
+#        return result # Return True/False for the logical state of the pin.
+#
+#    def IsHigh(self):
+#        """ Return TRUE if the pin is HIGH. 
+#            The true electrical state of the pin. 
+#            Does not respect self.Invert flag. 
+#            To respect self.Invert, use IsOn()/IsOff() """
+#        if GPIO.input(self.Pin) != 0: result = True # The true electrical state of the pin.
+#        else: result = False
+#        return result
+#
+#    def IsLow(self):
+#        """ Return TRUE if the pin is LOW.
+#            The true electrical state of the pin. 
+#            Does not respect self.Invert flag.
+#            To respect self.Invert, use IsOn()/IsOff() """
+#        if GPIO.input(self.Pin) != 0: result = False # The true electrical state of the pin.
+#        else: result = True
+#        return result
+#        
+#    def Refresh(self):
+#        """ Set the electrical state of the output pin to match the status and its enabled condition. """
+#        if self.Pin != None: # It's a real pin.
+#            if self.Enabled:
+#                temp = self.State # Logical state.
+#                if self.Invert: temp = not temp # Convert to electrical state.
+#                if temp: GPIO.output(self.Pin,GPIO.HIGH) # Enabled and HIGH.
+#                else: GPIO.output(self.Pin,GPIO.LOW) # Enabled and LOW.
+#            else: GPIO.output(self.Pin,GPIO.LOW) # Disabled pin should default to LOW.
+#
+#    def Enable(self):
+#        """ Enable the pin, this allows the output to be set HIGH.
+#            Can only enable REAL pins. """
+#        if self.Pin != None: self.Enabled = True # Only ENABLE if it's a real pin.
+#        self.Refresh() # Set the current electrical state of the pin.
+#        
+#    def Disable(self):
+#        """ Disable the pin, this prevents the output being set HIGH, it is forced LOW. """
+#        self.Enabled = False
+#        self.Refresh() # Set the current electrical state of the pin.
+#        
+#    def Status(self):
+#        """ Return a string describing the current status of the pin. """
+#        temp = "Pin:" + str(self.Pin) + ", OUT:" + \
+#               " Ena:" + str(StopPin.Enabled).rjust(5) + \
+#               " Inv:" + str(StopPin.Invert).rjust(5) + \
+#               " IsOn:" + str(StopPin.IsOn()).rjust(5) + \
+#               " IsOff:" + str(StopPin.IsOff()).rjust(5) + \
+#               " IsHigh:" + str(StopPin.IsHigh()).rjust(5) + \
+#               " IsLow:" + str(StopPin.IsLow()).rjust(5)
+#        return temp
+
+# ---------------------------------------------------------------------------------------------------------------
+
+# Create a stop button.
+if Parameters.StopPin != None: StopButton = inputpin(Parameters.StopPin,"StopButton",pull=GPIO.PUD_UP) # Pin is HIGH by default, must be grounded to trigger.
+else: StopButton = None
         
-    def Off(self):
-        self.State = False
-        self.Refresh()
-        
-    def Refresh(self):
-        if self.Enabled and self.State:
-            GPIO.output(self.Pin,GPIO.HIGH)
-        else:
-            GPIO.output(self.Pin,GPIO.LOW)
-
-    def Enable(self):
-        self.Enabled = True
-        self.Refresh()
-        
-    def Disable(self):
-        self.Enabled = False
-        self.Refresh()
-
-
 # ------------------------------------------------------------------------------------------------------
 
 class microcontroller(attributemaster):
@@ -2939,23 +3166,17 @@ class microcontroller(attributemaster):
                 mctl.Log = MainLog.Log # Tell which Logging function to use for main logfile messages.
                 mctl.Initiate() # Initiate communication.
         """
+
     def __init__(self,port='/dev/serial0',resetpin=4,boardtype=None):
         """ 
             port = serial port to use for UART communication. 
             resetpin = pin used to control reset or power for the microcontroller. 
             boardtype = Identifier of specific motorcontroller board. 
                         Motorcontrol board behaviour may change depending upon the board type.
-                None = Default (as per Instructables 2023-11 launch) 
-                                     Voltmeter on adc0 is used.
+                None = Default 
                 "Ton-2023-12" = Raspberry Pi 4 HAT format with onboard 5V power source. 
-                                     Voltmeter on adc0 is not used.
-                "Matt-2023-12-06"  = Basic PCB board design published just after Instructables project published. 
-                                     Voltmeter on adc0 it not used. """
-        self.BoardType = boardtype
-        # Depending upon the BoardType we can flag certain behaviours and capabilities.
-        #if self.BoardType in ['Ton-2023-12','Matt-2023-12-06']: self.SupportsVoltmeter = False # Motorcontrol voltage is not available on adc0.
-        #else: self.SupportsVoltmeter = True # Motorcontrol voltage will be monitored on adc0.
-        self.SupportsVoltmeter = False # Motorcontrol voltage will be NOT monitored on adc0.
+                "Matt-2023-12-06"  = Basic PCB board design published just after Instructables project published. """
+        self.BoardType = boardtype # Can be one of [None,'Ton-2023-12','Matt-2023-12-06'], or add your own.
         if self.BoardType in ['Ton-2023-12']: self.SupportsMode0 = self.SupportsMode1 = self.SupportsMode2 = False # The microstepping modes are not supported.
         else: self.SupportsMode0 = self.SupportsMode1 = self.SupportsMode2 = True # The microstepping modes are supported.
         
@@ -2964,23 +3185,24 @@ class microcontroller(attributemaster):
         self.Log = None # Handle to the method/function which will be used for logging messages.
         self.QueueToMctl = Queue() # Use queue mechanism to send commands to the microcontroller communication thread. 
         self.QueueFromMctl = Queue() # Use queue mechanism to receive commands from the microcontroller communication thread. 
-        self.ResetPin = resetpin # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
+        self.ResetBCM = resetpin # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
+        self.ResetPin = outputpin(self.ResetBCM,"MctlReset") # Create GPIO pin if a pin is specified, else create dummy pin. All pins start OFF.
         self.Lines = [] # No lines received yet.
-        self.WriteChunkBytes = 32
+        self.WriteChunkBytes = 32 # Maximum number of characters to send in a batch.
         self.WriteChunkSeconds = 0.2 # Seconds between chunks written to microcontroller.
-        self.InputLine = ''
+        self.InputLine = '' # This is the line currently being received. Completed lines are added to Lines list.
         self.WriteQueue = [] # No output to send yet.
-        self.LinesReceived = 0
-        self.LinesSent = 0
-        self.BytesReceived = 0
-        self.BytesSent = 0
+        self.LinesReceived = 0 # total number of lines received from the microcontroller.
+        self.LinesSent = 0 # Total count of lines sent to the microcontroller.
+        self.BytesReceived = 0 # Byte count from microcontroller.
+        self.BytesSent = 0 # Byte count sent to the microcontroller.
         self.PrintComms = False # When TRUE communication log is copied to the terminal, otherwise it's only written to the log file.
         self.LedStatus = True # LEDS on by default.
-        self.LineOpenedTime = NowUTC()
+        self.LineOpenedTime = NowUTC() # When did the UART comms start?
         self.LastTxTime = NowUTC() # When was data last sent?
         self.LastRxTime = NowUTC() # When was data last received?
-        self.RxErrors = 0
-        self.LastLineSent = None # We get 'reflection' on the UART port if the remote device isn't ready. This needs ignoring.
+        self.RxErrors = 0 # How many receive errors have been detected.
+        self.LastLineSent = None # We get 'reflection' on the UART port if the remote device isn't ready. This helps us to detect that.
         self.CommsTimeout = Parameters.MctlCommsTimeout # Seconds. microcontroller is restarted if no data received after this period.
         self.ForcedRestarts = 0 # How many restarts have been forced by this software?
         self.RemoteRestarts = 0 # How many restarts have been registered by the remote device itself?
@@ -3010,13 +3232,11 @@ class microcontroller(attributemaster):
                          "Concurrent USB + GPIO connections  to the microcontroller are recommended only",
                          "during development or debugging with special care taken to protect the devices."]
                 textcolor.TextBox(lines,fg=textcolor.WHITE,bg=textcolor.ORANGERED1)       
-        if self.ResetPin != None:
-            GPIO.setup(self.ResetPin, GPIO.OUT)
-            if self.PoweredByUsb == False: # If no USB power, we're powering it via a GPIO signal.
-                # Never turn on second power source to the microcontroller if it's already got USB power.
-                GPIO.output(self.ResetPin, GPIO.HIGH) # Makes sure the pin is HIGH, otherwise the microcontroller resets.
+        if self.PoweredByUsb == False: # If no USB power, we're powering it via a GPIO signal.
+            # Never turn on second power source to the microcontroller if it's already got USB power.
+            self.ResetPin.On() # Turn the microcontroller ON if we're in charge of the power supply.
         self.DeviceFailure = False # Set to TRUE if device seems to be irrecoverably lost.
-        self.ErrorWindow = None
+        self.ErrorWindow = None # Link to a display window that can show error messages.
         self.WriteProhibited = False # OK to write again to the write queue.
         self.SendId = 0 # Incremental counter, the message number being sent to the microcontroller. The microcontroller will respond that this message number has been received.
         # Calling program needs to call microcontroller.Initiate() to get things going.
@@ -3037,31 +3257,52 @@ class microcontroller(attributemaster):
 
     def PowerOn(self):
         """ Overrides all safeties, turns power GPIO power pin on for microcontroller. """
-        if self.ResetPin == None:
-            self.Log("microcontroller.PowerOn(): No Reset pin defined.",terminal=True)
+        if self.ResetBCM == None:
+            self.Log("microcontroller.PowerOn(): No Reset pin defined. Cannot turn microcontroller on via GPIO.",terminal=True)
             return
-        authority = AskYesNo("No safety checks. Do you want to turn ON GPIO power for the microcontroller [y/N]?",False,fg=textcolor.ORANGERED1,bg=textcolor.BLACK)
+        authority = AskYesNo("No safety checks. Do you want to turn ON GPIO power for the microcontroller [y/N]?",False,fg=textcolor.BLACK,bg=textcolor.ORANGERED1)
         if authority:
             self.Log("microcontroller.PowerOn(): No safety checks. GPIO POWER PIN turned on for Microcontroller.",terminal=True)
-            GPIO.output(self.ResetPin, GPIO.HIGH)
+            #GPIO.output(self.ResetBCM, GPIO.HIGH)
+            self.ResetPin.On()
 
     def PowerOff(self):
         """ Overrides all safeties, turns power GPIO power pin off for microcontroller. """
-        if self.ResetPin == None:
-            self.Log("microcontroller.PowerOff(): No Reset pin defined.",terminal=True)
+        if self.ResetBCM == None:
+            self.Log("microcontroller.PowerOff(): No Reset pin defined. Cannot turn microcontroller off via GPIO.",terminal=True)
             return
-        authority = AskYesNo("No safety checks. Do you want to turn OFF GPIO power for the microcontroller [y/N]?",False,fg=textcolor.ORANGERED1,bg=textcolor.BLACK)
+        authority = AskYesNo("No safety checks. Do you want to turn OFF GPIO power for the microcontroller [y/N]?",False,fg=textcolor.BLACK,bg=textcolor.ORANGERED1)
         if authority:
             self.Log("microcontroller.PowerOff(): No safety checks. GPIO POWER PIN turned off for Microcontroller.",terminal=True)
-            GPIO.output(self.ResetPin, GPIO.LOW)
+            self.Log("microcontroller.PowerOff(): Note: If the messagehandler is still running, it will restart the microcontroller automatically.",terminal=True)
+            #GPIO.output(self.ResetBCM, GPIO.LOW)
+            self.ResetPin.Off()
 
     def PowerIsOn(self):
         """ Return TRUE if power is on, FALSE otherwise. 
-            This uses GPIO.input(self.ResetPin) even though the pin is defined as an output,
+            This uses GPIO.input(self.ResetBCM) even though the pin is defined as an output,
             it still works and returns the state of the pin. """
-        return GPIO.input(self.ResetPin)
+        return self.ResetPin.State
 
-
+    def SendManualCommand(self):
+        """ Prompt the user for a manual command to send to the microcontroller. 
+            There is no validation performed on this, if you get the syntax wrong you may crash the 
+            microcontroller. Use at your own risk. """
+        print(textcolor.yellow("Manual command to microcontroller."))
+        print("Enter your commands ('&now' will be replaced with current timestamp.)")
+        print("There is no error checking on manual commands. Be careful.")
+        command = ''
+        while True:
+            command = input(textcolor.cyan("command ['x' to quit]: ")).strip()
+            if command.lower() == 'x': # Quit.
+                print(textcolor.yellow("Exited command mode."))
+                break
+            if command != '': # There's something to send.
+                command = command.replace('&now',CleanDatetimeString(str(NowUTC()))) # Substitude any reference to the current clock.
+                self.Log("microcontroller.SendManualCommand():",command,terminal=True)
+                self.Write(command) # Sent.
+        return True
+            
     def Initiate(self):
         """ Initiate communication. """
         self.Log('microcontroller.__init__:',\
@@ -3153,7 +3394,7 @@ class microcontroller(attributemaster):
                 print(textcolor.red(msg))
                 self.DeviceFailure = True
                 MainLog.RecordTraceback(None) # Record the stack at this point.
-                exit() # Quit the program.
+                exit() # Quit the program. (*Q* Other threads don't get stopped however!)
                 return False
             else:
                 self.ResetAttempts += 1 # Try again.
@@ -3161,6 +3402,7 @@ class microcontroller(attributemaster):
         if self.PoweredByUsb: # Powered by USB, so cannot power cycle it. Send a RESET command instead.
             MainLog.Log("microcontroller.Reset(): Device is connected via USB, will not enable power via GPIO for safety.",terminal=False)
             DevWindow.Print(NowHMS() + " Microcontroller is powered by USB, performing software reset.")
+            if self.PrintComms: print(textcolor.yellow("GPIO not in use. Software reset."))
             # Send software 'reset' command instead.
             self.Write('reset')
             # self.WriteFlush() # Make sure all commands are flushed through. When initializing for the first time, the write process isn't running! This won't flush.
@@ -3168,9 +3410,12 @@ class microcontroller(attributemaster):
             # GPIO pin is driven low for a second. This either triggers the microcontroller's reset pin directly (eg Pico RP2040, Feather RP2040 etc),
             # or it can simply switch off the power to a microcontroller that lacks a reset pin (eg Tiny2040).
             DevWindow.Print(NowHMS() + " Microcontroller is powered by GPIO, performing power reset.")
-            GPIO.output(self.ResetPin, GPIO.LOW)
+            #GPIO.output(self.ResetBCM, GPIO.LOW)
+            if self.PrintComms: print(textcolor.yellow("GPIO pin",self.ResetBCM,"low."))
+            self.ResetPin.Off() # If it's a real pin, turn it off, else do nothing.
             time.sleep(1) # Pause 1 second.
-            GPIO.output(self.ResetPin, GPIO.HIGH)
+            if self.PrintComms: print(textcolor.yellow("GPIO pin",self.ResetBCM,"high."))
+            self.ResetPin.On() # If it's a real pin and enabled, turn it on, else do nothing.
             time.sleep(1) #Pause 1 second.
         self.uart.reset_output_buffer()
         self.uart.reset_input_buffer()
@@ -3256,7 +3501,7 @@ class microcontroller(attributemaster):
             else: # Line is bad. Don't clean it.
                 cleanresult = result
             self.Log('RPi received: ' + cleanresult,terminal=False)
-            if self.PrintComms: print(textcolor.cyan('RPi received: ' + cleanresult))
+            if self.PrintComms: print(textcolor.magenta('RPi received: ' + cleanresult))
 
             MctlRxWindow.Print(cleanresult)
             if self.ValidateChecksum(result): # Line is good.
@@ -3396,7 +3641,7 @@ class microcontroller(attributemaster):
             self.WritePoll() # Send next chunk of data from output buffer if allowed.
             self.ReadPoll() # Read anything waiting in the input buffer.
             if threading.main_thread().is_alive() == False: # Check if parent is still alive. Quit if it is nolonger there.
-                self.Log("microcontroller.CommsLoop(): Parent thread is nolonger alive. Terminating",level='error')
+                self.Log("microcontroller.CommsLoop(): Parent thread is nolonger alive. Stopping.",level='error')
                 break # Parent thread died, so terminate this thread too.
             if commandqueue.empty() == False: # This queue allows the main thread to send commands to the microcontroller comms controller itself.
                 ReceivedMessage = commandqueue.get()
@@ -3771,13 +4016,13 @@ class motorcontrol(attributemaster):
             prevangletime = NowUTC()
             # 3rd task is to wait for the motor to complete.
             if self.MonitorMove: # Display movement progress.
-                print(NowHMS(),self.MotorName,Deg3dp(self.CurrentAngle,DegreeSymbol),textcolor.clearlineforward())
+                print(NowHMS(),self.MotorName,textcolor.white(Deg3dp(self.CurrentAngle,DegreeSymbol)),textcolor.clearlineforward())
             while True:
                 if prevangle != self.CurrentAngle: # The motor has moved.
                     prevangle = self.CurrentAngle
                     prevangletime = NowUTC()
                     if self.MonitorMove: # Display movement progress.
-                        print(textcolor.cursorup(),NowHMS(),self.MotorName,Deg3dp(self.CurrentAngle,DegreeSymbol),textcolor.clearlineforward())
+                        print(textcolor.cursorup(),NowHMS(),self.MotorName,textcolor.white(Deg3dp(self.CurrentAngle,DegreeSymbol)),textcolor.clearlineforward())
                 if self.CompareAngles(self.CurrentAngle,newangle,ptolerance=2): # Sometimes there's a mathematical disagreement between microcontroller and this software. So allow a small tolerance when comparing angles.
                     # Move complete.
                     self.Log('motorcontrol.GoToAngle(', self.MotorName, '): CompareAngles considers position is within tolerance, move considered complete.',terminal=False)
@@ -4828,7 +5073,6 @@ class imagetracker(attributemaster):
         ypos = int(height - 10)
         NewImageBuffer.AddText(ProgramTitle + " " + VERSION,xpos,ypos,color=BGRWhite,bgcolor=BGRBlack,hjust='r')
         # Save the file.
-        # Save image.
         filename = FolderList['tracking'] + "TrackingAnalysis_" + UtcTimeStamp() + ".jpg"
         CameraWindow.Print(NowHMS() + " " + filename.split('/')[-1]) # Note the filename that's been generated.
         DriftWindow.Print(NowHMS() + " Drift analysis image done.") # Note analysis done.
@@ -5185,7 +5429,7 @@ def hipex_load_dataframe(fobj):
     # Convert to b,g,r. Use Pandas efficiency to update all matching entries.
     # Create a catalog that can be used later to find these precalculated values.
     BVList = pandas.unique(df['B-V']) # How many unique values of B-V are there?
-    MainLog.Log("hipex_load_dataframe: Calculating",len(df),"star colors from",len(BVList),"unique B-V values...",terminal=True)
+    MainLog.Log("hipex_load_dataframe: Estimating",len(df),"star colors from",len(BVList),"unique B-V values...",terminal=True)
     BVColors = {}
     for i,e in enumerate(BVList): # Convert each unique value only once, then assign to all matching entries in the dataframe.
         temp = PandasFloat(e)
@@ -5254,7 +5498,7 @@ def hipex_load_dataframe(fobj):
         # Show progress...
         if updatetimer.Due():
             prgt.UpdateCount(i) # How far have we got so far? prgt will then produce ETA and % complete for us.
-            print(textcolor.cursorup() + NowHMS(),round(prgt.GetPercent(),1),"%. Record",i,"of",total,"( HIP" + str(hip),"). ETA",str(prgt.GetETA()).split('.')[0],"UTC",textcolor.clearlineforward())
+            print(textcolor.cursorup() + NowHMS(),textcolor.white(str(round(prgt.GetPercent(),1))),"%. Record",i,"of",total,"( HIP" + str(hip),"). ETA",str(prgt.GetETA()).split('.')[0],"UTC",textcolor.clearlineforward())
     return df
 
 # If Hipparcos data already cached, use that, otherwise load and prepare the data cache now.
@@ -5267,7 +5511,7 @@ else: # There is no Hipparcos cache on disc yet, it must be constructed.
     MainLog.Log("Hipparcos data cache does not exist yet. Generating it now...",terminal=True)
     lines = ["The full Hipparcos star catalog contains over 100000 stars.",
              "Pi-lomar is about to optimise this list and add some extra detail to speed things up later.",
-             "This will take up to an hour to prepare , but only needs doing once. Pi-lomar will save and",
+             "This may take up to an hour to prepare , but only needs doing once. Pi-lomar will save and",
              "reuse the calculated list in future."
     ]
     textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
@@ -5289,8 +5533,10 @@ else: # There is no Hipparcos cache on disc yet, it must be constructed.
         HipparcosDf.to_pickle(HipparcosCacheFile)
     # GitHub issue #39 workaround.
     MainLog.Log("Hipparcos catalog successfully built.",terminal=True)
-    print(textcolor.yellow("Please restart the program."))
-    exit() # Quit the program. This is a workaround to a problem where the Python 'input' statements fail after the hipex_load_dataframe() function has executed for a long time.
+    if ReloadData: pass # We're reloading a few datafiles, don't quit yet.
+    else: 
+        print(textcolor.yellow("Please restart the program."))
+        exit() # Quit the program. This is a workaround to a problem where the Python 'input' statements fail after the hipex_load_dataframe() function has executed for a long time.
 
 # These files come from JPL, they list the rules for positions of planets for hundreds of years.
 MainLog.Log("Loading solar system ephemeris from JPL...",terminal=False)
@@ -5364,6 +5610,7 @@ def GenerateNGCDataframe(NGCDict):
         processing of large lists, and moves closer to having common
         routines for handling all the different object lists. """
     MainLog.Log('GenerateNGCDataframe...',terminal=False)
+    # The types of NGC objects as defined in the Saguaro database.
     NGCTypes = {"aster":"Asterism",
                 "brtnb":"Bright nebula",
                 "cl+nb":"Cluster with nebulosity",
@@ -5476,10 +5723,17 @@ MainLog.Log('Loading meteor shower list from', MeteorDictUrl, '...',terminal=Tru
 Meteor_dictionary = DictionaryLoader(MeteorDictUrl)
 
 # Load comet data.
+# Comet data comes from the Minor Planet Center. 
+# Format is :-
+#     CJ95O010  1997 03 30.7270  0.890333  0.994981  130.2195  282.3128   89.4615  20240223  -2.0  4.0  C/1995 O1 (Hale-Bopp)                                    MPEC 2022-S20
+# 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012
+#           1         2         3         4         5         6         7         8         9        10        11        12        13        14        15        16        17        18
+#                                                                                  YYYYMMDD stamp of the data.
 MainLog.Log('Loading comet list from',mpc.COMET_URL,'...',terminal=True)
 with load.open(mpc.COMET_URL,reload=ReloadData) as f: # Don't keep reloading it if it is already on disc.
     comets = mpc.load_comets_dataframe(f) # Comet data loaded as a Pandas dataframe.
 MainLog.Log(len(comets), 'comets loaded.',terminal=False)
+MainLog.Log("Comet dataframe contents:",comets.columns.tolist(),terminal=False)
 # Keep only the most recent comet trajectory and index by designation for fast lookup.
 comets = (comets.sort_values('reference')
           .groupby('designation', as_index=False).last()
@@ -5489,6 +5743,21 @@ comets = (comets.sort_values('reference')
 #row = comets.loc['C/1995 O1 (Hale-Bopp)']
 
 CometList = comets['designation'].tolist() # Convert comet designations column into a list for searching later on.
+
+def CometDataAge():
+    """ Report the age of the comet trajectory data from the Minor Planet Center. """
+    filename = ProjectRoot + '/data/CometEls.txt' 
+    if os.path.exists(filename): # The cache data exists, check its age.
+        with open(filename,'r') as f:
+            line = f.readline() # Take 1st line as an example.
+            filedt = MctlStringToDatetime(line[81:89] + "000000") # YYYYMMDD portion of the record.
+            filedays = round((NowUTC() - filedt).total_seconds() / (24 * 60 * 60),0)
+            MainLog.Log("Comet data cache is from",filedt,filedays,"days old.",terminal=False)
+            if filedays > 60: # After 2 months, consider refreshing the file.
+                MainLog.Log("Comet data cache is from",filedays,"days old. Consider refreshing it to maintain accuracy.",terminal=True)
+            
+
+CometDataAge() # If the data cache exists, how old is the content?
 
 # ----------------------------------------------------------------------------------------------------------
 
@@ -5665,8 +5934,13 @@ MainLog.Log('Meteor shower list:', Meteor_namelist,terminal=False)
 
 # And ISS position from CelesTrak data (TLE lines).
 celestrakurl = "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle"
-MainLog.Log("Loading CelesTrak station data from",celestrakurl,terminal=False)
+MainLog.Log("Loading CelesTrak station data from",celestrakurl,terminal=True)
 CelesTrak = celestrak(celestrakurl,logger=MainLog,projectroot=ProjectRoot)
+
+
+if ReloadData: # We reloaded the data, quit here because STDIN can sometimes close during all the processing.
+    print(textcolor.yellow("Reload complete: Please restart the program."))
+    exit() # Quit the program. This is a workaround to a problem where the Python 'input' statements fail after the hipex_load_dataframe() function has executed for a long time.
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -5707,7 +5981,7 @@ class target(attributemaster):
         self.HomeSiteTopos = None # Skyfield object for home site.
         self.ts = load.timescale() # Time handling with astro corrections. ! Don't use this to read current time, always use SkyfieldNow() function!
         self.SetHome(Parameters.HomeLat,Parameters.HomeLon) # Use global variables at the moment. Requires that global list 'planets' is available too.
-        self.CometPandasRow = cometpandasrow # Comets don't have a skyfield object in 'Handle' we calculate the position differently, so store their pandas row here. 
+        self.CometPandasRow = cometpandasrow # Comets don't have a skyfield object in 'Handle', we calculate the position differently, so store their pandas row here. 
         self.CacheRADeg = None # Cached RA value for target. Set each time RaDecDegrees is called.
         self.CacheDec = None # Cached Dec value for target. Set each time RaDecDegrees is called.
         self.CacheAlt = None # Cached Altitude value for target. Set each time AzAltDegrees is called.
@@ -6459,6 +6733,7 @@ def ChooseSatellite(prechosen=None):
         if Result not in AvailableTargets:
             if prechosen != None:
                 MainLog.Log("ChooseSatellite: Prechosen '" + str(prechosen) + "' not recognised. Ignored.",terminal=False)
+                MainLog.Log("ChooseSatellite: Recognised list:",str(AvailableTargets),terminal=False)
                 return None # Scrap the attempt.
             print (textcolor.red("'" + Result + "' is not a recognised target name. Try again."))
             Result = ""
@@ -6916,8 +7191,8 @@ CameraInUse.SetObservationParameters() # Set target specific parameters for the 
 # Create some other major objects to be included in the SkyChart window.
 SunTarget = ChooseSolar(prechosen='sun') 
 MoonTarget = ChooseSolar(prechosen='moon')
-ISSTarget = ChooseSatellite(prechosen='ISS (ZARYA)')
-CSSTarget = ChooseSatellite(prechosen='CSS (TIANHE)')
+#ISSTarget = ChooseSatellite(prechosen='ISS (ZARYA)')
+#CSSTarget = ChooseSatellite(prechosen='CSS (TIANHE)')
 FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and ensures they exist on disc.
 
 # ----------------------------------------------------------
@@ -7995,7 +8270,7 @@ def CameraHandler(outboundqueue,inboundqueue):
     CamLog.Log("camerahandler: Begin main loop.",terminal=False)
     while RunThread: # This will run through all queued commands in sequence, then start polling periodically for new ones.
         if threading.main_thread().is_alive() == False: # Check if parent thread is still alive. Quit if it is nolonger there.
-            CamLog.Log('CameraHandler: Parent thread is nolonger alive. Terminating',level='error')
+            CamLog.Log('CameraHandler: Parent thread is nolonger alive. Stopping.',level='error')
             RunThread = False
             time.sleep(5)
             break
@@ -8192,7 +8467,7 @@ def CameraHandler(outboundqueue,inboundqueue):
                         f.write(str(obs_time) + '\t' + str(tempra) + '\t' + str(tempdec) + '\t')
                         f.write(str(tempaz) + '\t' + str(tempalt) + '\t' + str(streaksdetected) + '\n')
                 else:
-                    CamLog.Log("CameraHandler: Something went wrong with image capture. Aborting.",level='error')
+                    CamLog.Log("CameraHandler: Image capture did not succeed. Stopping.",level='error')
                     RunThread = False # Something went wrong, quit!
 
             # Generate a labelled copy of the image periodically. For monitoring.
@@ -8266,7 +8541,7 @@ def ShutdownCamera():
     global CameraControlQueue
     success = True # Assume success unless we fail to shut down the handler correctly. 
     print ('\n' + textcolor.yellow('Stopping CameraHandler...')) # force newline before printing text.
-    if CameraInUse.CurrentTask != None:
+    if not CameraInUse.CurrentTask in [None,'pause']:
         print ('The camera is currently processing the "' + str(CameraInUse.CurrentTask) + '" task.')
     print ('Waiting for CameraHandler to confirm it has completed (telescope may continue to move until this is finished) ...')
     CameraControlQueue.put({'Stop' : True}) # Post a shutdown message to the CameraHandler
@@ -8880,9 +9155,9 @@ def ObservationRun():
     colordisplay.GlobalForceRedraw() # Force all window buffers to fully redraw initially.
     while RunObservation: # Main loop of the observation.
 
-        MainLog.Log("ObservationRun: Loop starts",terminal=False)
+        #MainLog.Log("ObservationRun: Loop starts",terminal=False)
         # Check for keyboard commands...
-        MainLog.Log("ObservationRun: Check for keyboard input...",terminal=False)
+        #MainLog.Log("ObservationRun: Check for keyboard input...",terminal=False)
         # *Q* The following keyboard scan uses the curses library. It can cause the terminal display to blink sometimes. Not cured yet.
         if KeyboardTimer.Due(): # It's time to scan the keyboard.
             keypress = Keyboard.Check().lower() # Non-blocking scan for keyboard input. 
@@ -8933,34 +9208,34 @@ def ObservationRun():
                 ClearScreen() # Clear screen afterwards.
                 TerminalCols = temp[0] # Note the new display dimensions.
                 TerminalRows = temp[1]
-        MainLog.Log("ObservationRun: Check CameraThread is alive...",terminal=False)
+        #MainLog.Log("ObservationRun: Check CameraThread is alive...",terminal=False)
         if CameraThread.is_alive() == False: # If the CameraThread has died, quit.
             MainLog.Log("ObservationRun: CameraThread (Camera handler) is not running!",level='error')
             CameraWindow.Print(NowHMS() + " CameraThread is not running.")
             observationresult = False # Don't continue.
             RunObservation = False # Observation cannot continue.
-        MainLog.Log("ObservationRun: Check MessageThread (message handler) is alive...",terminal=False)
+        #MainLog.Log("ObservationRun: Check MessageThread (message handler) is alive...",terminal=False)
         if MessageThread.is_alive() == False: # If message handler thread has died, quit.
             MainLog.Log("ObservationRun: (loop) MessageThread is not running!",level='error')
             observationresult = False # Don't continue.
             RunObservation = False # Observation cannot continue.
-        MainLog.Log("ObservationRun: Check MctlThread (UART comms) is alive...",terminal=False)
+        #MainLog.Log("ObservationRun: Check MctlThread (UART comms) is alive...",terminal=False)
         if MctlThread.is_alive() == False: # If the motor microcontroller communication thread has died, quit.
             MainLog.Log("ObservationRun: (loop) MctlThread is not running!",level='error')
             observationresult = False # Don't continue.
             RunObservation = False # Observation cannot continue.
-        MainLog.Log("ObservationRun: Check CameraStatusQueue...",terminal=False)
+        #MainLog.Log("ObservationRun: Check CameraStatusQueue...",terminal=False)
         if CameraStatusQueue.empty() == False: # The CameraThread has sent messages that need to be processed.
             StatusMessage = CameraStatusQueue.get() # Retrieve the first message in the queue.
             Session.CameraRxCount += 1 # We received another message from the camera.
             # Extract any useful information from the received messages.
             if 'PhotoCount' in StatusMessage: PhotoCount = StatusMessage['PhotoCount'] # Camera has updated the number of photographs taken during this run.
-        MainLog.Log("ObservationRun: Calculate current target position...",terminal=False)
+        #MainLog.Log("ObservationRun: Calculate current target position...",terminal=False)
         # Calculate the current position of the target. This also updates the cached values, which remain valid for the duration of this loop.
         dtnow = NowUTC() # In datetime format. 
         ra, dec = Session.Target.RaDecDegrees() # Target's position. Right Ascension and Declination.
         az, alt = Session.Target.AzAltDegrees(updatespeed=True) # Target's position. Altitude and Azimuth from observer's location. Update angular velocity too.
-        MainLog.Log("ObservationRun: Update ObservationStatusWindow...",terminal=False)
+        #MainLog.Log("ObservationRun: Update ObservationStatusWindow...",terminal=False)
         ObservationDuration = (dtnow - obsstart).total_seconds() # How long has this observation run been running for?
         ObservationStatusWindow.FieldValue('TARGET',Session.Target.Name,fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG) # Update the target name. 
         ObservationStatusWindow.FieldValue('FOLDER',FolderList.get('session'),fg=OSW_TEXT_GOOD,bg=OSW_TEXT_BG) # Which folder is the observation data saved in. 
@@ -9044,15 +9319,15 @@ def ObservationRun():
             RunObservation = False
 
         if Mctl.DeviceFailure: # Communication with microcontroller has failed completely.
-            MainLog.Log("ObservationRun: Mctl.DeviceFailure reported. Terminating observation.",level='error')
+            MainLog.Log("ObservationRun: Mctl.DeviceFailure reported. Stopping observation.",level='error')
             observationresult = False # Don't continue.
             RunObservation = False
 
         # Check that the target is within observation range of the motors and above the horizon.
-        MainLog.Log("ObservationRun: Check target is within observation range...",terminal=False)
+        #MainLog.Log("ObservationRun: Check target is within observation range...",terminal=False)
         if alt < 0.0 and PrevAlt != None: # Target is below horizon!
             if alt < PrevAlt or alt < 5.0: # The target has set and won't rise for a while!
-                MainLog.Log("ObservationRun: Object below horizon. Terminating observation.",level='warning')
+                MainLog.Log("ObservationRun: Object below horizon. Stopping observation.",level='warning')
                 observationresult = False # Don't continue.
                 RunObservation = False
         PrevAlt = alt
@@ -9068,7 +9343,7 @@ def ObservationRun():
                     observationresult = False # Don't continue.
                     RunObservation = False
 
-        MainLog.Log("ObservationRun: Update image statistics...",terminal=False)
+        #MainLog.Log("ObservationRun: Update image statistics...",terminal=False)
         ImageStatusWindow.FieldValue('IMAGES',str(ImageCount()),fg=OSW_TEXT_GOOD) 
         # Calculate total accumulated image time.
         AccumulatedTime = PhotoCount * CameraInUse.ExposureSeconds
@@ -9086,11 +9361,12 @@ def ObservationRun():
         else:
             ImageStatusWindow.FieldValue('RUN',str(PhotoCount) + " of " + str(Parameters.BatchSize) + '(dis.)',fg=textcolor.RED1) # Red
             ImageStatusWindow.FieldValue('ETA','n/a',fg=OSW_TEXT_GOOD) 
-        if GPIO.input(StopBCM) == 0: # Emergency stop pin on RPi has been grounded. 
+        if StopButton != None and StopButton.IsLow(): # Emergency stop pin on RPi has been grounded. 
             print(textcolor.red('STOP BUTTON: Break observation'))
+            ErrorWindow.Print(NowHMS() + " STOP BUTTON pressed.")
             observationresult = False # Don't continue
             RunObservation = False # Quit loop.
-        MainLog.Log("ObservationRun: Update ImageStatusWindow...",terminal=False)
+        # MainLog.Log("ObservationRun: Update ImageStatusWindow...",terminal=False)
         UpdateCameraCaptureStatus()
         # Explain what is in the 'last captured image' buffer.
         if CameraInUse.Image.ImageExists(): # openCV image buffer is loaded.
@@ -9118,7 +9394,7 @@ def ObservationRun():
         else: # No current drift image available.
             ImageStatusWindow.FieldValue("DLI","empty",fg=OSW_TEXT_POOR)
         ReadyToObserve = True # Work out if all the motors are on target!
-        MainLog.Log('ObservationRun. Loop init: ReadyToObserve = True',terminal=False)
+        #MainLog.Log('ObservationRun. Loop init: ReadyToObserve = True',terminal=False)
         for i in MotorControls: # Report tuning status of each motor in turn.
             if Session.Target.IsFixedPoint(): # Fixed point, doesn't need the motor to report 'OnTarget' - we decide in this program instead.
                 pass # Take no action here. Motor was already placed 'on target' when ObservationRun started. It doesn't move after that.
@@ -9143,7 +9419,7 @@ def ObservationRun():
                 if ClockOffset != None: # Warn that tracking clock is not running in realtime.
                     print(textcolor.red(NowHMS() + " Tracking clock is offset to",str(NowUTC()).split('.')[0]))
         else: # Not in debug mode, update the color display.
-            MainLog.Log("ObservationRun: Refresh display windows...",terminal=False)
+            #MainLog.Log("ObservationRun: Refresh display windows...",terminal=False)
             # Refresh status and debug windows.
             # These will draw if their allocated terminal space is available.
             ObservationStatusWindow.Display(TerminalRows,TerminalCols) # Refresh the actual display.
@@ -9179,7 +9455,7 @@ def ObservationRun():
         LoopTimeList = LoopTimeList[-10:] # Limit list to last 10 entries.
 
         # End of main ObservationRun loop.
-        MainLog.Log("ObservationRun: End of main loop...",terminal=False)
+        #MainLog.Log("ObservationRun: End of main loop...",terminal=False)
         
     # Observation is over at this point.
     print(textcolor.clearforward()) # Clear the screen from the current location forward, makes the following messages easier to read.
@@ -9215,13 +9491,16 @@ def DisableCleanup(): # For menu
         print ("The Raspberry Pi HQ sensor performs some on-chip image cleanup.")
         print ("On-chip cleanup may degrade the raw image data.")
         print ("It is recommended to disable this feature for astrophotography.")
-        print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
-        if AskYesNo("Disable on-sensor cleanup? [y/N]",False):
-            SensorInUse.DisableCleanup()
-            Parameters.DisableCleanup = True
-            FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
-            DocumentSession()
-            DriftTracker.Reset()
+        if CameraDriver == 'raspistill':
+            print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
+            if AskYesNo("Disable on-sensor cleanup? [y/N]",False):
+                SensorInUse.DisableCleanup()
+                FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
+                DocumentSession()
+                DriftTracker.Reset()
+        else:
+            print ("- With libcamera installations you should edit the --denoise parameter in the command templates.")
+            print ("  The '--denoise off' option will disable cleanup.")
 
 # ------------------------------------------------------------------------------------------------
 
@@ -9231,13 +9510,16 @@ def EnableCleanup(): # For menu
         print ("The Raspberry Pi High Quality camera can perform some on-chip image cleanup.")
         print ("It is often disabled for astrophotography because it degrades the raw image data slightly.")
         print ("It is recommended to enable this for regular photography.")
-        print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
-        if AskYesNo("Enable on-sensor cleanup? [y/N]",False):
-            Parameters.DisableCleanup = False
-            SensorInUse.EnableCleanup()
-            FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
-            DocumentSession()
-            DriftTracker.Reset()
+        if CameraDriver == 'raspistill':
+            if AskYesNo("Enable on-sensor cleanup? [y/N]",False):
+                print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
+                SensorInUse.EnableCleanup()
+                FolderList = CreateFolderList(Session.Target.Name,CameraInUse.ExposureSeconds) # This creates a list of folders to use, and initializes them.
+                DocumentSession()
+                DriftTracker.Reset()
+        else:
+            print ("- With libcamera installations you should edit the --denoise parameter in the command templates.")
+            print ("  Removing the '--denoise off' option will enable cleanup.")
     
 # ------------------------------------------------------------------------------------------------------
 
@@ -9556,7 +9838,15 @@ def MenuAutoPhoto(): # For menu
 # ------------------------------------------------------------------------------------------------------
 
 def ProcessImageFiles(): # For menu
-    CameraInUse.ProcessImageFiles()
+    print(textcolor.yellow("Process image files:"))
+    print("If you used FastImageCapture the image files have not been fully processed.")
+    print("For example now RAW (.dng) extraction may have been done yet.")
+    print("This option will run through all the image files captured so far")
+    print("and make sure that each image is fully processed.")
+    if AskYesNo("Do you want to continue? [y/N]",False):
+        CameraInUse.ProcessImageFiles()
+    else:
+        print("No further processing done.")
         
 # ------------------------------------------------------------------------------------------------------
 
@@ -9647,13 +9937,19 @@ def ZipTrajectoryLog():
 
 # ------------------------------------------------------------------------------------------------------
 
-def MonitorComms():
-    """ For a period mirror microcontroller communication to the terminal. """
+def MonitorCommsHelp():
+    """ Show the functions available in the MonitorComms utility. """
     print(textcolor.yellow("MonitorComms"))
     print("This will show communication traffic.")
     print("Press 'x' to return to the menu.")
     print("Press 'r' to reset microcontroller.")
     print("Press 'f' to flash LED Yellow.")
+    print("Press 'c' to send manual commands.")
+    print("Press '?' for this list.")
+
+def MonitorComms():
+    """ For a period mirror microcontroller communication to the terminal. """
+    MonitorCommsHelp() # Show initial help.
     if Mctl.PowerIsOn() or Mctl.PoweredByUsb: # Warn if the microcontroller is not powered. 
         print(textcolor.green("The microcontroller power is ON. Communication should be running."))
     else:
@@ -9668,6 +9964,10 @@ def MonitorComms():
         elif keypress == 'f': # Flash RGB LED YELLOW for 1 second.
             print(textcolor.yellow("Sending YELLOW flash to microcontroller LED."))
             Mctl.Write("set rgb " + CleanDatetimeString(str(NowUTC())) + " y y n 1")
+        elif keypress == 'c': # Send manual commands to the microcontroller.
+            Mctl.SendManualCommand()
+        elif keypress == '?': # Reprint the help list of commands.
+            MonitorCommsHelp()
         time.sleep(0.5)
     Mctl.EndMonitor() # Turn off replication to the terminal.
 
@@ -9807,13 +10107,13 @@ def MicrocontrollerStatus():
     print(textcolor.yellow("Microcontroller status"))
     
     print("Board type:",Parameters.BoardType)
-    print("Supports Voltmeter:",Mctl.SupportsVoltmeter) # Motorcontrol voltage will be NOT monitored on adc0.
+    #print("Supports Voltmeter:",Mctl.SupportsVoltmeter) # Motorcontrol voltage will be NOT monitored on adc0.
     if Session.ValidControllerVersion():
         print("Microcontroller program version:",textcolor.green(Session.ControllerVersion),"(good)") # We like this version.
     else:
         print("Microcontroller program version:",textcolor.red(Session.ControllerVersion),"(check)") # We don't trust this version.
     print("Acceptable microcontroller versions:",ACCEPTABLECONTROLLERVERSIONS) # What microcontroller versions are acceptable?
-    print("Reset PIN:",Mctl.ResetPin) # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
+    print("Reset PIN:",Mctl.ResetBCM) # Grounding this pin will RESET the remote device. (or turn it off if microcontroller power is controlled by it).
     print("Received line queue:",len(Mctl.Lines)) # No lines received yet.
     print("Write chunk size:",Mctl.WriteChunkBytes,"bytes")
     print("Write chunk gap:",Mctl.WriteChunkSeconds,"s") # Seconds between chunks written to microcontroller.
@@ -9890,7 +10190,10 @@ def AboutCamera():
     print("  Sensor type:",SensorInUse.Type)
     print("  Sensor ID:",SensorInUse.ID)
     print("  Sensor mode:",SensorInUse.Mode)
-    print("  On chip cleanup:",SensorInUse.OnChipCleanup)
+    if CameraDriver == 'raspistill': # DisableCleanup / OnChipCleanup is handled differently between raspistill and libcamera.
+        print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(DisableCleanup parameter)"))
+    else:
+        print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(Libcamera command template parameter)"))
     print("  Infra red filter:",Parameters.IRFilter) # Is Infra Red filter fitted?
 
     print(textcolor.white(" Lens"))
@@ -9976,6 +10279,18 @@ def About():
     
 # ------------------------------------------------------------------------------------------------------
 
+# ------------------------------------------------------------------------------------------------------
+
+def GpioStatus():
+    """ Display the status of any defined GPIO pins. """
+    print(textcolor.yellow("GPIO status"))
+    for pin in outputpin.OutputPins:
+        print(pin.Status(),pin.Name)
+    for pin in inputpin.InputPins:
+        print(pin.Status(),pin.Name)
+    
+# ------------------------------------------------------------------------------------------------------
+
 # Create menu structure.
 
 MotorMenuOptions = {
@@ -10000,6 +10315,7 @@ CameraMenuOptions = {
     'EnableCamera':              {'label':'Enable camera',              'call':EnableCamera},
     'DisableCamera':             {'label':'Disable camera',             'call':DisableCamera}
 }
+
 CameraMenu = proceduremenu(CameraMenuOptions,'Camera tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
 MctlMenuOptions = {
@@ -10042,6 +10358,7 @@ DevMenuOptions = {
     'TestLatestFilter':       {'label':'Test Latest Tracking filter','call':TestLatestFilter},
     'RecheckDisc':            {'label':'Check / remount storage',    'call':RecheckDisc},
     'ZipTrajectories':        {'label':'Zip trajectory log',         'call':ZipTrajectoryLog},
+    'GpioStatus':             {'label':'GPIO status',                'call':GpioStatus},
     'ShowParameters':         {'label':'Show parameters',            'call':ShowParameters},
     'EditParameters':         {'label':'Edit parameters',            'call':EditParameters},
     'ReloadParameters':       {'label':'Reload parameters',          'call':ReloadParameters}
