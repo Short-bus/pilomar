@@ -10,15 +10,35 @@
 #   configure motor 20210409090949 azimuth 180.0
 #   sendstatus 20210409090949 False
 
-# If MODE0/1/2 pins are declared as None, Microstepping is disabled.
+# NOTE: Under CircuitPython 8 & Raspian Bookworm: Thonny seems to struggle sometimes.
+# You can get memory and other errors thrown at you when you try to load a new version of this program
+# onto the microcontroller. 
+# - It is more common for the microcontroller to switch to 'read-only' mode in that configuration.
+#   Search online for 'reset file system in circuitpython'
+# 
+#      From REPL in Thonny
+#      >>> import storage
+#      >>> storage.erase_filesystem()
+#
+#      You can then try downloading code.py once more.
+
+# If you want to run the microcontroller with the USB cable permanently attached 
+# there is a risk that the microcontroller will auto-reload randomly whenever the 
+# RPi O/S accesses the CIRCUITPY drive. If this is the case you can disable 
+# autoreloading by uncommenting the 2 lines below.
+#    (If these two lines are active you will have to manually restart the 
+#     microcontroller each time you update the source code. 
+#     Pressing the RESET button is the most effective method.)
+#import supervisor
+#supervisor.runtime.autoreload = False
 
 # Version numbering scheme:
 #           aa.bb.cc
 #           aa = Major version, large changes to functionality. Likely to require major version change on RPi side too.
-#           bb = Feature changes, but same overall program. Likely to require functionality change on RPi side too.
+#           bb = Feature changes, but same overall program. May require functionality change on RPi side too.
 #           cc = Bugfix, no feature changes. Will not require changes on RPi side.
-VERSION = '0.3.2' # Software version reported to the RPi.
-ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2'] # Which RPi versions are acceptable? (Ignore patch level)
+VERSION = '0.4.0' # Software version reported to the RPi.
+ACCEPTABLERPIVERSIONS = ['0.0','0.1','0.2','0.3'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
 print ('This is code.py for CircuitPython.')
@@ -30,28 +50,25 @@ CircuitPython = False # Indicates CircuitPython rather than MicroPython.
 # Adafruit CircuitPython 7.2.0 on 2022-02-24 Pimoroni Tiny 2040 (8MB) with rp2040 Board ID:pimoroni_tiny2040|4e4b
 Bootline = '' # Make sure the entire boot_out.txt content is available as a single item.
 CircuitPythonVersion = ''
-with open('boot_out.txt','r') as f:
-    while True:
+with open('boot_out.txt','r') as f: # Read the configuration summary.
+    while True: # Loop through all the lines in turn.
         line = f.readline()
-        if line == '': break
-        lines = line.split(';')
-        for item in lines:
+        if line == '': break # End of file.
+        lines = line.split(';') # Split the line.
+        for item in lines: 
             cleanitem = item.strip() # Remove unwanted characters.
             Bootline += cleanitem + ' '
-            print(cleanitem)
-            for elements in item.split(' '):
+            # print(cleanitem)
+            for elements in item.split(' '): # Split into individual elements.
                 if elements.strip().lower() == 'circuitpython': CircuitPython = True # This is a CircuitPython build.
                 if len(elements.split('.')) == 3: # 'a.b.c' format is version number.
                     CircuitPythonVersion = elements # Allows code to adapt to different CircuitPython versions.
-print("CircuitPython installed:",CircuitPython)
-print("CircuitPython version:",CircuitPythonVersion)
-print("CircuitPython environment:",Bootline)
+print("CircuitPython installed:",CircuitPython, "version:",CircuitPythonVersion,"environment:",Bootline)
 
 import digitalio
 import microcontroller
 import board
-import analogio
-import busio
+from busio import UART as busio_UART # Only need the UART features.
 import time
 import gc # Garbage Collector
 gcmf = gc.mem_free()
@@ -72,9 +89,15 @@ def neatprint(*args):
         pass
 
 class GPIOpin():
-    def __init__(self,pin):
+
+    PinList = [] # Maintain a list of all defined pins.
+    
+    def __init__(self,pin,name=None):
+        print("GPIOpin: Initializing pin",pin,name)
         self.Pin = digitalio.DigitalInOut(pin)
         self.PinNumber = pin
+        self.Name = name
+        GPIOpin.PinList.append(self) # Add this pin to the list of defined pins. 
 
     def SetDirection(self,direction):
         self.Pin.direction = direction
@@ -88,7 +111,7 @@ class GPIOpin():
 
     def SetPull(self,pull):
         if self.Pin.direction == digitalio.Direction.INPUT: self.Pin.pull = pull
-
+        
 class led():
     def __init__(self,pin,state=False):
         """ Tiny2040 LED on/off state is inverted!
@@ -102,35 +125,42 @@ class led():
         self.Enabled = True # Set to FALSE to turn off the LED completely.
 
     def Enable(self):
+        """ Enable the LED and turn it on if required. """
         self.Enabled = True
         if self.State(): self.On()
 
     def Disable(self):
+        """ Disable the LED and make sure it is turned off. """
         self.Enabled = False
         self.Off()
 
     def On(self):
-        """ Tiny2040 uses opposite pin state to control LED. """
+        """ Turn the LED ON.
+            NOTE: Tiny2040 uses opposite pin state to control LED. """
         if self.Enabled: self.Led.value = False
         else: self.Led.value = True
 
     def Off(self):
-        """ Tiny2040 uses opposite pin state to control LED. """
+        """ Turn the LED OFF.
+            NOTE: Tiny2040 uses opposite pin state to control LED. """
         self.Led.value = True
 
     def Toggle(self):
+        """ Switch from ON to OFF, or OFF to ON. """
         if self.Led.value: self.Off()
         else: self.On()
 
     def State(self):
+        """ Return the current state of the LED. """
         return self.Led.value
 
 class statusled():
-    """ Pimoroni Tiny2040 version of RGB LED handling. """
+    """ Pimoroni Tiny2040 version of RGB LED handling.
+        The RGB LED is a collection of three led() objects. """
     def __init__(self):
-        self.LedR = led(board.LED_R)
-        self.LedG = led(board.LED_G)
-        self.LedB = led(board.LED_B)
+        self.LedR = led(board.LED_R) # Create LED for RED channel.
+        self.LedG = led(board.LED_G) # Create LED for GREEN channel.
+        self.LedB = led(board.LED_B) # Create LED for BLUE channel.
         self.TaskList = {'idle': (False,False,False), # Off
                          'tx': (False,False,True), # Blue - Flashes when writing output to UART
                          'rx': (False,False,True), # Blue - Flashes when clearing input from UART
@@ -145,9 +175,11 @@ class statusled():
         self.Task('idle')
 
     def Enable(self):
+        """ Enable the LED. """
         self.Enabled = True
 
     def Disable(self):
+        """ Disable the LED. """
         self.Enabled = False
         self.Task('idle')
 
@@ -162,13 +194,6 @@ class statusled():
         ErrorTask = 'error'
         if self.MonoSeconds() < self.StatusExpiry: # Error code is still valid. No other setting can be used yet.
             pass
-            #t = self.TaskList[ErrorTask]
-            #if t[0]: self.LedR.On()
-            #else: self.LedR.Off()
-            #if t[1]: self.LedG.On()
-            #else: self.LedG.Off()
-            #if t[2]: self.LedB.On()
-            #else: self.LedB.Off()
         elif self.Enabled or task == ErrorTask: # No current ERROR status, so we can consider whether to set the new status.
             if task == ErrorTask: # Setting a new error status. Set the timeout for 1 second ahead.
                 self.StatusExpiry = self.MonoSeconds() + 1 # Set 1 second expiry on error codes.
@@ -368,11 +393,6 @@ class timer():
             if gap >= 0:
                 self.NextDue = self.NextDue + (self.RepeatSeconds * gap)
 
-    def SetNextDue_orig(self):
-        """ Original NEXT DUE calculation, rolls forward 1 RepeatSeconds slot at a time until it's in the future. """
-        while self.NextDue <= time.time():
-            self.NextDue = self.NextDue + self.RepeatSeconds # Move forward if still needed.
-
     def Reset(self):
         """ Restart the time from NOW. """
         self.NextDue = time.time() + self.RepeatSeconds
@@ -483,29 +503,32 @@ class uarthost():
         Handles buffering of received and transmitted data over serial line. """
     def __init__(self,name=None,channel=0):
         print(dir(board))
-        try:
-            cpv = int(CircuitPythonVersion.split('.')[0])
-        except:
-            print("cpv",CircuitPythonVersion,"did not convert. Assuming 7.")
-            print("uarthost.__init__(): Parse CircuitPythonVersion",str(CircuitPythonVersion),"failed.")
-            cpv = 7
+        #try:
+        #    cpv = int(CircuitPythonVersion.split('.')[0])
+        #except:
+        #    print("cpv",CircuitPythonVersion,"did not convert. Assuming 7.")
+        #    print("uarthost.__init__(): Parse CircuitPythonVersion",str(CircuitPythonVersion),"failed.")
+        #    cpv = 7
         if name == None: name = 'UART' + str(channel) # Default to useful name.
         if channel == 0: # UART0
-            if cpv > 7:
-                self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024,timeout=0) # was 256 # Define UART0 as the serial comms channel to the host.
-            else:
-                self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
+            #if cpv > 7:
+            #    # self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024,timeout=0) # was 256 # Define UART0 as the serial comms channel to the host.
+            #    self.uart = busio_UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024,timeout=0) # was 256 # Define UART0 as the serial comms channel to the host.
+            #else:
+            #    #self.uart = busio.UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
+            #    self.uart = busio_UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024) # was 256 # Define UART0 as the serial comms channel to the host.
+            self.uart = busio_UART(board.GP0,board.GP1,baudrate=115200,receiver_buffer_size=1024,timeout=0) # Define UART0 as the serial comms channel to the host.
             print ('UART TX=', board.GP0, 'UART RX=', board.GP1)
         else: # UART1
             raise Exception('uarthost on Tiny2040 not configued for UART channel 1. Use channel 0 only.')
             # Don't increment exception count because we quit here. No communication can be established if this fails.
             # We can quit here because without a UART channel there's no way to report the error back to the RPi.
-        self.BufferInput = self.BufferInput7 # Pointer to BufferInput method for circuitpython version 7 and earlier.
-        if cpv > 7: # We're running CircuitPython 8 or later. UART calls are different.
-            self.BufferInput = self.BufferInput8 # Pointer to BufferInput method for circuitpython version 8 and later.
-            LogFile.Log("uarthost.__init__(): Switching to BufferInput8")
-        else:
-            LogFile.Log("uarthost.__init__(): Keeping BufferInput7")
+        #self.BufferInput = self.BufferInput7 # Pointer to BufferInput method for circuitpython version 7 and earlier.
+        #if cpv > 7: # We're running CircuitPython 8 or later. UART calls are different.
+        #    self.BufferInput = self.BufferInput8 # Pointer to BufferInput method for circuitpython version 8 and later.
+        #    LogFile.Log("uarthost.__init__(): Switching to BufferInput8")
+        #else:
+        #    LogFile.Log("uarthost.__init__(): Keeping BufferInput7")
         self.WriteChunk = 32 # 32 seems OK on Circuitpython.
         self.ReceivedLines = [] # No lines received yet.
         self.LinesRead = 0 # total number of lines received.
@@ -520,9 +543,8 @@ class uarthost():
         self.WriteQueue = [] # List of queued messages to be sent when safe.
         self.WriteDrops = 0 # Number of messages dropped because queue filled.
         self.ReadDrops = 0 # How many received messages are dropped because input buffer is full?
-        self.LastTxms = self.ticks_ms() # Milliseconds since last transmission.
-        self.LastRxms = self.ticks_ms() # Milliseconds since last receipt.
-        self.Clock = None # *Q* Is this used?
+        self.LastTxms = self.LastRxms = self.ticks_ms() # Milliseconds since last transmission.
+        #self.Clock = None # *Q* Is this used?
         neatprint (self.Name, self.uart)
 
     def Reset(self):
@@ -531,19 +553,13 @@ class uarthost():
         self.ReceivedLines = [] # Empty the input queue.
         ExceptionCounter.Reset() # Reset the ExceptionCounter also.
         for i in range(2): self.Write('#' * 20) # Send dummy lines through the UART line to flush out any junk.
-        self.Write('# CP env ' + str(Bootline)) # Show the circuitpython environment.
-        self.Write('# CP ver ' + str(CircuitPythonVersion)) # Tell what version of circuitpython is in use.
-        self.Write('# gc.mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
+        self.Write('# CP env ' + str(Bootline) + ' ver ' + str(CircuitPythonVersion) + ' mem_free ' + str(gc.mem_free())) # Tell how much memory is initially available.
         self.Write('controller started') # Tell the remote device we're up and running.
         self.Write('controller version ' + str(VERSION)) # Tell the remote device which software version is running.
         
     def ticks_ms(self):
         """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
         return int(time.monotonic_ns() / 1000000) # Nano seconds. Reduce by 1.0e6 to get milliseconds (as integer).
-
-    def ticks_s(self):
-        """ Standardise result of CircuitPython and MicroPython CPU ticks value. """
-        return float(time.monotonic_ns() / 1000000000) # Seconds. Reduce by 1.0e9 to get seconds (as decimal).
 
     def CalculateChecksum(self,line):
         """ Simple checksum calculation. """
@@ -582,53 +598,54 @@ class uarthost():
         if self.uart.in_waiting > 0: result = True
         return result
 
-    def BufferInput7(self):
-        """ Read of UART serial port. For circuitpython 7 and earlier.
-            Completed lines are added to the ReceivedLines list and
-            are available to the rest of the program. """
-        CharCounter = 0
-        while self.RxWaiting(): # Input waiting in Rx buffer.
-            StatusLed.Task('rx')
-            CharCounter += 1
-            if CharCounter > 20: break # Max 20 chars read per call.
-            try:
-                bchar = self.uart.read(1) # 1 char at a time. # *Q* This fails in CircuitPython 8.x, use alternative below.
-                #bchar = self.uart.read(nbytes=1) # *Q* This fails in CircuitPython 7.2, use alternative above.
-                cchar = ''
-                self.CharactersRead += 1
-                nchar = int.from_bytes(bchar,'little',False)
-                if nchar <= 127: # Acceptable as 7 bit ascii
-                    cchar = bchar.decode('utf-8')
-                    if cchar != chr(nchar):
-                        print('uarthost.BufferInput7: 7bit character conversion cheat would fail.')
-                    self.ReceivingLine += cchar
-                else:
-                    LogFile.Log('uarthost.BufferInput7: Ignored bad char (', str(bchar), "/", str(nchar), ')')
-            except Exception as e:
-                LogFile.Log('uarthost.BufferInput7: Error:', str(e))
-                ExceptionCounter.Raise() # Increment exception count for the session.
-            if cchar == '\n': # End of line
-                self.LinesRead += 1
-                if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
-                    line = self.ReceivingLine.strip() # Clear special characters.
-                    if len(line) > 0: # Something to process.
-                        if len(self.ReceivedLines) < 10: # Only buffer 10 lines, discard the rest. No space!
-                            self.ReceivedLines.append(line) # Add to list of lines to handle.
-                            line = self.RemoveChecksum(line)
-                            report = 'rec: ' + line
-                            print (report) # Report all receipts to serial out.
-                            if line[0] != "#": # Acknowledge receipt of all messages except comments via the log file back to the RPi too.
-                                x = line.split(' ')[-1] # Last entry should be message sequence number.
-                                if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
-                                LogFile.Log(report)
-                        else:
-                            print('uarthost.BufferInput7 full. Ignored: ' + line)
-                            self.ReadDrops += 1
-                self.ReceivingLine = ''
-            self.LastRxms = self.ticks_ms() # When was last message received?
-        StatusLed.Task('idle')
+    #def BufferInput7(self):
+    #    """ Read of UART serial port. For circuitpython 7 and earlier.
+    #        Completed lines are added to the ReceivedLines list and
+    #        are available to the rest of the program. """
+    #    CharCounter = 0
+    #    while self.RxWaiting(): # Input waiting in Rx buffer.
+    #        StatusLed.Task('rx')
+    #        CharCounter += 1
+    #        if CharCounter > 20: break # Max 20 chars read per call.
+    #        try:
+    #            bchar = self.uart.read(1) # 1 char at a time. # *Q* This fails in CircuitPython 8.x, use alternative below.
+    #            #bchar = self.uart.read(nbytes=1) # *Q* This fails in CircuitPython 7.2, use alternative above.
+    #            cchar = ''
+    #            self.CharactersRead += 1
+    #            nchar = int.from_bytes(bchar,'little',False)
+    #            if nchar <= 127: # Acceptable as 7 bit ascii
+    #                cchar = bchar.decode('utf-8')
+    #                if cchar != chr(nchar):
+    #                    print('uarthost.BufferInput7: 7bit character conversion cheat would fail.')
+    #                self.ReceivingLine += cchar
+    #            else:
+    #                LogFile.Log('uarthost.BufferInput7: Ignored bad char (', str(bchar), "/", str(nchar), ')')
+    #        except Exception as e:
+    #            LogFile.Log('uarthost.BufferInput7: Error:', str(e))
+    #            ExceptionCounter.Raise() # Increment exception count for the session.
+    #        if cchar == '\n': # End of line
+    #            self.LinesRead += 1
+    #            if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
+    #                line = self.ReceivingLine.strip() # Clear special characters.
+    #                if len(line) > 0: # Something to process.
+    #                    if len(self.ReceivedLines) < 10: # Only buffer 10 lines, discard the rest. No space!
+    #                        self.ReceivedLines.append(line) # Add to list of lines to handle.
+    #                        line = self.RemoveChecksum(line)
+    #                        report = 'rec: ' + line
+    #                        print (report) # Report all receipts to serial out.
+    #                        if line[0] != "#": # Acknowledge receipt of all messages except comments via the log file back to the RPi too.
+    #                            x = line.split(' ')[-1] # Last entry should be message sequence number.
+    #                            if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
+    #                            LogFile.Log(report)
+    #                    else:
+    #                        print('uarthost.BufferInput7 full. Ignored: ' + line)
+    #                        self.ReadDrops += 1
+    #            self.ReceivingLine = ''
+    #        self.LastRxms = self.ticks_ms() # When was last message received?
+    #    StatusLed.Task('idle')
     
-    def BufferInput8(self):
+    #def BufferInput8(self):
+    def BufferInput(self):
         """ Read of UART serial port. For circuitpython 8 and later.
             Completed lines are added to the ReceivedLines list and
             are available to the rest of the program. """
@@ -643,7 +660,7 @@ class uarthost():
                 CharsToProcess = ''.join([chr(b) for b in bchar]) # Convert to string.
                 self.CharactersRead += len(CharsToProcess) # Count characters read.
             except Exception as e:
-                LogFile.Log('uarthost.BufferInput8: uart.read() or conversion error:', str(e))
+                LogFile.Log('uarthost.BufferInput: uart.read() or conversion error:', str(e))
                 ExceptionCounter.Raise() # Increment exception count for the session.
             # Process each new character in turn.
             if len(CharsToProcess) > 0:
@@ -664,7 +681,7 @@ class uarthost():
                                         if x.startswith('['): report = 'rec: ' + x # If we have message sequence number, just report that back to the RPi.
                                         LogFile.Log(report)
                                 else:
-                                    print('uarthost.BufferInput8 full. Ignored: ' + line)
+                                    print('uarthost.BufferInput full. Ignored: ' + line)
                                     self.ReadDrops += 1
                         self.ReceivingLine = '' # Start a new receiving line with the next character received.
             self.LastRxms = self.ticks_ms() # When was last message received?
@@ -679,9 +696,7 @@ class uarthost():
         """ If the line ends with a message counter ('[nnn]') remove it. """
         temp = line.rfind('[')
         if temp >= 0:
-            #print("RemoveCounter: Before '" + str(line) + "', idx",temp)
             line = line[:temp].strip() # Strip anything after the last '[' character, it's a message count and not data.
-            #print("RemoveCounter: After '" + str(line) + "'")
         return line
 
     def Read(self):
@@ -781,8 +796,6 @@ class clock():
             self.SetTimeFromInt(TimeInt)
             LogFile.Log("UpdateClockFromInt(",IntToTimeString(TimeInt),") replaces",IntToTimeString(tn),"Updated clock.")
             result = True
-        #else:
-        #    LogFile.Log("UpdateClockFromInt(",IntToTimeString(TimeInt),") does not replace",IntToTimeString(tn))
         return result
 
     def UpdateClockFromString(self,TimeString):
@@ -795,14 +808,11 @@ class clock():
             If the microcontroller is connected via USB to Thonny on a remote machine, the machine clock may then
             get synchronised, in which case the TimeDelta value is nolonger needed. """
 
-        #print("c.UCFS: Received",TimeString)
         result = False
         for a in [' ','.','-',':']:
             TimeString = TimeString.replace(a,"")
         try:
-            #print("c.UCFS: Using",TimeString)
             result = TimeStringToInt(TimeString)
-            #print("c.UCFS: As int",result)
             self.UpdateClockFromInt(result)
         except:
             LogFile.Log("UpdateClockFromString(",TimeString,") failed.")
@@ -812,7 +822,6 @@ class clock():
     def CheckTimeDelta(self,now):
         """ If the basic clock time suddenly jumps, assume that the clock has been synchronised
             in which case clear TimeDelta because it's nolonger needed. """
-        # now = time.time()
         if now - self.PrevTime > 3600: # Clock has suddenly jumped an hour or more!
             print("c.CTD: Internal clock may have synchronised. Resetting clock synchronisation.")
             self.TimeDelta = 0
@@ -851,7 +860,7 @@ class clock():
 
 Clock = clock(time.time()) # Simulate RTC
 LogFile.Clock = Clock # Tell the LogFile which clock to use.
-RPi.Clock = Clock # Tell the RPi which clock to use.
+#RPi.Clock = Clock # Tell the RPi which clock to use.
 
 class trajectorypoint():
     """ An individual segment in a trajectory.
@@ -861,7 +870,7 @@ class trajectorypoint():
         trajectory point yymmddhhmmss motorname start startangle end endangle
              0       1         2          3       4       5       6     7     """
     def __init__(self,line):
-        # Be very protective of junk arriving on the serial line.
+        # BE sure trajectory details are not corrupted.
         # Don't create the entry if there is any problem with it.
         # The remote server will re-send the record if it doesn't get created this time.
         # trajectory 20210410163444 azimuth 20210410163444 256.57984815616663 20210410163544 256.7949264136615
@@ -983,30 +992,6 @@ class trajectory():
             result = None # No angle set yet.
         return result
 
-# Use ADC to read VMOT value. We can detect if motors are actually powered.
-# - Losing power is an easy problem to detect and report.
-ADC0_Mode = 'adc' # 'adc' means an analog signal is reported.
-if ADC0_Mode == 'adc':
-    # print (dir(analogio))
-    VMotADC = analogio.AnalogIn(board.A0)
-else:   
-    VMotADC = None
-
-def VMot():
-    """ Read the current MotorPower ADC value directly.
-        Don't scale for voltage, let the host deal with that.
-        If not available or failed, ZERO is returned. """
-    result = 0
-    try:
-        if ADC0_Mode == 'adc':
-            result = VMotADC.value
-        else: 
-            result = 0 # No ADC value supported.
-    except Exception as e:
-        print('VMot() failed:',e)
-        ExceptionCounter.Raise() # Increment exception count for the session.
-    return result
-
 class steppermotor():
     """ Handler for a NEMA17 stepper motor with DRV8825 driver chip. """
     def __init__(self,name):
@@ -1024,7 +1009,6 @@ class steppermotor():
         self.FastTime = 0.0005 # The fastest pulse time for moving the motor.
         self.SlowTime = 0.05 # The slowest pulse time for moving the motor.
         self.DeltaTime = 0.003 # The acceleration amount moving from SlowTime to FastTime as the motor gets going.
-        # self.UseMicrostepping = False Obsolete parameter.
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.Orientation = 1 # 1=Fwd, -1=Bkwd. This sets the overall orientation of motion. Compensate for gearing reversing the direction of motion here! It's applied to the DirectionBCM pin when the move is made.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
@@ -1033,12 +1017,9 @@ class steppermotor():
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
         self.MotorStepsPerRev = None
         self.ModeSignals = [False,False,False] # The setting of the 3 mode signals to the driver chip. Defines full/microstep value.
-        #self.MicrostepRatio = None # Obsolete parameter.
-        self.MotorPower = None
         self.MicrosteppingMode0 = False
         self.MicrosteppingMode1 = False
         self.MicrosteppingMode2 = False
-        #self.MotorStepsPerAxisDegree = None
         self.GearRatio = None # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
         self.AxisStepsPerRev = None
         self.MinAngle = None # Max anticlockwise movement.
@@ -1050,9 +1031,9 @@ class steppermotor():
         self.RestAngle = None # The 'rest' position of the axis. Used for calibrating at startup. Typically DUE SOUTH or HORIZONTAL position of the axis.
         self.RestPosition = None
         # Limit position. This is not the position of a Limit switch, it is a rotation limit to prevent excessive cable twisting.
-        self.LimitAngle = None # If given, this is a limit of movement. The telescope will reverse around this rather than cross it. It sets LimitPosition.
+        #self.LimitAngle = None # If given, this is a limit of movement. The telescope will reverse around this rather than cross it. It sets LimitPosition.
         self.LimitPosition = None # If given, this is the limit of movement. The telescope will reverse around this rather than cross it.
-        self.RequestedAngle = None
+        #self.RequestedAngle = None
         self.RequestedPosition = None
         # Set up control pins for the motor.
         # If we're using the same pins to drive multiple motors you may get some warnings from GPIO.
@@ -1066,31 +1047,10 @@ class steppermotor():
         self.FaultBCM = None # Set pin to INPUT. Will EARTH when triggered.
         # The following items just need allocating, the self.Reset() call will set the values.
         self.OnTarget = False # Indicates that the motor is on target. This will control Observable status.
-        self.FullStepBoundary = True # True if the motor position is currently on a FULL STEP position. We can make FULL STEP moves if we are. Otherwise we're microstepping.
         self.LatestTuneSteps = 0 # Record details of the last tune command received. So we can see it was handled.
         self.LatestTuneTime = None
         # Latest Start/Stop times for config and status methods.
-        #self.ConfigStartTime = None
-        #self.ConfigEndTime = None
-        #self.StatusStartTime = None
-        #self.StatusEndTime = None
         self.OptimiseMoves = False # When set to TRUE the motor is allowed to take a short-cut if a requested move is > 50% of the circumference.
-
-    #def ReportStamps(self):
-    #    """ Report back start/end timestmaps for config and status methods. """
-    #    line = "# Timestamps: " + self.MotorName + " Config "
-    #    if self.ConfigStartTime == None: line += "NOT SET"
-    #    else: line += IntToTimeString(self.ConfigStartTime)
-    #    line += "-"
-    #    if self.ConfigEndTime == None: line += "NOT SET"
-    #    else: line += IntToTimeString(self.ConfigEndTime)
-    #    line += " Status "
-    #    if self.StatusStartTime == None: line += "NOT SET"
-    #    else: line += IntToTimeString(self.StatusStartTime)
-    #    line += "-"
-    #    if self.StatusEndTime == None: line += "NOT SET"
-    #    else: line += IntToTimeString(self.StatusEndTime)
-    #    RPi.Write(line) # Send over UART to RPi.
 
     def CheckOnTarget(self):
         """ Set the OnTarget indicator if it looks like we're on-target.
@@ -1117,16 +1077,14 @@ class steppermotor():
         self.TargetPosition = self.CurrentPosition
         self.TargetAngle = self.CurrentAngle
         self.RequestedPosition = None
-        self.RequestedAngle = None
+        #self.RequestedAngle = None
         self.MotorConfigured = False
         self.SendStatus = True 
         self.ModeSignals = [False,False,False]
         self.MotorStepsPerRev = None
-        self.MotorPower = None
         self.MicrosteppingMode0 = False
         self.MicrosteppingMode1 = False
         self.MicrosteppingMode2 = False
-        #self.MotorStepsPerAxisDegree = None
         self.GearRatio = None # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
         self.AxisStepsPerRev = None        
         self.SendMotorStatus(immediate=True,codes='rst')
@@ -1152,7 +1110,7 @@ class steppermotor():
         self.TargetAngle = self.CurrentAngle
         self.OnTarget = False
         self.RequestedPosition = None
-        self.RequestedAngle = None
+        #self.RequestedAngle = None
         LogFile.Log('steppermotor.Stop(' + self.MotorName + ')')
 
     def EnableMotor(self):
@@ -1199,7 +1157,7 @@ class steppermotor():
         """ Set a new target ANGLE (and therefore position) for the motor.
             This will not move the motor, it will just prepare the step count and direction etpc.
         """
-        self.RequestedAngle = newangle # What angle was requested?
+        #self.RequestedAngle = newangle # What angle was requested?
         self.RequestedPosition = self.AngleToStep(newangle) # What position was requested?
         self.EnableMotor() # Enable the motor.
         result = True # Set was successful.
@@ -1229,7 +1187,7 @@ class steppermotor():
         # Limit new angle to movement range. (MaxAngle, MinAngle)
         newangle = self.StepToAngle(newposition)
         result = True # Set succeeded.
-        self.RequestedAngle = newangle # What angle was requested?
+        #self.RequestedAngle = newangle # What angle was requested?
         self.RequestedPosition = newposition # What position was requested?
         self.EnableMotor() # Enable the motor.
         if Limit:
@@ -1285,31 +1243,24 @@ class steppermotor():
     def SetPins(self,stepBCM,directionBCM,mode0BCM,mode1BCM,mode2BCM,enableBCM,faultBCM):
         self.StepBCM = stepBCM # Pin(stepBCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This sends the MOVE pulse to the controller.
         self.StepBCM.SetValue(False) # (0) # Turn pin off.
-        LogFile.Log("#", self.MotorName, 'Step pin', self.StepBCM.PinNumber)
+        LogFile.Log(self.MotorName, 'Step pin', self.StepBCM.PinNumber)
         self.DirectionBCM = directionBCM # Pin(directionBCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This sets the MOVE direction to the controller.
         self.DirectionBCM.SetValue(False) # (0)  # Turn pin off.
-        LogFile.Log("#", self.MotorName, 'Direction pin', self.DirectionBCM.PinNumber)
+        LogFile.Log(self.MotorName, 'Direction pin', self.DirectionBCM.PinNumber)
         self.Mode0BCM = mode0BCM # Pin(mode0BCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This controls FULL vs MICRO stepping for the controller.
         self.Mode1BCM = mode1BCM # Pin(mode1BCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This controls FULL vs MICRO stepping for the controller.
         self.Mode2BCM = mode2BCM # Pin(mode2BCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This controls FULL vs MICRO stepping for the controller.
         self.Mode0BCM.SetValue(False) # (0)  # Turn pin off.
         self.Mode1BCM.SetValue(False) # (0)  # Turn pin off.
         self.Mode2BCM.SetValue(False) # (0)  # Turn pin off.
-        #LogFile.Log("#", self.MotorName, 'Mode0 pin', self.Mode0BCM.PinNumber)
-        #LogFile.Log("#", self.MotorName, 'Mode1 pin', self.Mode1BCM.PinNumber)
-        #LogFile.Log("#", self.MotorName, 'Mode2 pin', self.Mode2BCM.PinNumber)
         self.EnableBCM = enableBCM # Pin(enableBCM, Pin.OUT, Pin.PULL_DOWN) # Set pin to OUTPUT. This enables/disabled the motor.
         self.EnableBCM.SetValue(False) # (0)  # Turn pin off.
-        #LogFile.Log("#", self.MotorName, 'Enable pin', self.EnableBCM.PinNumber)
         self.FaultBCM = faultBCM # Pin(faultBCM, Pin.IN) # Set pin to INPUT. Will EARTH when triggered.
-        #LogFile.Log("#", self.MotorName, 'Fault pin', self.FaultBCM.PinNumber)
 
-    #def SetConfig(self,gearratio,motorstepsperrev,microstepratio,minangle,maxangle,restangle,currentangle,orientation,backlashangle,modesignals=[False,False,False]):
     def SetConfig(self,gearratio,motorstepsperrev,minangle,maxangle,restangle,currentangle,orientation,backlashangle,modesignals=[False,False,False]):
         self.GearRatio = gearratio
         self.MotorStepsPerRev = motorstepsperrev
         self.ModeSignals = modesignals # The 3 mode pin values to control full/micro stepping.
-        # self.MicrostepRatio = microstepratio # Obsolete parameter
         self.MinAngle = minangle
         self.MaxAngle = maxangle
         self.RestAngle = restangle
@@ -1318,61 +1269,21 @@ class steppermotor():
         self.BacklashAngle = backlashangle
         # Reapply dependent calculations.
         # Microstepratio and UseMicrostepping now obsolete parameters.
-        #if self.MicrostepRatio != 1: self.UseMicrostepping = True # Allow microstepping to be used. Increases resolution 32times, but less torque.
-        #else: self.UseMicrostepping = False
-        #if self.UseMicrostepping: # Microstepping function is not currently tested because it's not used in the current project. Warn!
-        #    LogFile.Log("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
-        #    print("steppermotor.SetConfig: WARNING: Microstepping is triggered, functionality is not tested in this version.")
         self.WaitTime = self.SlowTime # The time between pulses, starts slow, reduces as a move progresses. Resets every time a new target is set.
         self.StepDir = 1 # The direction of a particular move +/-1. It always represents a SINGLE FULL STEP.
         self.LastStepDir = 0 # Record the 'last' direction that the motor moved in. This may be useful for handling gear backlash. Starts at ZERO (No direction)
         self.DriftSteps = 0 # This is the number of steps 'error' that DriftTracking has identified. It must be incorporated back into motor movements as smoothly as possible. Consider backlash etc.
         # gearratio is the overall gearing of the entire transmission. 60 means 60 motor revs for 1 transmission rev.
-        ## Officially a NEMA17 motor has 200 (1.8Deg), or 400 steps (0.9deg) steps (each has XX substeps available, but with reduced accuracy/power)
-        ## - If using MICROSTEPPING, the precision is increased by up to 32x . Which is 0.056 degrees. The 16mm lens on the HQ Camera has 0.01 degree per pixel. So some gearing is probably needed, but not too strong.
-        ## - OR switch back to FULL STEPS and using higher gearing!! Needs to be 1:200 gearing in FULL STEP mode to match pixel resolution...
-        ## WARNING!!! MICROSTEPPING Typically reduces torque dramatically.
-        ## An example of the effect is shown here from https://www.machinedesign.com/archive/article/21812154/microstepping-myths
-        ## Full step     100.00% torque
-        ## 2 microsteps  70.71%
-        ## 4      -"-    38.27%
-        ## 8      -"-    19.51%
-        ## 16     -"-    9.80%
-        ## 32     -"-    4.91% <- Max on NEMA17, and probably too weak to achieve movement.
-        ## 64     -"-    2.45%
-        ## 128    -"-    1.23%
-        ## 256    -"-    0.61%
-        ## If we activate Microstepping, how do we set the Mode pins (Mode0,1,2) on the DRV8825 chip?
-        #steppinglist = {1 : {'power' : 100, 'mode0' : False, 'mode1' : False, 'mode2' : False},
-        #                2 : {'power' : 70, 'mode0' : True, 'mode1' : False, 'mode2' : False},
-        #                4 : {'power' : 40, 'mode0' : False, 'mode1' : True, 'mode2' : False},
-        #                8 : {'power' : 20, 'mode0' : True, 'mode1' : True, 'mode2' : False},
-        #                16 : {'power' : 10, 'mode0' : False, 'mode1' : False, 'mode2' : True},
-        #                32 : {'power' : 5, 'mode0' : True, 'mode1' : True, 'mode2' : True}}
-        #if self.UseMicrostepping: # If we're using microstepping, then we have 32 times more positions for a NEMA17 motor in each revolution, but only 5% of the power!
-        #    self.MotorStepsPerRev = self.MotorStepsPerRev * self.MicrostepRatio
-        #    try:
-        #        self.MotorPower = steppinglist[self.MicrostepRatio]['power']
-        #        self.MicrosteppingMode0 = steppinglist[self.MicrostepRatio]['mode0']
-        #        self.MicrosteppingMode1 = steppinglist[self.MicrostepRatio]['mode1']
-        #        self.MicrosteppingMode2 = steppinglist[self.MicrostepRatio]['mode2']
-        #        if self.MicrostepRatio != 1:
-        #            LogFile.Log("Configure(" + self.MotorName + ") MicrostepRatio " + str(self.MicrostepRatio) + " " + str(self.MotorPower) + "% torque.")
-        #    except Exception as e:
-        #        LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") MicrostepRatio failed: " + str(e))
-        #        LogFile.Log("error: steppermotor.Configure(" + self.MotorName + ") invalid MicrostepRatio (" + str(self.MicrostepRatio) + "). Please correct it.")
-        #        ExceptionCounter.Raise() # Increment exception count for the session.
         self.MicrosteppingMode0 = self.ModeSignals[0]
         self.MicrosteppingMode1 = self.ModeSignals[1]
         self.MicrosteppingMode2 = self.ModeSignals[2]
-        #self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
         self.AxisStepsPerRev = self.MotorStepsPerRev * self.GearRatio
         # AngleToStep and StepToAngle only work from here on!
         self.RestPosition = self.AngleToStep(self.RestAngle)
         self.CurrentPosition = self.TargetPosition = self.AngleToStep(self.CurrentAngle)
         self.MinPosition = self.AngleToStep(self.MinAngle) # Min clockwise movement. Location of limit switch in steps (This is self calibrating when in use).
         self.MaxPosition = self.AngleToStep(self.MaxAngle) # Max clockwise movement. Location of limit switch in steps (This is self calibrating when in use).
-        self.RequestedAngle = self.CurrentAngle
+        #self.RequestedAngle = self.CurrentAngle
         self.RequestedPosition = self.CurrentPosition
         return self.MotorConfigured
 
@@ -1386,7 +1297,6 @@ class steppermotor():
                 0       1         2           3       4    5  6   7  8   9     10    11  12 13 14 15   16 17  18 19
                 
             """
-        #self.ConfigStartTime = Clock.Now()
         try:
             lineitems = line.split(' ')
             lc = len(lineitems)
@@ -1416,10 +1326,7 @@ class steppermotor():
                 self.GearRatio = float(lineitems[16])
             if lc > 17 and lineitems[17].lower() != 'none': # Define motorstepsperrev
                 self.MotorStepsPerRev = int(lineitems[17])
-                #self.MotorStepsPerAxisDegree = self.MotorStepsPerRev / 360.0
                 self.AxisStepsPerRev = self.MotorStepsPerRev * self.GearRatio
-            #if lc > 18 and lineitems[18].lower() != 'none': # Define microstepratio # Obsolete parameter.
-            #    self.MicrostepRatio = int(lineitems[18])
             if lc > 19 and lineitems[19].lower() != 'none': # Define restangle
                 self.RestAngle = float(lineitems[19])
             if lc > 20: # Load mode signals to select full or microstepping ratio.
@@ -1440,17 +1347,15 @@ class steppermotor():
                 self.MaxPosition = self.AngleToStep(self.MaxAngle)
             if lc > 15: # Define movement limit on the motor. The motor will reverse around a limit rather than crossing it.
                 if lineitems[15].lower() != 'none': # Set a movement limit.
-                    self.LimitAngle = float(lineitems[15])
-                    self.LimitPosition = self.AngleToStep(self.LimitAngle)
+                    limitangle = float(lineitems[15])
+                    self.LimitPosition = self.AngleToStep(limitangle)
                 else:
-                    self.LimitAngle = None 
                     self.LimitPosition = None
             self.MotorConfigured = True
         except Exception as e:
             LogFile.Log("steppermotor.ConfigureMotor(line) failed: " + str(e))
             print("steppermotor.ConfigureMotor() failed.")
             ExceptionCounter.Raise() # Increment exception count for the session.
-        #self.ConfigEndTime = Clock.Now()
         self.ReportMotorConfig() # Report the configuration back to the RPi.
         return self.MotorConfigured
 
@@ -1486,20 +1391,6 @@ class steppermotor():
         if self.StepDir != self.LastStepDir: # We have a change of direction.
             LogFile.Log('MoveFullStep: ' + self.MotorName + ' changed direction (' + str(self.StepDir) + ' vs ' + str(self.LastStepDir) + '). Backlash?')
         self.LastStepDir = self.StepDir # Record the direction that the motor is moving in. This may be useful for handling gear backlash etc.
-        ## Set DRV8825 driver mode to FULL STEPPING.
-        #if self.UseMicrostepping: # We can switch between FULL and MICRO steps to have both speed and fine control.
-        #    if stepsize > 1:
-        #        self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-        #        self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-        #        self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-        #    else:
-        #        self.Mode0BCM.SetValue(self.MicrosteppingMode0) # value(self.MicrosteppingMode0) # Micro steps set Mode pins.
-        #        self.Mode1BCM.SetValue(self.MicrosteppingMode1) # value(self.MicrosteppingMode1) # Micro steps set Mode pins.
-        #        self.Mode2BCM.SetValue(self.MicrosteppingMode2) # value(self.MicrosteppingMode2) # Micro steps set Mode pins.
-        #else: # We use full steps only. Less fine control, but faster and stronger movement.
-        #    self.Mode0BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-        #    self.Mode1BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
-        #    self.Mode2BCM.SetValue(False) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
         # Send MOVE pulse to controller.
         self.Mode0BCM.SetValue(self.MicrosteppingMode0) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
         self.Mode1BCM.SetValue(self.MicrosteppingMode1) # value(0) # Full steps # Keep DRV8825 MODE pins LOW.
@@ -1511,12 +1402,6 @@ class steppermotor():
             time.sleep(self.WaitTime)
         self.CurrentPosition = (self.CurrentPosition + (self.StepDir * stepsize)) % self.AxisStepsPerRev
         self.CurrentAngle = self.StepToAngle(self.CurrentPosition)
-        #if self.UseMicrostepping:
-        #    if self.CurrentPosition % self.MicrostepRatio == 0: # We're on a full-step-boundary.
-        #        self.FullStepBoundary = True
-        #    else:
-        #        self.FullStepBoundary = False
-        # Else. FullStepBoundary remains True all the time.
         # Accelerate the motor.
         if self.WaitTime > self.FastTime: # We can still accelerate
             self.WaitTime = max(self.WaitTime - self.DeltaTime, self.FastTime)
@@ -1585,19 +1470,6 @@ class steppermotor():
         while MotorSteps != 0:
             # If supporting microstepping: If we're on a full step boundary and the move is large enough we can use FULL STEPS for speed.
             StatusLed.Task(self.MotorName) # Flash status LED with motor specific colour.
-            #if self.UseMicrostepping: # Switch between FULL and MICRO stepping as required.
-            #    if abs(MotorSteps) > self.MicrostepRatio and self.FullStepBoundary: # Full steps work for this move.
-            #        # We have a long way to go, and we are at a safe point, so move a FULL STEP.
-            #        # Only trigger a FULL STEP if we're on a full step boundary. Otherwise the motor may 'settle' to the closest boundary later on and cause drift.
-            #        MotorSteps = MotorSteps - (self.StepDir * self.MicrostepRatio) # REDUCE (-ve) the number of steps to take.
-            #        self.MoveFullStep(stepsize=self.MicrostepRatio) # This will update CurrentPosition on-the-fly as the motor moves.
-            #    else: # Only microsteps work for this move.
-            #        # We're only moving a small distance or we're not on a full step boundary, so use MICROSTEPPING.
-            #        MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-            #        self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
-            #else: # We're not using microstepping, so we're just moving full steps.
-            #    MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
-            #    self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
             MotorSteps = MotorSteps - self.StepDir # REDUCE (-ve) the number of steps to take.
             self.MoveFullStep(stepsize=1) # This will update CurrentPosition on-the-fly as the motor moves.
             self.SendMotorStatus(codes='mov') # Long slow moves would cause RPi to trigger a reset, so send regular status updates.
@@ -1633,7 +1505,6 @@ class steppermotor():
         line += "MinP " + str(self.MinPosition) + " " 
         line += "MaxA " + str(self.MaxAngle) + " " 
         line += "MaxP " + str(self.MaxPosition) + " " 
-        line += "LimA " + str(self.LimitAngle) + " " 
         line += "LimP " + str(self.LimitPosition) + " " 
         line += "RestA " + str(self.RestAngle) + " " 
         RPi.Write(line) # Send over UART to RPi.
@@ -1649,9 +1520,7 @@ class steppermotor():
         line = "# Motor " + self.MotorName + " conf 3: "
         line += "GearRat " + str(self.GearRatio) + " " 
         line += "uS/Rev " + str(self.MotorStepsPerRev) + " " 
-        #line += "ustepRat " + str(self.MicrostepRatio) + " " # Obsolete parameter now.
         line += "usMode " + BoolToString(self.MicrosteppingMode0) + BoolToString(self.MicrosteppingMode1) + BoolToString(self.MicrosteppingMode2) + " " # Microstepping mode pin settings. 
-        #line += "MStp/AxDeg " + str(int(self.MotorStepsPerAxisDegree)) + " " 
         line += "AxStp/Rev " + str(int(self.AxisStepsPerRev)) + " "
         line += "MtrCnf " + str(self.MotorConfigured) + " " 
         RPi.Write(line) # Send over UART to RPi.
@@ -1666,7 +1535,6 @@ class steppermotor():
             codes: Optional string of codes that are added to the status message. (Debug/test/dev etc)
             """
         if immediate or self.StatusTimer.Due(): # Only send the status at regular intervals, otherwise we flood communications.
-            #self.StatusStartTime = Clock.Now()
             if self.SendStatus == False: # Status message is currently disabled. Inform that we're not sending it.
                 RPi.Write('# SendMotorStatus ' + IntToTimeString(Clock.Now()) + ' ' + self.MotorName + ' disabled. ' + str(codes))
                 print("SendMotorStatus",self.MotorName,"currently disabled.",codes)
@@ -1682,23 +1550,22 @@ class steppermotor():
             line += BoolToString(self.MotorConfigured) + ' ' # MotorConfigured
             line += BoolToString(self.OnTarget) + ' ' # Motor is on target or not.
             line += str(self.WaitTime * 2) + ' ' # The pulse period (indicates speed) of the motor.
-            line += str(VMot()) + ' ' # Measure the motor power voltage from ADC0. Will return '0' if adc0 is not configured as an 'adc' input.
+            line += '0 ' # Measure the motor power voltage from ADC0. Will return '0' if adc0 is not configured as an 'adc' input.
             line += str(codes) + ' ' # Optional codes added to status message.
             RPi.Write(line) # Send over UART to RPi.
-            #self.StatusEndTime = Clock.Now()
             # Reset the status timer.
             self.StatusTimer.Reset() # We've sent the regular status message, decide when the next is due.
 
 # Define pins for motorcontroller chips.
-AzimuthStepBCM = GPIOpin(board.GP29) # Tiny RP2040
-AltitudeStepBCM = GPIOpin(board.GP28) # Tiny RP2040
-CommonDirectionBCM = GPIOpin(board.GP27) # Tiny RP2040
-CommonMode0BCM = GPIOpin(board.GP3) # Tiny RP2040
-CommonMode1BCM = GPIOpin(board.GP4) # Tiny RP2040
-CommonMode2BCM = GPIOpin(board.GP5) # Tiny RP2040
-CommonEnableBCM = GPIOpin(board.GP2) # Tiny RP2040
-AzimuthFaultBCM = GPIOpin(board.GP6) # Tiny RP2040
-AltitudeFaultBCM = GPIOpin(board.GP7) # Tiny RP2040
+AzimuthStepBCM = GPIOpin(board.GP29,'azstep') # Tiny RP2040
+AltitudeStepBCM = GPIOpin(board.GP28,'altstep') # Tiny RP2040
+CommonDirectionBCM = GPIOpin(board.GP27,'dir') # Tiny RP2040
+CommonMode0BCM = GPIOpin(board.GP3,'mode0') # Tiny RP2040
+CommonMode1BCM = GPIOpin(board.GP4,'mode1') # Tiny RP2040
+CommonMode2BCM = GPIOpin(board.GP5,'mode2') # Tiny RP2040
+CommonEnableBCM = GPIOpin(board.GP2,'enable') # Tiny RP2040
+AzimuthFaultBCM = GPIOpin(board.GP6,'azfault') # Tiny RP2040
+AltitudeFaultBCM = GPIOpin(board.GP7,'altfault') # Tiny RP2040
 
 AzimuthStepBCM.SetDirection(digitalio.Direction.OUTPUT)
 AzimuthStepBCM.SetValue(False)
@@ -1722,11 +1589,9 @@ AltitudeFaultBCM.pull = digitalio.Pull.UP
 # Configure Motors.
 Azimuth = steppermotor('azimuth')
 Azimuth.SetPins(stepBCM=AzimuthStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AzimuthFaultBCM) # Direct control over Azimuth motor.
-#Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
 Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0)
 Altitude = steppermotor('altitude')
 Altitude.SetPins(stepBCM=AltitudeStepBCM,directionBCM=CommonDirectionBCM,mode0BCM=CommonMode0BCM,mode1BCM=CommonMode1BCM,mode2BCM=CommonMode2BCM,enableBCM=CommonEnableBCM,faultBCM=AltitudeFaultBCM) # Direct control over Altitude motor.
-#Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,microstepratio=1,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
 Altitude.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,minangle=0.0,maxangle=90.0,restangle=0.0,currentangle=0.0,orientation=-1,backlashangle=0.0)
 Motors = [Azimuth, Altitude] # Control over 'all' motors.
 
@@ -1738,7 +1603,7 @@ class picosession():
         self.Quit = False # Set to TRUE to terminate the session.
         self.TrajectorySafetyms = 2 * 60 * 1000 # How many milliseconds can a valid trajectory remain in use before comms failure terminates it? == 2 minutes.
         self.TrajectorySafetyFlushes = 0 # How many times have we had to flush the trajectories for safety when comms seemed to fail?
-        self.FailsafeLatch = False # Latch to prevent 'failsafe' messages flooding the commication buffers when safety flush is triggered.
+        self.FailsafeLatch = False # Latch to prevent 'failsafe' messages flooding the communication buffers when safety flush is triggered.
 
     def MovePermission(self):
         # Decide if the microcontroller can accept remote control of the motors.
@@ -1844,13 +1709,86 @@ def CheckVersionCompatibility(rpiversion):
     if not compversion in ACCEPTABLERPIVERSIONS:
         LogFile.Log('CheckVersionCompatibility',rpiversion,'not in',str(ACCEPTABLERPIVERSIONS))
 
+def PinCommand(line):
+    """ Receive a direct command for a GPIO pin and execute it. 
+        
+        pin {date} {name} state/on/off [duration [repeat]]
+        
+                                                   ^ Defines how many times to repeat the command.
+                                         ^ Defines how long the signal stays at set value before reverting.
+                                 ^ Turn ON or OFF the pin, or return its current state.
+                   ^ The pin name (must be set when GPIOpin instance created).
+            ^ Standard message timestamp string.
+            
+        pin 20240307013045 dir on     
+            Would turn the 'dir' pin on and leave it on.
+            
+        pin 20240307013045 dir on 0.5
+            Would turn the 'dir' pin on for 0.5 seconds then turn it off.
+            
+        pin 20240307013045 dir on 0.25 10
+            Would turn the 'dir' pin on for 0.25 seconds then off for .25 seconds. It would do this 10 times.
+            
+        pin 20240307013045 dir status 
+            Would return a comment message to the RPi with the current state of the 'dir' pin.
+            
+        """
+    lineitems = line.split() # Extract individual items.
+    itemcount = len(lineitems)
+    # item 0 = 'pin' command.
+    # item 1 = 'timestamp'.
+    if itemcount > 2: # item 2 = number/name exists.
+        pin = lineitems[2] 
+    else: # Incomplete command.
+        RPi.Write("# pin command failed: No pin ID.")
+        return False
+    if itemcount > 3: # item 3 = command exists.
+        command = lineitems[3].lower()
+    else: # Incomplete command.
+        RPi.Write("# pin command failed: No command.")
+        return False
+    if itemcount > 4: # item 4 = optional duration.
+        duration = float(lineitems[4])
+    else: duration = 0
+    if itemcount > 5: # item 5 = repeat count.
+        repeats = int(lineitems[5])
+    else:
+        repeats = 0
+    pinobj = None
+    namelist = []
+    for pins in GPIOpin.PinList: # Search the defined pins for the specified one.
+        if pins.Name == str(pin): # Find by name.
+            pinobj = pins # This is the pin instance we'll work with.
+            break # Found it.
+    if pinobj == None: # Failed to identify the pin.
+        RPi.Write("# pin command failed: " + str(pin) + " unknown.")
+        return False
+    # We have a valid command.
+    print(pinobj.Name,command,duration,repeats)
+    for i in range(max(repeats,1)): # Loop as many times as requested.
+        if command == 'on' and pinobj.Pin.direction == digitalio.Direction.OUTPUT: # Switch on and it's an OUTPUT. command
+            pinobj.SetValue(True) # Turn on.
+            if duration != 0: # For a limited time only.
+                time.sleep(duration) # Wait until time to turn off again.
+                pinobj.SetValue(False) # Turn off.
+                if repeats > 0: time.sleep(duration) # If we're going to repeat, pause before repeating too.
+        elif command == 'off' and pinobj.Pin.direction == digitalio.Direction.OUTPUT: # Switch off and it's an INPUT.
+            pinobj.SetValue(False) # Turn off.
+            if duration != 0: # For a limited time only.
+                time.sleep(duration) # Wait until time to turn on again.
+                pinobj.SetValue(True) # Turn on.
+                if repeats > 0: time.sleep(duration) # If we're going to repeat, pause before repeating too.
+        elif command == 'state': # Send pin state.
+            RPi.Write("# pin status " + str(pinobj.Name) + " " + str(pinobj.Pin.value))
+    return True
+
 Session = picosession() # Instantiate a sesson object.
 
 def ProcessInput(line):
     lineitems = line.split(' ')
     if lineitems[0] == 'exit':
-        print('exit command received.')
-        LogFile.Log('exit command received.')
+        print('exit cmd received.')
+        LogFile.Log('exit cmd received.')
         Session.Quit = True
     elif lineitems[0] == 'stop': # Immediately stop motion.
         for i in Motors:
@@ -1912,6 +1850,8 @@ def ProcessInput(line):
         StatusLed.Disable() # Disable the onboard status LED.
     elif line.startswith('leds on'): # Enable the LEDs to show processing.
         StatusLed.Enable() # Enable the onboard status LED.
+    elif lineitems[0] == 'pin': # Direct GPIO pin command.
+        PinCommand(line) # Execute the pin command.
     else:
         RPi.Write('error: unrecognised RPi command: ' + line)
 
