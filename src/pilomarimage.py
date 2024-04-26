@@ -19,12 +19,12 @@
 
 import cv2 # OpenCV.
 import numpy as np # Numpy array handling.
-#from scipy.spatial.distance import pdist, squareform # For ArrangeLabels physics modelling. Included in ChatGPT generated code, but not actually used!
 from datetime import datetime, timezone, timedelta
 import math
 import random # random number generator.
 import os
-
+from PIL import Image as PIL_Image
+from PIL import ExifTags as PIL_ExifTags
 
 class data_set():
     """ Data set list of data points. """
@@ -51,7 +51,6 @@ class data_point():
         self.XName = xname
         self.YName = yname
 
-### BEGIN DEVELOPMENT ###
 class fd_object():
     """ Object to be placed in an image (for force directed graphs). """
     def __init__(self):
@@ -73,13 +72,13 @@ class fd_edge():
         self.Name = None
         self.ObjectA = None # Handle to object at one end of the edge.
         self.ObjectB = None # Handle to object at the other end of the edge.
-### END DEVELOPMENT ###
 
 class pilomarimage():
 
     # Constants.
-    __version__ = '0.0.2'
+    __version__ = '0.1.0'
     IMAGETYPES = ['bgr','bgra','grayscale']
+    # COLORPOINTS is used to estimate a RGB color from a Hipparcos star catalog star B-V value.
     COLORPOINTS = [(-0.33,[0x70,0x6f,0xfe]),
                    (-0.3,[0x51,0x9f,0xfe]),
                    (-0.02,[0xbf,0xd0,0xff]),
@@ -89,669 +88,710 @@ class pilomarimage():
                    (1.4,[0xfe,0x7f,0x7d])]
     # Color names for OpenCV drawing. (Beware colors are BGR not RGB!)
     # Official HTML colors 3 Channel BGR colors only. 
-    BGRBlack = (0,0,0)
-    BGRNight = (10,9,12)
-    BGRCharcoal = (44,40,52)
-    BGROil = (49,49,59)
-    BGRDarkGray = (60,59,58)
-    BGRLightBlack = (69,69,69)
-    BGRBlackCat = (57,56,65)
-    BGRIridium = (58,60,61)
-    BGRBlackEel = (63,62,70)
-    BGRBlackCow = (70,70,76)
-    BGRGrayWolf = (75,74,80)
-    BGRVampireGray = (81,80,86)
-    BGRIronGray = (93,89,82)
-    BGRGrayDolphin = (88,88,92)
-    BGRCarbonGray = (93,93,98)
-    BGRAshGray = (98,99,102)
-    BGRDimGray = (105,105,105)
-    BGRNardoGray = (108,106,104)
-    BGRCloudyGray = (104,105,109)
-    BGRSmokeyGray = (109,110,114)
-    BGRAlienGray = (110,111,115)
-    BGRSonicSilver = (117,117,117)
-    BGRPlatinumGray = (121,121,121)
-    BGRGranite = (124,126,131)
-    BGRGray = (128,128,128)
-    BGRBattleshipGray = (130,132,132)
-    BGRGunmetalGray = (141,145,141)
-    BGRDarkGray = (169,169,169)
-    BGRGrayCloud = (180,182,182)
-    BGRSilver = (192,192,192)
-    BGRPaleSilver = (187,192,201)
-    BGRGrayGoose = (206,208,209)
-    BGRPlatinumSilver = (206,206,206)
-    BGRLightGray = (211,211,211)
-    BGRSilverWhite = (221,219,218)
-    BGRGainsboro = (220,220,220)
-    BGRPlatinum = (226,228,229)
-    BGRMetallicSilver = (204,198,188)
-    BGRBlueGray = (199,175,152)
-    BGRRomanSilver = (150,137,131)
-    BGRLightSlateGray = (153,136,119)
-    BGRSlateGray = (144,128,112)
-    BGRRatGray = (141,123,109)
-    BGRSlateGraniteGray = (131,115,101)
-    BGRJetGray = (126,109,97)
-    BGRMistBlue = (126,109,100)
-    BGRMarbleBlue = (126,109,86)
-    BGRSlateBlueGrey = (161,124,115)
-    BGRLightPurpleBlue = (206,143,114)
-    BGRAzureBlue = (160,99,72)
-    BGRBlueJay = (126,84,43)
-    BGRCharcoalBlue = (79,69,54)
-    BGRDarkBlueGrey = (91,70,41)
-    BGRDarkSlate = (86,56,43)
-    BGRDeepSeaBlue = (86,52,18)
-    BGRNightBlue = (84,27,21)
-    BGRMidnightBlue = (112,25,25)
-    BGRNavy = (128,0,0)
-    BGRDenimDarkBlue = (141,27,21)
-    BGRDarkBlue = (139,0,0)
-    BGRLapisBlue = (126,49,21)
-    BGRNewMidnightBlue = (160,0,0)
-    BGREarthBlue = (165,0,0)
-    BGRCobaltBlue = (194,32,0)
-    BGRMediumBlue = (205,0,0)
-    BGRBlueberryBlue = (194,65,0)
-    BGRCanaryBlue = (245,22,41)
-    BGRBlue = (255,0,0)
-    BGRSamcoBlue = (255,2,0)
-    BGRBrightBlue = (255,9,9)
-    BGRBlueOrchid = (252,69,31)
-    BGRSapphireBlue = (199,84,37)
-    BGRBlueEyes = (199,105,21)
-    BGRBrightNavyBlue = (210,116,25)
-    BGRBalloonBlue = (222,96,43)
-    BGRRoyalBlue = (225,105,65)
-    BGROceanBlue = (236,101,43)
-    BGRBlueRibbon = (255,110,48)
-    BGRBlueDress = (236,125,21)
-    BGRNeonBlue = (255,137,21)
-    BGRDodgerBlue = (255,144,30)
-    BGRGlacialBlueIce = (193,139,54)
-    BGRSteelBlue = (180,130,70)
-    BGRSilkBlue = (199,138,72)
-    BGRWindowsBlue = (199,126,53)
-    BGRBlueIvy = (199,144,48)
-    BGRBlueKoi = (199,158,101)
-    BGRColumbiaBlue = (199,175,135)
-    BGRBabyBlue = (199,185,149)
-    BGRCornflowerBlue = (237,149,100)
-    BGRSkyBlueDress = (255,152,102)
-    BGRIceberg = (236,165,86)
-    BGRButterflyBlue = (236,172,56)
-    BGRDeepSkyBlue = (255,191,0)
-    BGRMiddayBlue = (255,185,59)
-    BGRCrystalBlue = (255,179,92)
-    BGRDenimBlue = (236,186,121)
-    BGRDaySkyBlue = (255,202,130)
-    BGRLightSkyBlue = (250,206,135)
-    BGRSkyBlue = (235,206,135)
-    BGRJeansBlue = (236,207,160)
-    BGRBlueAngel = (236,206,183)
-    BGRPastelBlue = (236,207,180)
-    BGRLightDayBlue = (255,223,173)
-    BGRSeaBlue = (255,223,194)
-    BGRHeavenlyBlue = (255,222,198)
-    BGRRobinEggBlue = (255,237,189)
-    BGRPowderBlue = (230,224,176)
-    BGRCoralBlue = (236,220,175)
-    BGRLightBlue = (230,216,173)
-    BGRLightSteelBlue = (222,207,176)
-    BGRGulfBlue = (236,223,201)
-    BGRPastelLightBlue = (234,214,213)
-    BGRLavenderBlue = (250,228,227)
-    BGRWhiteBlue = (250,233,219)
-    BGRLavender = (250,230,230)
-    BGRWater = (250,244,235)
-    BGRAliceBlue = (255,248,240)
-    BGRGhostWhite = (255,248,248)
-    BGRAzure = (255,255,240)
-    BGRLightCyan = (255,255,224)
-    BGRLightSlate = (255,255,204)
-    BGRElectricBlue = (255,254,154)
-    BGRTronBlue = (254,253,125)
-    BGRBlueZircon = (255,254,87)
-    BGRAqua = (255,255,0)
-    BGRCyan = (255,255,0)
-    BGRBrightCyan = (255,255,10)
-    BGRCeleste = (236,235,80)
-    BGRBlueDiamond = (236,226,78)
-    BGRBrightTurquoise = (245,226,22)
-    BGRBlueLagoon = (236,235,142)
-    BGRPaleTurquoise = (238,238,175)
-    BGRPaleBlueLily = (236,236,207)
-    BGRLightTeal = (217,217,179)
-    BGRTiffanyBlue = (208,216,129)
-    BGRBlueHosta = (199,191,119)
-    BGRCyanOpaque = (199,199,146)
-    BGRNorthernLightsBlue = (199,199,120)
-    BGRBlueGreen = (181,204,123)
-    BGRMediumAquaMarine = (170,205,102)
-    BGRMagicMint = (209,240,170)
-    BGRLightAquamarine = (232,255,147)
-    BGRAquamarine = (212,255,127)
-    BGRBrightTeal = (198,249,1)
-    BGRTurquoise = (208,224,64)
-    BGRMediumTurquoise = (204,209,72)
-    BGRDeepTurquoise = (205,204,72)
-    BGRJellyfish = (199,199,70)
-    BGRBlueTurquoise = (219,198,67)
-    BGRDarkTurquoise = (209,206,0)
-    BGRMacawBlueGreen = (199,191,67)
-    BGRLightSeaGreen = (170,178,32)
-    BGRSeafoamGreen = (159,169,62)
-    BGRCadetBlue = (160,158,95)
-    BGRDeepSea = (156,156,59)
-    BGRDarkCyan = (139,139,0)
-    BGRTealGreen = (127,130,0)
-    BGRTeal = (128,128,0)
-    BGRTealBlue = (128,124,0)
-    BGRMediumTeal = (95,95,4)
-    BGRDarkTeal = (93,93,4)
-    BGRDeepTeal = (62,62,3)
-    BGRDarkSlateGray = (60,56,37)
-    BGRGunmetal = (57,53,44)
-    BGRBlueMossGreen = (91,86,60)
-    BGRBeetleGreen = (126,120,76)
-    BGRGrayishTurquoise = (126,125,94)
-    BGRGreenishBlue = (126,125,48)
-    BGRAquamarineStone = (129,135,52)
-    BGRSeaTurtleGreen = (128,141,67)
-    BGRDullSeaGreen = (117,137,78)
-    BGRDarkGreenBlue = (87,99,31)
-    BGRDeepSeaGreen = (84,103,48)
-    BGRBottleGreen = (78,106,0)
-    BGRSeaGreen = (87,139,46)
-    BGRElfGreen = (107,138,27)
-    BGRDarkMint = (110,144,49)
-    BGRJade = (108,163,0)
-    BGREarthGreen = (111,165,52)
-    BGRChromeGreen = (96,162,26)
-    BGREmerald = (120,200,80)
-    BGRMint = (137,180,62)
-    BGRMediumSeaGreen = (113,179,60)
-    BGRMetallicGreen = (142,157,124)
-    BGRCamouflageGreen = (107,134,120)
-    BGRSageGreen = (121,139,132)
-    BGRHazelGreen = (88,124,97)
-    BGRVenomGreen = (0,140,114)
-    BGROliveDrab = (35,142,107)
-    BGROlive = (0,128,128)
-    BGRDarkOliveGreen = (47,107,85)
-    BGRMilitaryGreen = (49,91,78)
-    BGRGreenLeaves = (11,95,58)
-    BGRArmyGreen = (32,83,75)
-    BGRFernGreen = (38,124,102)
-    BGRFallForestGreen = (88,146,78)
-    BGRIrishGreen = (75,160,8)
-    BGRPineGreen = (68,124,56)
-    BGRMediumForestGreen = (53,114,52)
-    BGRJungleGreen = (44,124,52)
-    BGRCactusGreen = (66,116,34)
-    BGRForestGreen = (34,139,34)
-    BGRGreen = (0,128,0)
-    BGRDarkGreen = (0,100,0)
-    BGRDeepGreen = (8,102,5)
-    BGRDeepEmeraldGreen = (7,99,4)
-    BGRHunterGreen = (59,94,53)
-    BGRDarkForestGreen = (23,65,37)
-    BGRLotusGreen = (37,66,0)
-    BGRSeaweedGreen = (23,124,67)
-    BGRShamrockGreen = (23,124,52)
-    BGRGreenOnion = (33,161,106)
-    BGRMossGreen = (91,154,138)
-    BGRGrassGreen = (11,155,63)
-    BGRGreenPepper = (44,160,74)
-    BGRDarkLimeGreen = (23,163,65)
-    BGRParrotGreen = (43,173,18)
-    BGRCloverGreen = (85,160,62)
-    BGRDinosaurGreen = (108,161,115)
-    BGRGreenSnake = (60,187,108)
-    BGRAlienGreen = (23,196,108)
-    BGRGreenApple = (23,196,76)
-    BGRLimeGreen = (50,205,50)
-    BGRPeaGreen = (23,208,82)
-    BGRKellyGreen = (82,197,76)
-    BGRZombieGreen = (113,197,84)
-    BGRGreenPeas = (92,195,137)
-    BGRDollarBillGreen = (101,187,133)
-    BGRFrogGreen = (142,198,153)
-    BGRTurquoiseGreen = (180,214,160)
-    BGRDarkSeaGreen = (143,188,143)
-    BGRBasilGreen = (130,159,130)
-    BGRGrayGreen = (156,173,162)
-    BGRIguanaGreen = (113,176,156)
-    BGRCitronGreen = (29,179,143)
-    BGRAcidGreen = (26,191,176)
-    BGRAvocadoGreen = (72,194,178)
-    BGRPistachioGreen = (9,194,157)
-    BGRSaladGreen = (53,201,161)
-    BGRYellowGreen = (50,205,154)
-    BGRPastelGreen = (119,221,119)
-    BGRHummingbirdGreen = (23,232,127)
-    BGRNebulaGreen = (23,232,89)
-    BGRStoplightGoGreen = (100,233,87)
-    BGRNeonGreen = (41,245,22)
-    BGRJadeGreen = (110,251,94)
-    BGRLimeMintGreen = (127,245,54)
-    BGRSpringGreen = (127,255,0)
-    BGRMediumSpringGreen = (154,250,0)
-    BGREmeraldGreen = (23,251,95)
-    BGRLime = (0,255,0)
-    BGRLawnGreen = (0,252,124)
-    BGRBrightGreen = (0,255,102)
-    BGRChartreuse = (0,255,127)
-    BGRYellowLawnGreen = (23,247,135)
-    BGRAloeVeraGreen = (22,245,152)
-    BGRDullGreenYellow = (23,251,177)
-    BGRLemonGreen = (2,248,173)
-    BGRGreenYellow = (47,255,173)
-    BGRChameleonGreen = (22,245,189)
-    BGRNeonYellowGreen = (1,238,218)
-    BGRYellowGreenGrosbeak = (22,245,226)
-    BGRTeaGreen = (93,251,204)
-    BGRSlimeGreen = (84,233,188)
-    BGRAlgaeGreen = (134,233,100)
-    BGRLightGreen = (144,238,144)
-    BGRDragonGreen = (146,251,106)
-    BGRPaleGreen = (152,251,152)
-    BGRMintGreen = (152,255,152)
-    BGRGreenThumb = (170,234,181)
-    BGROrganicBrown = (166,249,227)
-    BGRLightJade = (184,253,195)
-    BGRLightMintGreen = (211,229,194)
-    BGRLightRoseGreen = (219,249,219)
-    BGRChromeWhite = (212,241,232)
-    BGRHoneyDew = (240,255,240)
-    BGRMintCream = (250,255,245)
-    BGRLemonChiffon = (205,250,255)
-    BGRParchment = (194,255,255)
-    BGRCream = (204,255,255)
-    BGRCreamWhite = (208,253,255)
-    BGRLightGoldenRodYellow = (210,250,250)
-    BGRLightYellow = (224,255,255)
-    BGRBeige = (220,245,245)
-    BGRCornsilk = (220,248,255)
-    BGRBlonde = (217,246,251)
-    BGRChampagne = (206,231,247)
-    BGRAntiqueWhite = (215,235,250)
-    BGRPapayaWhip = (213,239,255)
-    BGRBlanchedAlmond = (205,235,255)
-    BGRBisque = (196,228,255)
-    BGRWheat = (179,222,245)
-    BGRMoccasin = (181,228,255)
-    BGRPeach = (180,229,255)
-    BGRLightOrange = (177,216,254)
-    BGRPeachPuff = (185,218,255)
-    BGRCoralPeach = (171,213,251)
-    BGRNavajoWhite = (173,222,255)
-    BGRGoldenBlonde = (161,231,251)
-    BGRGoldenSilk = (195,227,243)
-    BGRDarkBlonde = (182,226,240)
-    BGRLightGold = (172,229,241)
-    BGRVanilla = (171,229,243)
-    BGRTanBrown = (182,229,236)
-    BGRDirtyWhite = (201,228,232)
-    BGRPaleGoldenRod = (170,232,238)
-    BGRKhaki = (140,230,240)
-    BGRCardboardBrown = (116,218,237)
-    BGRHarvestGold = (117,226,237)
-    BGRSunYellow = (124,232,255)
-    BGRCornYellow = (128,243,255)
-    BGRPastelYellow = (132,248,250)
-    BGRNeonYellow = (51,255,255)
-    BGRYellow = (0,255,255)
-    BGRCanaryYellow = (0,239,255)
-    BGRBananaYellow = (22,226,245)
-    BGRMustardYellow = (88,219,255)
-    BGRGoldenYellow = (0,223,255)
-    BGRBoldYellow = (36,219,249)
-    BGRRubberDuckyYellow = (1,216,255)
-    BGRGold = (0,215,255)
-    BGRBrightGold = (23,208,253)
-    BGRChromeGold = (68,206,255)
-    BGRGoldenBrown = (23,193,234)
-    BGRDeepYellow = (0,190,246)
-    BGRMacaroniandCheese = (102,187,242)
-    BGRSaffron = (23,185,251)
-    BGRNeonGold = (1,189,253)
-    BGRBeer = (23,177,251)
-    BGROrangeYellow = (66,174,255)
-    BGRYellowOrange = (66,174,255)
-    BGRCantaloupe = (47,166,255)
-    BGRCheeseOrange = (0,166,255)
-    BGROrange = (0,165,255)
-    BGRBrownSand = (77,154,238)
-    BGRSandyBrown = (96,164,244)
-    BGRBrownSugar = (111,167,226)
-    BGRCamelBrown = (107,154,193)
-    BGRDeerBrown = (131,191,230)
-    BGRBurlyWood = (135,184,222)
-    BGRTan = (140,180,210)
-    BGRLightFrenchBeige = (127,173,200)
-    BGRSand = (128,178,194)
-    BGRSage = (138,184,188)
-    BGRFallLeafBrown = (96,181,200)
-    BGRGingerBrown = (98,190,201)
-    BGRBronzeGold = (93,174,201)
-    BGRDarkKhaki = (107,183,189)
-    BGROliveGreen = (108,184,186)
-    BGRBrass = (66,166,181)
-    BGRCookieBrown = (23,163,199)
-    BGRMetallicGold = (55,175,212)
-    BGRBeeYellow = (23,171,233)
-    BGRSchoolBusYellow = (23,163,232)
-    BGRGoldenRod = (32,165,218)
-    BGROrangeGold = (23,160,212)
-    BGRCaramel = (23,142,198)
-    BGRDarkGoldenRod = (11,134,184)
-    BGRCinnamon = (23,137,197)
-    BGRPeru = (63,133,205)
-    BGRBronze = (50,127,205)
-    BGRTigerOrange = (65,129,200)
-    BGRCopper = (51,115,184)
-    BGRDarkGold = (57,108,170)
-    BGRMetallicBronze = (66,113,169)
-    BGRDarkAlmond = (78,120,171)
-    BGRWood = (51,111,150)
-    BGROakBrown = (23,101,128)
-    BGRAntiqueBronze = (30,93,102)
-    BGRHazel = (24,118,142)
-    BGRDarkYellow = (0,128,139)
-    BGRDarkMoccasin = (57,120,130)
-    BGRKhakiGreen = (93,134,138)
-    BGRMillenniumJade = (124,145,147)
-    BGRDarkBeige = (118,140,159)
-    BGRBulletShell = (96,155,175)
-    BGRArmyBrown = (96,123,130)
-    BGRSandstone = (95,109,120)
-    BGRTaupe = (50,60,72)
-    BGRMocha = (38,61,73)
-    BGRMilkChocolate = (28,59,81)
-    BGRGrayBrown = (53,54,61)
-    BGRDarkCoffee = (47,47,59)
-    BGROldBurgundy = (46,48,67)
-    BGRWesternCharcoal = (63,65,73)
-    BGRBakersBrown = (23,51,92)
-    BGRDarkBrown = (33,67,101)
-    BGRSepiaBrown = (20,66,112)
-    BGRDarkBronze = (0,74,128)
-    BGRCoffee = (55,78,111)
-    BGRBrownBear = (59,92,131)
-    BGRRedDirt = (23,82,127)
-    BGRSepia = (44,70,127)
-    BGRSienna = (45,82,160)
-    BGRSaddleBrown = (19,69,139)
-    BGRDarkSienna = (23,65,138)
-    BGRSangria = (23,56,126)
-    BGRBloodRed = (23,53,126)
-    BGRChestnut = (53,69,149)
-    BGRCoralBrown = (56,70,158)
-    BGRChestnutRed = (44,74,195)
-    BGRMahogany = (0,64,192)
-    BGRRedGold = (6,84,235)
-    BGRRedFox = (23,88,195)
-    BGRDarkBisque = (0,101,184)
-    BGRLightBrown = (29,101,181)
-    BGRPetraGold = (52,103,183)
-    BGRRust = (65,98,195)
-    BGRCopperRed = (81,109,203)
-    BGROrangeSalmon = (81,116,196)
-    BGRChocolate = (30,105,210)
-    BGRSedona = (0,102,204)
-    BGRPapayaOrange = (23,103,229)
-    BGRHalloweenOrange = (44,108,230)
-    BGRNeonOrange = (0,103,255)
-    BGRBrightOrange = (31,95,255)
-    BGRPumpkinOrange = (23,114,248)
-    BGRCarrotOrange = (23,128,248)
-    BGRDarkOrange = (0,140,255)
-    BGRConstructionConeOrange = (49,116,248)
-    BGRIndianSaffron = (34,119,255)
-    BGRSunriseOrange = (81,116,230)
-    BGRMangoOrange = (64,128,255)
-    BGRCoral = (80,127,255)
-    BGRBasketBallOrange = (88,129,248)
-    BGRLightSalmonRose = (107,150,249)
-    BGRLightSalmon = (122,160,255)
-    BGRDarkSalmon = (122,150,233)
-    BGRTangerine = (97,138,231)
-    BGRLightCopper = (103,138,218)
-    BGRSalmonPink = (116,134,255)
-    BGRSalmon = (114,128,250)
-    BGRPeachPink = (136,139,249)
-    BGRLightCoral = (128,128,240)
-    BGRPastelRed = (128,114,246)
-    BGRPinkCoral = (113,116,231)
-    BGRBeanRed = (89,93,247)
-    BGRValentineRed = (81,84,229)
-    BGRIndianRed = (92,92,205)
-    BGRTomato = (71,99,255)
-    BGRShockingOrange = (60,91,229)
-    BGROrangeRed = (0,69,255)
-    BGRRed = (0,0,255)
-    BGRNeonRed = (3,28,253)
-    BGRScarletRed = (0,36,255)
-    BGRRubyRed = (23,34,246)
-    BGRFerrariRed = (26,13,247)
-    BGRFireEngineRed = (23,40,246)
-    BGRLavaRed = (23,34,228)
-    BGRLoveRed = (23,27,228)
-    BGRGrapefruit = (31,56,220)
-    BGRCherryRed = (65,70,194)
-    BGRChilliPepper = (23,27,193)
-    BGRFireBrick = (34,34,178)
-    BGRTomatoSauceRed = (7,24,178)
-    BGRBrown = (42,42,165)
-    BGRCarbonRed = (42,13,167)
-    BGRCranberry = (15,0,159)
-    BGRSaffronRed = (20,19,147)
-    BGRCrimsonRed = (0,0,153)
-    BGRRedWine = (18,0,153)
-    BGRWineRed = (18,0,153)
-    BGRDarkRed = (0,0,139)
-    BGRVeryDarkRed = (0,0,10) # Pilomar specific color.
-    BGRMaroon = (0,0,128)
-    BGRBurgundy = (26,0,140)
-    BGRVermilion = (27,25,126)
-    BGRDeepRed = (23,5,128)
-    BGRRedBlood = (0,0,102)
-    BGRBloodNight = (6,22,85)
-    BGRDarkScarlet = (25,3,86)
-    BGRBlackBean = (2,12,61)
-    BGRChocolateBrown = (15,0,63)
-    BGRMidnight = (23,27,43)
-    BGRPurpleLily = (53,10,85)
-    BGRPurpleMaroon = (65,5,129)
-    BGRPlumPie = (65,5,125)
-    BGRPlumVelvet = (82,5,125)
-    BGRDarkRaspberry = (87,38,135)
-    BGRVelvetMaroon = (77,53,126)
-    BGRRosyFinch = (82,78,127)
-    BGRDullPurple = (93,82,127)
-    BGRPuce = (88,90,127)
-    BGRRoseDust = (112,112,153)
-    BGRPastelBrown = (127,144,177)
-    BGRRosyPink = (129,132,179)
-    BGRRosyBrown = (143,143,188)
-    BGRKhakiRose = (142,144,197)
-    BGRLipstickPink = (147,135,196)
-    BGRPinkBrown = (137,129,196)
-    BGROldRose = (129,128,192)
-    BGRDustyPink = (148,138,213)
-    BGRPinkDaisy = (163,153,231)
-    BGRRose = (170,173,232)
-    BGRDustyRose = (166,169,201)
-    BGRSilverPink = (173,174,196)
-    BGRGoldPink = (194,199,230)
-    BGRRoseGold = (192,197,236)
-    BGRDeepPeach = (164,203,255)
-    BGRPastelOrange = (139,184,248)
-    BGRDesertSand = (175,201,237)
-    BGRUnbleachedSilk = (202,221,255)
-    BGRPigPink = (228,215,253)
-    BGRPalePink = (215,212,242)
-    BGRBlush = (232,230,255)
-    BGRMistyRose = (225,228,255)
-    BGRPinkBubbleGum = (221,223,255)
-    BGRLightRose = (205,207,251)
-    BGRLightRed = (203,204,255)
-    BGRWarmPink = (189,198,246)
-    BGRDeepRose = (185,187,251)
-    BGRPink = (203,192,255)
-    BGRLightPink = (193,182,255)
-    BGRSoftPink = (191,184,255)
-    BGRDonutPink = (190,175,250)
-    BGRBabyPink = (186,175,250)
-    BGRFlamingoPink = (176,167,249)
-    BGRPastelPink = (170,163,254)
-    BGRRosePink = (176,161,231)
-    BGRPinkRose = (176,161,231)
-    BGRCadillacPink = (174,138,227)
-    BGRCarnationPink = (161,120,247)
-    BGRPastelRose = (143,120,229)
-    BGRBlushRed = (148,110,229)
-    BGRPaleVioletRed = (147,112,219)
-    BGRPurplePink = (135,101,209)
-    BGRTulipPink = (124,90,194)
-    BGRBashfulPink = (131,82,194)
-    BGRDarkPink = (128,84,231)
-    BGRDarkHotPink = (171,96,246)
-    BGRHotPink = (180,105,255)
-    BGRWatermelonPink = (133,108,252)
-    BGRVioletRed = (138,53,246)
-    BGRHotDeepPink = (135,40,245)
-    BGRBrightPink = (127,0,255)
-    BGRDeepPink = (147,20,255)
-    BGRNeonPink = (170,53,245)
-    BGRChromePink = (170,51,255)
-    BGRNeonHotPink = (156,52,253)
-    BGRPinkCupcake = (157,94,228)
-    BGRRoyalPink = (172,89,231)
-    BGRDimorphothecaMagenta = (157,49,227)
-    BGRPinkLemonade = (124,40,228)
-    BGRRedPink = (85,42,250)
-    BGRRaspberry = (93,11,227)
-    BGRCrimson = (60,20,220)
-    BGRBrightMaroon = (72,33,195)
-    BGRRoseRed = (86,30,194)
-    BGRRoguePink = (105,40,193)
-    BGRBurntPink = (103,34,193)
-    BGRPinkViolet = (107,34,202)
-    BGRMagentaPink = (139,51,204)
-    BGRMediumVioletRed = (133,21,199)
-    BGRDarkCarnationPink = (131,34,193)
-    BGRRaspberryPurple = (108,68,179)
-    BGRPinkPlum = (143,59,185)
-    BGROrchid = (214,112,218)
-    BGRDeepMauve = (212,115,223)
-    BGRViolet = (238,130,238)
-    BGRFuchsiaPink = (255,119,255)
-    BGRBrightNeonPink = (255,51,244)
-    BGRFuchsia = (255,0,255)
-    BGRMagenta = (255,0,255)
-    BGRCrimsonPurple = (236,56,226)
-    BGRHeliotropePurple = (255,98,212)
-    BGRTyrianPurple = (236,90,196)
-    BGRMediumOrchid = (211,85,186)
-    BGRPurpleFlower = (199,74,167)
-    BGROrchidPurple = (181,72,176)
-    BGRRichLilac = (210,102,182)
-    BGRPastelViolet = (188,145,210)
-    BGRMauveTaupe = (109,95,145)
-    BGRViolaPurple = (126,88,126)
-    BGREggplant = (81,64,97)
-    BGRPlumPurple = (89,55,88)
-    BGRGrape = (128,90,94)
-    BGRPurpleNavy = (128,81,78)
-    BGRSlateBlue = (205,90,106)
-    BGRBlueLotus = (236,96,105)
-    BGRBlurple = (242,101,88)
-    BGRLightSlateBlue = (255,106,115)
-    BGRMediumSlateBlue = (238,104,123)
-    BGRPeriwinklePurple = (207,117,117)
-    BGRVeryPeri = (171,103,102)
-    BGRBrightGrape = (168,45,111)
-    BGRPurpleAmethyst = (199,45,108)
-    BGRBrightPurple = (173,13,106)
-    BGRDeepPeriwinkle = (166,83,84)
-    BGRDarkSlateBlue = (139,61,72)
-    BGRPurpleHaze = (126,56,78)
-    BGRPurpleIris = (126,27,87)
-    BGRDarkPurple = (80,1,75)
-    BGRDeepPurple = (63,1,54)
-    BGRMidnightPurple = (71,26,46)
-    BGRPurpleMonster = (126,27,70)
-    BGRIndigo = (130,0,75)
-    BGRBlueWhale = (126,45,52)
-    BGRRebeccaPurple = (153,51,102)
-    BGRPurpleJam = (126,40,106)
-    BGRDarkMagenta = (139,0,139)
-    BGRPurple = (128,0,128)
-    BGRFrenchLilac = (142,96,134)
-    BGRDarkOrchid = (204,50,153)
-    BGRDarkViolet = (211,0,148)
-    BGRPurpleViolet = (201,56,141)
-    BGRJasminePurple = (236,59,162)
-    BGRPurpleDaffodil = (255,65,176)
-    BGRClematisViolet = (206,45,132)
-    BGRBlueViolet = (226,43,138)
-    BGRPurpleSageBush = (199,93,122)
-    BGRLovelyPurple = (236,56,127)
-    BGRNeonPurple = (255,0,157)
-    BGRPurplePlum = (239,53,142)
-    BGRAztechPurple = (255,59,137)
-    BGRMediumPurple = (219,112,147)
-    BGRLightPurple = (215,103,132)
-    BGRCrocusPurple = (236,114,145)
-    BGRPurpleMimosa = (255,123,158)
-    BGRPeriwinkle = (255,204,204)
-    BGRPaleLilac = (255,208,220)
-    BGRLavenderPurple = (182,123,150)
-    BGRRosePurple = (202,159,176)
-    BGRLilac = (200,162,200)
-    BGRMauve = (255,176,224)
-    BGRBrightLilac = (239,145,216)
-    BGRPurpleDragon = (199,142,195)
-    BGRPlum = (221,160,221)
-    BGRBlushPink = (236,169,230)
-    BGRPastelPurple = (232,162,242)
-    BGRBlossomPink = (255,183,249)
-    BGRWisteriaPurple = (199,174,198)
-    BGRPurpleThistle = (211,185,210)
-    BGRThistle = (216,191,216)
-    BGRPurpleWhite = (227,211,223)
-    BGRPeriwinklePink = (236,207,233)
-    BGRCottonCandy = (255,223,252)
-    BGRLavenderPinocchio = (226,221,235)
-    BGRDarkWhite = (209,217,225)
-    BGRAshWhite = (212,228,233)
-    BGRWhiteChocolate = (214,230,237)
-    BGRSoftIvory = (221,240,250)
-    BGROffWhite = (227,240,248)
-    BGRPearlWhite = (240,246,248)
-    BGRRedWhite = (234,232,243)
-    BGRLavenderBlush = (245,240,255)
-    BGRPearl = (244,238,253)
-    BGREggShell = (227,249,255)
-    BGROldLace = (227,240,254)
-    BGRLinen = (230,240,250)
-    BGRSeaShell = (238,245,255)
-    BGRBoneWhite = (238,246,249)
-    BGRRice = (239,245,250)
-    BGRFloralWhite = (240,250,255)
-    BGRIvory = (240,255,255)
-    BGRWhiteGold = (244,255,255)
-    BGRLightWhite = (247,255,255)
-    BGRWhiteSmoke = (245,245,245)
-    BGRCotton = (249,251,251)
-    BGRSnow = (250,250,255)
-    BGRMilkWhite = (255,252,254)
-    BGRHalfWhite = (250,254,255)
-    BGRWhite = (255,255,255)
+    # Make all BGR colors available as a dictionary. Easier to search and manipulate.
+    BGRColor = {
+        "Black":(0,0,0),
+        "Night":(10,9,12),
+        "Charcoal":(44,40,52),
+        "Oil":(49,49,59),
+        "DarkGray":(60,59,58),
+        "LightBlack":(69,69,69),
+        "BlackCat":(57,56,65),
+        "Iridium":(58,60,61),
+        "BlackEel":(63,62,70),
+        "BlackCow":(70,70,76),
+        "GrayWolf":(75,74,80),
+        "VampireGray":(81,80,86),
+        "IronGray":(93,89,82),
+        "GrayDolphin":(88,88,92),
+        "CarbonGray":(93,93,98),
+        "AshGray":(98,99,102),
+        "DimGray":(105,105,105),
+        "NardoGray":(108,106,104),
+        "CloudyGray":(104,105,109),
+        "SmokeyGray":(109,110,114),
+        "AlienGray":(110,111,115),
+        "SonicSilver":(117,117,117),
+        "PlatinumGray":(121,121,121),
+        "Granite":(124,126,131),
+        "Gray":(128,128,128),
+        "BattleshipGray":(130,132,132),
+        "GunmetalGray":(141,145,141),
+        "DarkGray":(169,169,169),
+        "GrayCloud":(180,182,182),
+        "Silver":(192,192,192),
+        "PaleSilver":(187,192,201),
+        "GrayGoose":(206,208,209),
+        "PlatinumSilver":(206,206,206),
+        "LightGray":(211,211,211),
+        "SilverWhite":(221,219,218),
+        "Gainsboro":(220,220,220),
+        "Platinum":(226,228,229),
+        "MetallicSilver":(204,198,188),
+        "BlueGray":(199,175,152),
+        "RomanSilver":(150,137,131),
+        "LightSlateGray":(153,136,119),
+        "SlateGray":(144,128,112),
+        "RatGray":(141,123,109),
+        "SlateGraniteGray":(131,115,101),
+        "JetGray":(126,109,97),
+        "MistBlue":(126,109,100),
+        "MarbleBlue":(126,109,86),
+        "SlateBlueGrey":(161,124,115),
+        "LightPurpleBlue":(206,143,114),
+        "AzureBlue":(160,99,72),
+        "BlueJay":(126,84,43),
+        "CharcoalBlue":(79,69,54),
+        "DarkBlueGrey":(91,70,41),
+        "DarkSlate":(86,56,43),
+        "DeepSeaBlue":(86,52,18),
+        "NightBlue":(84,27,21),
+        "MidnightBlue":(112,25,25),
+        "Navy":(128,0,0),
+        "DenimDarkBlue":(141,27,21),
+        "DarkBlue":(139,0,0),
+        "LapisBlue":(126,49,21),
+        "NewMidnightBlue":(160,0,0),
+        "EarthBlue":(165,0,0),
+        "CobaltBlue":(194,32,0),
+        "MediumBlue":(205,0,0),
+        "BlueberryBlue":(194,65,0),
+        "CanaryBlue":(245,22,41),
+        "Blue":(255,0,0),
+        "SamcoBlue":(255,2,0),
+        "BrightBlue":(255,9,9),
+        "BlueOrchid":(252,69,31),
+        "SapphireBlue":(199,84,37),
+        "BlueEyes":(199,105,21),
+        "BrightNavyBlue":(210,116,25),
+        "BalloonBlue":(222,96,43),
+        "RoyalBlue":(225,105,65),
+        "OceanBlue":(236,101,43),
+        "BlueRibbon":(255,110,48),
+        "BlueDress":(236,125,21),
+        "NeonBlue":(255,137,21),
+        "DodgerBlue":(255,144,30),
+        "GlacialBlueIce":(193,139,54),
+        "SteelBlue":(180,130,70),
+        "SilkBlue":(199,138,72),
+        "WindowsBlue":(199,126,53),
+        "BlueIvy":(199,144,48),
+        "BlueKoi":(199,158,101),
+        "ColumbiaBlue":(199,175,135),
+        "BabyBlue":(199,185,149),
+        "CornflowerBlue":(237,149,100),
+        "SkyBlueDress":(255,152,102),
+        "Iceberg":(236,165,86),
+        "ButterflyBlue":(236,172,56),
+        "DeepSkyBlue":(255,191,0),
+        "MiddayBlue":(255,185,59),
+        "CrystalBlue":(255,179,92),
+        "DenimBlue":(236,186,121),
+        "DaySkyBlue":(255,202,130),
+        "LightSkyBlue":(250,206,135),
+        "SkyBlue":(235,206,135),
+        "JeansBlue":(236,207,160),
+        "BlueAngel":(236,206,183),
+        "PastelBlue":(236,207,180),
+        "LightDayBlue":(255,223,173),
+        "SeaBlue":(255,223,194),
+        "HeavenlyBlue":(255,222,198),
+        "RobinEggBlue":(255,237,189),
+        "PowderBlue":(230,224,176),
+        "CoralBlue":(236,220,175),
+        "LightBlue":(230,216,173),
+        "LightSteelBlue":(222,207,176),
+        "GulfBlue":(236,223,201),
+        "PastelLightBlue":(234,214,213),
+        "LavenderBlue":(250,228,227),
+        "WhiteBlue":(250,233,219),
+        "Lavender":(250,230,230),
+        "Water":(250,244,235),
+        "AliceBlue":(255,248,240),
+        "GhostWhite":(255,248,248),
+        "Azure":(255,255,240),
+        "LightCyan":(255,255,224),
+        "LightSlate":(255,255,204),
+        "ElectricBlue":(255,254,154),
+        "TronBlue":(254,253,125),
+        "BlueZircon":(255,254,87),
+        "Aqua":(255,255,0),
+        "Cyan":(255,255,0),
+        "BrightCyan":(255,255,10),
+        "Celeste":(236,235,80),
+        "BlueDiamond":(236,226,78),
+        "BrightTurquoise":(245,226,22),
+        "BlueLagoon":(236,235,142),
+        "PaleTurquoise":(238,238,175),
+        "PaleBlueLily":(236,236,207),
+        "LightTeal":(217,217,179),
+        "TiffanyBlue":(208,216,129),
+        "BlueHosta":(199,191,119),
+        "CyanOpaque":(199,199,146),
+        "NorthernLightsBlue":(199,199,120),
+        "BlueGreen":(181,204,123),
+        "MediumAquaMarine":(170,205,102),
+        "MagicMint":(209,240,170),
+        "LightAquamarine":(232,255,147),
+        "Aquamarine":(212,255,127),
+        "BrightTeal":(198,249,1),
+        "Turquoise":(208,224,64),
+        "MediumTurquoise":(204,209,72),
+        "DeepTurquoise":(205,204,72),
+        "Jellyfish":(199,199,70),
+        "BlueTurquoise":(219,198,67),
+        "DarkTurquoise":(209,206,0),
+        "MacawBlueGreen":(199,191,67),
+        "LightSeaGreen":(170,178,32),
+        "SeafoamGreen":(159,169,62),
+        "CadetBlue":(160,158,95),
+        "DeepSea":(156,156,59),
+        "DarkCyan":(139,139,0),
+        "TealGreen":(127,130,0),
+        "Teal":(128,128,0),
+        "TealBlue":(128,124,0),
+        "MediumTeal":(95,95,4),
+        "DarkTeal":(93,93,4),
+        "DeepTeal":(62,62,3),
+        "DarkSlateGray":(60,56,37),
+        "Gunmetal":(57,53,44),
+        "BlueMossGreen":(91,86,60),
+        "BeetleGreen":(126,120,76),
+        "GrayishTurquoise":(126,125,94),
+        "GreenishBlue":(126,125,48),
+        "AquamarineStone":(129,135,52),
+        "SeaTurtleGreen":(128,141,67),
+        "DullSeaGreen":(117,137,78),
+        "DarkGreenBlue":(87,99,31),
+        "DeepSeaGreen":(84,103,48),
+        "BottleGreen":(78,106,0),
+        "SeaGreen":(87,139,46),
+        "ElfGreen":(107,138,27),
+        "DarkMint":(110,144,49),
+        "Jade":(108,163,0),
+        "EarthGreen":(111,165,52),
+        "ChromeGreen":(96,162,26),
+        "Emerald":(120,200,80),
+        "Mint":(137,180,62),
+        "MediumSeaGreen":(113,179,60),
+        "MetallicGreen":(142,157,124),
+        "CamouflageGreen":(107,134,120),
+        "SageGreen":(121,139,132),
+        "HazelGreen":(88,124,97),
+        "VenomGreen":(0,140,114),
+        "OliveDrab":(35,142,107),
+        "Olive":(0,128,128),
+        "DarkOliveGreen":(47,107,85),
+        "MilitaryGreen":(49,91,78),
+        "GreenLeaves":(11,95,58),
+        "ArmyGreen":(32,83,75),
+        "FernGreen":(38,124,102),
+        "FallForestGreen":(88,146,78),
+        "IrishGreen":(75,160,8),
+        "PineGreen":(68,124,56),
+        "MediumForestGreen":(53,114,52),
+        "JungleGreen":(44,124,52),
+        "CactusGreen":(66,116,34),
+        "ForestGreen":(34,139,34),
+        "Green":(0,128,0),
+        "DarkGreen":(0,100,0),
+        "DeepGreen":(8,102,5),
+        "DeepEmeraldGreen":(7,99,4),
+        "HunterGreen":(59,94,53),
+        "DarkForestGreen":(23,65,37),
+        "LotusGreen":(37,66,0),
+        "SeaweedGreen":(23,124,67),
+        "ShamrockGreen":(23,124,52),
+        "GreenOnion":(33,161,106),
+        "MossGreen":(91,154,138),
+        "GrassGreen":(11,155,63),
+        "GreenPepper":(44,160,74),
+        "DarkLimeGreen":(23,163,65),
+        "ParrotGreen":(43,173,18),
+        "CloverGreen":(85,160,62),
+        "DinosaurGreen":(108,161,115),
+        "GreenSnake":(60,187,108),
+        "AlienGreen":(23,196,108),
+        "GreenApple":(23,196,76),
+        "LimeGreen":(50,205,50),
+        "PeaGreen":(23,208,82),
+        "KellyGreen":(82,197,76),
+        "ZombieGreen":(113,197,84),
+        "GreenPeas":(92,195,137),
+        "DollarBillGreen":(101,187,133),
+        "FrogGreen":(142,198,153),
+        "TurquoiseGreen":(180,214,160),
+        "DarkSeaGreen":(143,188,143),
+        "BasilGreen":(130,159,130),
+        "GrayGreen":(156,173,162),
+        "IguanaGreen":(113,176,156),
+        "CitronGreen":(29,179,143),
+        "AcidGreen":(26,191,176),
+        "AvocadoGreen":(72,194,178),
+        "PistachioGreen":(9,194,157),
+        "SaladGreen":(53,201,161),
+        "YellowGreen":(50,205,154),
+        "PastelGreen":(119,221,119),
+        "HummingbirdGreen":(23,232,127),
+        "NebulaGreen":(23,232,89),
+        "StoplightGoGreen":(100,233,87),
+        "NeonGreen":(41,245,22),
+        "JadeGreen":(110,251,94),
+        "LimeMintGreen":(127,245,54),
+        "SpringGreen":(127,255,0),
+        "MediumSpringGreen":(154,250,0),
+        "EmeraldGreen":(23,251,95),
+        "Lime":(0,255,0),
+        "LawnGreen":(0,252,124),
+        "BrightGreen":(0,255,102),
+        "Chartreuse":(0,255,127),
+        "YellowLawnGreen":(23,247,135),
+        "AloeVeraGreen":(22,245,152),
+        "DullGreenYellow":(23,251,177),
+        "LemonGreen":(2,248,173),
+        "GreenYellow":(47,255,173),
+        "ChameleonGreen":(22,245,189),
+        "NeonYellowGreen":(1,238,218),
+        "YellowGreenGrosbeak":(22,245,226),
+        "TeaGreen":(93,251,204),
+        "SlimeGreen":(84,233,188),
+        "AlgaeGreen":(134,233,100),
+        "LightGreen":(144,238,144),
+        "DragonGreen":(146,251,106),
+        "PaleGreen":(152,251,152),
+        "MintGreen":(152,255,152),
+        "GreenThumb":(170,234,181),
+        "OrganicBrown":(166,249,227),
+        "LightJade":(184,253,195),
+        "LightMintGreen":(211,229,194),
+        "LightRoseGreen":(219,249,219),
+        "ChromeWhite":(212,241,232),
+        "HoneyDew":(240,255,240),
+        "MintCream":(250,255,245),
+        "LemonChiffon":(205,250,255),
+        "Parchment":(194,255,255),
+        "Cream":(204,255,255),
+        "CreamWhite":(208,253,255),
+        "LightGoldenRodYellow":(210,250,250),
+        "LightYellow":(224,255,255),
+        "Beige":(220,245,245),
+        "Cornsilk":(220,248,255),
+        "Blonde":(217,246,251),
+        "Champagne":(206,231,247),
+        "AntiqueWhite":(215,235,250),
+        "PapayaWhip":(213,239,255),
+        "BlanchedAlmond":(205,235,255),
+        "Bisque":(196,228,255),
+        "Wheat":(179,222,245),
+        "Moccasin":(181,228,255),
+        "Peach":(180,229,255),
+        "LightOrange":(177,216,254),
+        "PeachPuff":(185,218,255),
+        "CoralPeach":(171,213,251),
+        "NavajoWhite":(173,222,255),
+        "GoldenBlonde":(161,231,251),
+        "GoldenSilk":(195,227,243),
+        "DarkBlonde":(182,226,240),
+        "LightGold":(172,229,241),
+        "Vanilla":(171,229,243),
+        "TanBrown":(182,229,236),
+        "DirtyWhite":(201,228,232),
+        "PaleGoldenRod":(170,232,238),
+        "Khaki":(140,230,240),
+        "CardboardBrown":(116,218,237),
+        "HarvestGold":(117,226,237),
+        "SunYellow":(124,232,255),
+        "CornYellow":(128,243,255),
+        "PastelYellow":(132,248,250),
+        "NeonYellow":(51,255,255),
+        "Yellow":(0,255,255),
+        "CanaryYellow":(0,239,255),
+        "BananaYellow":(22,226,245),
+        "MustardYellow":(88,219,255),
+        "GoldenYellow":(0,223,255),
+        "BoldYellow":(36,219,249),
+        "RubberDuckyYellow":(1,216,255),
+        "Gold":(0,215,255),
+        "BrightGold":(23,208,253),
+        "ChromeGold":(68,206,255),
+        "GoldenBrown":(23,193,234),
+        "DeepYellow":(0,190,246),
+        "MacaroniandCheese":(102,187,242),
+        "Saffron":(23,185,251),
+        "NeonGold":(1,189,253),
+        "Beer":(23,177,251),
+        "OrangeYellow":(66,174,255),
+        "YellowOrange":(66,174,255),
+        "Cantaloupe":(47,166,255),
+        "CheeseOrange":(0,166,255),
+        "Orange":(0,165,255),
+        "BrownSand":(77,154,238),
+        "SandyBrown":(96,164,244),
+        "BrownSugar":(111,167,226),
+        "CamelBrown":(107,154,193),
+        "DeerBrown":(131,191,230),
+        "BurlyWood":(135,184,222),
+        "Tan":(140,180,210),
+        "LightFrenchBeige":(127,173,200),
+        "Sand":(128,178,194),
+        "Sage":(138,184,188),
+        "FallLeafBrown":(96,181,200),
+        "GingerBrown":(98,190,201),
+        "BronzeGold":(93,174,201),
+        "DarkKhaki":(107,183,189),
+        "OliveGreen":(108,184,186),
+        "Brass":(66,166,181),
+        "CookieBrown":(23,163,199),
+        "MetallicGold":(55,175,212),
+        "BeeYellow":(23,171,233),
+        "SchoolBusYellow":(23,163,232),
+        "GoldenRod":(32,165,218),
+        "OrangeGold":(23,160,212),
+        "Caramel":(23,142,198),
+        "DarkGoldenRod":(11,134,184),
+        "Cinnamon":(23,137,197),
+        "Peru":(63,133,205),
+        "Bronze":(50,127,205),
+        "TigerOrange":(65,129,200),
+        "Copper":(51,115,184),
+        "DarkGold":(57,108,170),
+        "MetallicBronze":(66,113,169),
+        "DarkAlmond":(78,120,171),
+        "Wood":(51,111,150),
+        "OakBrown":(23,101,128),
+        "AntiqueBronze":(30,93,102),
+        "Hazel":(24,118,142),
+        "DarkYellow":(0,128,139),
+        "DarkMoccasin":(57,120,130),
+        "KhakiGreen":(93,134,138),
+        "MillenniumJade":(124,145,147),
+        "DarkBeige":(118,140,159),
+        "BulletShell":(96,155,175),
+        "ArmyBrown":(96,123,130),
+        "Sandstone":(95,109,120),
+        "Taupe":(50,60,72),
+        "Mocha":(38,61,73),
+        "MilkChocolate":(28,59,81),
+        "GrayBrown":(53,54,61),
+        "DarkCoffee":(47,47,59),
+        "OldBurgundy":(46,48,67),
+        "WesternCharcoal":(63,65,73),
+        "BakersBrown":(23,51,92),
+        "DarkBrown":(33,67,101),
+        "SepiaBrown":(20,66,112),
+        "DarkBronze":(0,74,128),
+        "Coffee":(55,78,111),
+        "BrownBear":(59,92,131),
+        "RedDirt":(23,82,127),
+        "Sepia":(44,70,127),
+        "Sienna":(45,82,160),
+        "SaddleBrown":(19,69,139),
+        "DarkSienna":(23,65,138),
+        "Sangria":(23,56,126),
+        "BloodRed":(23,53,126),
+        "Chestnut":(53,69,149),
+        "CoralBrown":(56,70,158),
+        "ChestnutRed":(44,74,195),
+        "Mahogany":(0,64,192),
+        "RedGold":(6,84,235),
+        "RedFox":(23,88,195),
+        "DarkBisque":(0,101,184),
+        "LightBrown":(29,101,181),
+        "PetraGold":(52,103,183),
+        "Rust":(65,98,195),
+        "CopperRed":(81,109,203),
+        "OrangeSalmon":(81,116,196),
+        "Chocolate":(30,105,210),
+        "Sedona":(0,102,204),
+        "PapayaOrange":(23,103,229),
+        "HalloweenOrange":(44,108,230),
+        "NeonOrange":(0,103,255),
+        "BrightOrange":(31,95,255),
+        "PumpkinOrange":(23,114,248),
+        "CarrotOrange":(23,128,248),
+        "DarkOrange":(0,140,255),
+        "ConstructionConeOrange":(49,116,248),
+        "IndianSaffron":(34,119,255),
+        "SunriseOrange":(81,116,230),
+        "MangoOrange":(64,128,255),
+        "Coral":(80,127,255),
+        "BasketBallOrange":(88,129,248),
+        "LightSalmonRose":(107,150,249),
+        "LightSalmon":(122,160,255),
+        "DarkSalmon":(122,150,233),
+        "Tangerine":(97,138,231),
+        "LightCopper":(103,138,218),
+        "SalmonPink":(116,134,255),
+        "Salmon":(114,128,250),
+        "PeachPink":(136,139,249),
+        "LightCoral":(128,128,240),
+        "PastelRed":(128,114,246),
+        "PinkCoral":(113,116,231),
+        "BeanRed":(89,93,247),
+        "ValentineRed":(81,84,229),
+        "IndianRed":(92,92,205),
+        "Tomato":(71,99,255),
+        "ShockingOrange":(60,91,229),
+        "OrangeRed":(0,69,255),
+        "Red":(0,0,255),
+        "NeonRed":(3,28,253),
+        "ScarletRed":(0,36,255),
+        "RubyRed":(23,34,246),
+        "FerrariRed":(26,13,247),
+        "FireEngineRed":(23,40,246),
+        "LavaRed":(23,34,228),
+        "LoveRed":(23,27,228),
+        "Grapefruit":(31,56,220),
+        "CherryRed":(65,70,194),
+        "ChilliPepper":(23,27,193),
+        "FireBrick":(34,34,178),
+        "TomatoSauceRed":(7,24,178),
+        "Brown":(42,42,165),
+        "CarbonRed":(42,13,167),
+        "Cranberry":(15,0,159),
+        "SaffronRed":(20,19,147),
+        "CrimsonRed":(0,0,153),
+        "RedWine":(18,0,153),
+        "WineRed":(18,0,153),
+        "DarkRed":(0,0,139),
+        "VeryDarkRed":(0,0,10),
+        "Maroon":(0,0,128),
+        "Burgundy":(26,0,140),
+        "Vermilion":(27,25,126),
+        "DeepRed":(23,5,128),
+        "RedBlood":(0,0,102),
+        "BloodNight":(6,22,85),
+        "DarkScarlet":(25,3,86),
+        "BlackBean":(2,12,61),
+        "ChocolateBrown":(15,0,63),
+        "Midnight":(23,27,43),
+        "PurpleLily":(53,10,85),
+        "PurpleMaroon":(65,5,129),
+        "PlumPie":(65,5,125),
+        "PlumVelvet":(82,5,125),
+        "DarkRaspberry":(87,38,135),
+        "VelvetMaroon":(77,53,126),
+        "RosyFinch":(82,78,127),
+        "DullPurple":(93,82,127),
+        "Puce":(88,90,127),
+        "RoseDust":(112,112,153),
+        "PastelBrown":(127,144,177),
+        "RosyPink":(129,132,179),
+        "RosyBrown":(143,143,188),
+        "KhakiRose":(142,144,197),
+        "LipstickPink":(147,135,196),
+        "PinkBrown":(137,129,196),
+        "OldRose":(129,128,192),
+        "DustyPink":(148,138,213),
+        "PinkDaisy":(163,153,231),
+        "Rose":(170,173,232),
+        "DustyRose":(166,169,201),
+        "SilverPink":(173,174,196),
+        "GoldPink":(194,199,230),
+        "RoseGold":(192,197,236),
+        "DeepPeach":(164,203,255),
+        "PastelOrange":(139,184,248),
+        "DesertSand":(175,201,237),
+        "UnbleachedSilk":(202,221,255),
+        "PigPink":(228,215,253),
+        "PalePink":(215,212,242),
+        "Blush":(232,230,255),
+        "MistyRose":(225,228,255),
+        "PinkBubbleGum":(221,223,255),
+        "LightRose":(205,207,251),
+        "LightRed":(203,204,255),
+        "WarmPink":(189,198,246),
+        "DeepRose":(185,187,251),
+        "Pink":(203,192,255),
+        "LightPink":(193,182,255),
+        "SoftPink":(191,184,255),
+        "DonutPink":(190,175,250),
+        "BabyPink":(186,175,250),
+        "FlamingoPink":(176,167,249),
+        "PastelPink":(170,163,254),
+        "RosePink":(176,161,231),
+        "PinkRose":(176,161,231),
+        "CadillacPink":(174,138,227),
+        "CarnationPink":(161,120,247),
+        "PastelRose":(143,120,229),
+        "BlushRed":(148,110,229),
+        "PaleVioletRed":(147,112,219),
+        "PurplePink":(135,101,209),
+        "TulipPink":(124,90,194),
+        "BashfulPink":(131,82,194),
+        "DarkPink":(128,84,231),
+        "DarkHotPink":(171,96,246),
+        "HotPink":(180,105,255),
+        "WatermelonPink":(133,108,252),
+        "VioletRed":(138,53,246),
+        "HotDeepPink":(135,40,245),
+        "BrightPink":(127,0,255),
+        "DeepPink":(147,20,255),
+        "NeonPink":(170,53,245),
+        "ChromePink":(170,51,255),
+        "NeonHotPink":(156,52,253),
+        "PinkCupcake":(157,94,228),
+        "RoyalPink":(172,89,231),
+        "DimorphothecaMagenta":(157,49,227),
+        "PinkLemonade":(124,40,228),
+        "RedPink":(85,42,250),
+        "Raspberry":(93,11,227),
+        "Crimson":(60,20,220),
+        "BrightMaroon":(72,33,195),
+        "RoseRed":(86,30,194),
+        "RoguePink":(105,40,193),
+        "BurntPink":(103,34,193),
+        "PinkViolet":(107,34,202),
+        "MagentaPink":(139,51,204),
+        "MediumVioletRed":(133,21,199),
+        "DarkCarnationPink":(131,34,193),
+        "RaspberryPurple":(108,68,179),
+        "PinkPlum":(143,59,185),
+        "Orchid":(214,112,218),
+        "DeepMauve":(212,115,223),
+        "Violet":(238,130,238),
+        "FuchsiaPink":(255,119,255),
+        "BrightNeonPink":(255,51,244),
+        "Fuchsia":(255,0,255),
+        "Magenta":(255,0,255),
+        "CrimsonPurple":(236,56,226),
+        "HeliotropePurple":(255,98,212),
+        "TyrianPurple":(236,90,196),
+        "MediumOrchid":(211,85,186),
+        "PurpleFlower":(199,74,167),
+        "OrchidPurple":(181,72,176),
+        "RichLilac":(210,102,182),
+        "PastelViolet":(188,145,210),
+        "MauveTaupe":(109,95,145),
+        "ViolaPurple":(126,88,126),
+        "Eggplant":(81,64,97),
+        "PlumPurple":(89,55,88),
+        "Grape":(128,90,94),
+        "PurpleNavy":(128,81,78),
+        "SlateBlue":(205,90,106),
+        "BlueLotus":(236,96,105),
+        "Blurple":(242,101,88),
+        "LightSlateBlue":(255,106,115),
+        "MediumSlateBlue":(238,104,123),
+        "PeriwinklePurple":(207,117,117),
+        "VeryPeri":(171,103,102),
+        "BrightGrape":(168,45,111),
+        "PurpleAmethyst":(199,45,108),
+        "BrightPurple":(173,13,106),
+        "DeepPeriwinkle":(166,83,84),
+        "DarkSlateBlue":(139,61,72),
+        "PurpleHaze":(126,56,78),
+        "PurpleIris":(126,27,87),
+        "DarkPurple":(80,1,75),
+        "DeepPurple":(63,1,54),
+        "MidnightPurple":(71,26,46),
+        "PurpleMonster":(126,27,70),
+        "Indigo":(130,0,75),
+        "BlueWhale":(126,45,52),
+        "RebeccaPurple":(153,51,102),
+        "PurpleJam":(126,40,106),
+        "DarkMagenta":(139,0,139),
+        "Purple":(128,0,128),
+        "FrenchLilac":(142,96,134),
+        "DarkOrchid":(204,50,153),
+        "DarkViolet":(211,0,148),
+        "PurpleViolet":(201,56,141),
+        "JasminePurple":(236,59,162),
+        "PurpleDaffodil":(255,65,176),
+        "ClematisViolet":(206,45,132),
+        "BlueViolet":(226,43,138),
+        "PurpleSageBush":(199,93,122),
+        "LovelyPurple":(236,56,127),
+        "NeonPurple":(255,0,157),
+        "PurplePlum":(239,53,142),
+        "AztechPurple":(255,59,137),
+        "MediumPurple":(219,112,147),
+        "LightPurple":(215,103,132),
+        "CrocusPurple":(236,114,145),
+        "PurpleMimosa":(255,123,158),
+        "Periwinkle":(255,204,204),
+        "PaleLilac":(255,208,220),
+        "LavenderPurple":(182,123,150),
+        "RosePurple":(202,159,176),
+        "Lilac":(200,162,200),
+        "Mauve":(255,176,224),
+        "BrightLilac":(239,145,216),
+        "PurpleDragon":(199,142,195),
+        "Plum":(221,160,221),
+        "BlushPink":(236,169,230),
+        "PastelPurple":(232,162,242),
+        "BlossomPink":(255,183,249),
+        "WisteriaPurple":(199,174,198),
+        "PurpleThistle":(211,185,210),
+        "Thistle":(216,191,216),
+        "PurpleWhite":(227,211,223),
+        "PeriwinklePink":(236,207,233),
+        "CottonCandy":(255,223,252),
+        "LavenderPinocchio":(226,221,235),
+        "DarkWhite":(209,217,225),
+        "AshWhite":(212,228,233),
+        "WhiteChocolate":(214,230,237),
+        "SoftIvory":(221,240,250),
+        "OffWhite":(227,240,248),
+        "PearlWhite":(240,246,248),
+        "RedWhite":(234,232,243),
+        "LavenderBlush":(245,240,255),
+        "Pearl":(244,238,253),
+        "EggShell":(227,249,255),
+        "OldLace":(227,240,254),
+        "Linen":(230,240,250),
+        "SeaShell":(238,245,255),
+        "BoneWhite":(238,246,249),
+        "Rice":(239,245,250),
+        "FloralWhite":(240,250,255),
+        "Ivory":(240,255,255),
+        "WhiteGold":(244,255,255),
+        "LightWhite":(247,255,255),
+        "WhiteSmoke":(245,245,245),
+        "Cotton":(249,251,251),
+        "Snow":(250,250,255),
+        "MilkWhite":(255,252,254),
+        "HalfWhite":(250,254,255),
+        "White":(255,255,255)
+        }
+
+    @staticmethod
+    def BGR(colorname):
+        """ Return color tuple for any given name. """
+        return pilomarimage.BGRColor.get(colorname,(0,0,0))
+        
+    BGRAColor = {
+        "Black":(0,0,0,255),
+        "Blue":(255,0,0,255),
+        "Cyan":(255,255,0,255),
+        "DimGray":(105,105,105,255),
+        "Gold":(0,215,255,255),
+        "Green":(0,255,0,255),
+        "HotPink":(180,105,255,255),
+        "LimeGreen":(50,205,50,255),
+        "Orange":(0,165,255,255),
+        "PaleGreen":(152,251,152,255),
+        "Red":(0,0,255,255),
+        "Transparent":(0,0,0,0),
+        "White":(255,255,255,255),
+        "Yellow":(0,255,255,255)
+        }
+
+    @staticmethod
+    def BGRA(colorname):
+        """ Return color tuple for any given name. """
+        return pilomarimage.BGRAColor.get(colorname,(0,0,0,255))
+
+    GRAYSCALEColor = {
+        "White":255,
+        "50":127,
+        "Black":0    
+    }
+    
+    @staticmethod
+    def GRAYSCALE(colorname):
+        """ Return grayscale tuple for any given name. """
+        return pilomarimage.GRAYSCALEColor.get(colorname,0)
     
     # Define default filter scripts.
     # - You can overwrite this with your own set of scripts by assigning pilomarimage.FILTERSCRIPTS = {.....}
@@ -940,19 +980,19 @@ class pilomarimage():
         else: y = self.Graph_YMinVal
         x1,y1 = self.MapToGraph(self.Graph_XMinVal,y)
         x2,y2 = self.MapToGraph(self.Graph_XMaxVal,y)
-        self.DrawLine((x1,y1),(x2,y2),color=pilomarimage.BGRBlack) # x-axis
+        self.DrawLine((x1,y1),(x2,y2),color=pilomarimage.BGRColor['Black']) # x-axis
         # Mark scale.
         i = self.Graph_XMinVal
         while i <= self.Graph_XMaxVal:
             # Mark this location and value.
             x1,y1 = self.MapToGraph(i,y)
             y2 = y1 - 20
-            self.DrawLine((x1,y1),(x1,y2),color=pilomarimage.BGRBlack) # Tick mark.
-            self.AddText(str(round(i,3)),x1,y1 - 30,color=pilomarimage.BGRBlack,hjust='c',vjust='t')
+            self.DrawLine((x1,y1),(x1,y2),color=pilomarimage.BGRColor['Black']) # Tick mark.
+            self.AddText(str(round(i,3)),x1,y1 - 30,color=pilomarimage.BGRColor['Black'],hjust='c',vjust='t')
             i += self.Graph_XTicks
         # Label the axis.
         cx, _ = self.CenterCoordinates()
-        self.AddText(self.Graph_XAxisTitle,cx,int(self.Graph_YBorder / 2),color=pilomarimage.BGRBlack,size=2.0,hjust='c',vjust='c',thickness=2)
+        self.AddText(self.Graph_XAxisTitle,cx,int(self.Graph_YBorder / 2),color=pilomarimage.BGRColor['Black'],size=2.0,hjust='c',vjust='c',thickness=2)
         return True
 
     def DrawYAxis(self):
@@ -963,26 +1003,26 @@ class pilomarimage():
         else: x = self.Graph_XMinVal
         x1,y1 = self.MapToGraph(x,self.Graph_YMinVal)
         x2,y2 = self.MapToGraph(x,self.Graph_YMaxVal)
-        self.DrawLine((x1,y1),(x2,y2),color=pilomarimage.BGRBlack) # y-axis
+        self.DrawLine((x1,y1),(x2,y2),color=pilomarimage.BGRColor['Black']) # y-axis
         # Mark scale.
         i = self.Graph_YMinVal
         while i <= self.Graph_YMaxVal:
             # Mark this location and value.
             x1,y1 = self.MapToGraph(x,i)
             x2 = x1 - 20
-            self.DrawLine((x1,y1),(x2,y1),color=pilomarimage.BGRBlack) # Tick mark.
-            self.AddText(str(round(i,3)),x1 - 30,y1,color=pilomarimage.BGRBlack,hjust='r',vjust='c')
+            self.DrawLine((x1,y1),(x2,y1),color=pilomarimage.BGRColor['Black']) # Tick mark.
+            self.AddText(str(round(i,3)),x1 - 30,y1,color=pilomarimage.BGRColor['Black'],hjust='r',vjust='c')
             i += self.Graph_YTicks
         # Label the axis.
         _, cy = self.CenterCoordinates()
-        self.AddAngleText(self.Graph_YAxisTitle,int(self.Graph_XBorder / 2),cy,color=pilomarimage.BGRBlack,size=2.0,hjust='c',vjust='c',thickness=2,angle=90) # Rotated. Not working smoothly yet.
+        self.AddAngleText(self.Graph_YAxisTitle,int(self.Graph_XBorder / 2),cy,color=pilomarimage.BGRColor['Black'],size=2.0,hjust='c',vjust='c',thickness=2,angle=90) # Rotated. Not working smoothly yet.
         return True
 
     def ListDataSets(self):
         """ Generate a key on the graph.
             List the names of the available data sets in the image. """
         x = self.GetWidth() - self.Graph_XBorder + 50
-        self.AddText("Datasets:-",x,self.GetHeight() - 500,color=pilomarimage.BGRBlack)
+        self.AddText("Datasets:-",x,self.GetHeight() - 500,color=pilomarimage.BGRColor['Black'])
         for dataset in self.Graph_DataSets:
             self.AddText(dataset.Name,x,self.PrevTextY,color=dataset.Color)
         return True
@@ -1015,7 +1055,6 @@ class pilomarimage():
                     if color == None: color = dataset.Color # Inherit color from parent dataset.
                     datapoint = data_point(x,y,color,label,style,xname,yname)
                     dataset.Add(datapoint)
-        #else: print("pilomarimage.Adddata_point():",x,y,"too close to last point. Ignored.")
         return True
     
     def Adddata_set(self,name,color=None,style=['line']):
@@ -1080,9 +1119,9 @@ class pilomarimage():
             for i,datapoint in enumerate(dataset.DataPoints):
                 x,y = self.MapToGraph(datapoint.X,datapoint.Y)
                 r = 5
-                color = self.SafeColor(datapoint.Color,default=pilomarimage.BGRFuchsia)
+                color = self.SafeColor(datapoint.Color,default=pilomarimage.BGRColor['Fuchsia'])
                 if 'line' in dataset.Style and i > 0: # Line between points.
-                    self.DrawLine((prevx,prevy),(x,y),color=self.SafeColor(dataset.Color,default=pilomarimage.BGRCyan))
+                    self.DrawLine((prevx,prevy),(x,y),color=self.SafeColor(dataset.Color,default=pilomarimage.BGRColor['Cyan']))
                 if 'dot' in datapoint.Style: # Draw a small dot where the datapoint is.
                     self.FillCircle(x,y,r,color) # Dot on the datapoint.
                 if 'point' in datapoint.Style: # Draw a single pixel where the datapoint is.
@@ -1095,8 +1134,7 @@ class pilomarimage():
         """ Dump the graph data. """
         ft = filename.rindex('.')
         filename = filename[:ft] + ".dat"
-        #print("ExportData:",filename)
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ExportData:",str(filename),terminal=False)
+        self.Log("pilomarimage",self.Name,".ExportData:",str(filename),terminal=False)
         with open(filename,'w') as f:
             line = "dataset.Name\t"
             line += "datapoint.X\t"
@@ -1124,7 +1162,7 @@ class pilomarimage():
             This is VERY crude! IF you want proper graphing capabilities then install matplotlib!
             This is really to support development/debugging work sometimes while avoiding having to install extra packages.
             export=True means a datafile is dumped too. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".PlotGraph:",str(filename),str(export),terminal=False)
+        self.Log("pilomarimage",self.Name,".PlotGraph:",str(filename),str(export),terminal=False)
         self.InvertHeight = True # Easier to plot graphs if HEIGHT pixels count from the bottom up.
         # Find axis limits.
         self.AnalyseDataPoints()
@@ -1132,14 +1170,14 @@ class pilomarimage():
         self.EstablishGraphScale()
         # Establish graph space
         self.New(height,width,'bgr') # New BGR image.
-        self.FillColor(pilomarimage.BGRWhite) # White canvas
+        self.FillColor(pilomarimage.BGRColor['White']) # White canvas
         self.Graph_XBorder = int(width * 0.1)
         self.Graph_YBorder = int(height * 0.1)
-        self.DrawRectangle((self.Graph_XBorder,self.Graph_YBorder),(width - self.Graph_XBorder,height - self.Graph_YBorder),color=pilomarimage.BGRDarkGray)
+        self.DrawRectangle((self.Graph_XBorder,self.Graph_YBorder),(width - self.Graph_XBorder,height - self.Graph_YBorder),color=pilomarimage.BGRColor['DarkGray'])
         self.DrawXAxis() # Draw X axis on graph.
         self.DrawYAxis() # Draw Y axis on graph.
         x,y = self.CenterCoordinates()
-        self.AddText(self.Graph_Title,x,int(height - self.Graph_YBorder / 2),size=3,color=pilomarimage.BGRBlack,thickness=3,hjust='c',vjust='c')
+        self.AddText(self.Graph_Title,x,int(height - self.Graph_YBorder / 2),size=3,color=pilomarimage.BGRColor['Black'],thickness=3,hjust='c',vjust='c')
         self.ListDataSets() # Add labels for the available datasets.
         self.PlotData() # Plot the data on the graph.
         self.DrawGraphID() # Write footing information onto the graph.
@@ -1152,20 +1190,25 @@ class pilomarimage():
     def DrawGraphID(self):
         """ Write footing information onto the graph. """
         line = ' pilomarimage.PlotGraph ' + str(datetime.now()).split('.')[0] + ' UTC '
-        self.AddText(line,self.GetWidth() - 10, 20, color=pilomarimage.BGRBlack,hjust='r')
+        self.AddText(line,self.GetWidth() - 10, 20, color=pilomarimage.BGRColor['Black'],hjust='r')
         return True
         
     def SetLogger(self,logger):
         """ Set up link to logging class and shortcuts to common methods. """
+        # The logging methods default to 'consumers' which will just silently eat any parameters passed.
         self.Logger = logger # Logger instance.
-        self.Log = None
-        self.ReportException = None # Report exception details to logfile.
-        self.RaiseException = None # Report and raise exception. 
+        self.Log = self._NullLogger # No log method.
+        self.ReportException = self._NullLogger # Cannot report exception details to logfile.
+        self.RaiseException = self._NullLogger # Cannor report and raise exception. 
         if hasattr(logger,'Log'): self.Log = logger.Log # Log method.
         if hasattr(logger,'ReportException'): self.ReportException = logger.ReportException # Report exception details to logfile.
         if hasattr(logger,'RaiseException'): self.RaiseException = logger.RaiseException # Report and raise exception. 
-        if self.Log != None: self.Log("pilomarimage.SetLogger(",self.Name,"): Linked to this log file.",terminal=False)
-        return True
+        #self.Log("pilomarimage.SetLogger: Linked to this log file.",terminal=False)
+
+    def _NullLogger(self,*args, **kwargs):
+        """ Null logger. Absorbs parameters and .log call but does nothing. 
+            Use this when there is no logger defined. """
+        return
 
     def _initialize(self):
         """ Create default values for the object. 
@@ -1175,7 +1218,7 @@ class pilomarimage():
         self.ImageAccumulator = None # Array of cumulative image values. (For live stacking)
         self.ImageCounter = None # Array of how many values are accumulated into each pixel of self.ImageAccumulator. (For live stacking)
         self.ActionList = [] # List of actions performed on the image.
-        self.CreatedTimestamp = self.Now()
+        self.CreatedTimestamp = self.NowUTC()
         self.ModifiedTimestamp = None
         self.StarList = [] # Was None
         self.StarCount = 0
@@ -1200,6 +1243,7 @@ class pilomarimage():
         # Text collision avoidance...
         self.TextList = [] # When text is printed, this holds the co-ordinates of each block of text added [[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],...]
         self.AvoidTextCollisions = False # When TRUE, new text is only created if it doesn't overlap existing text.
+        self.ExifData = {} # Empty dictionary of any associated EXIF tags loaded from an image.
         
     def TextCollision(self,fromx,fromy,tox,toy):
         """ Return TRUE if proposed text area collides with an existing one. """
@@ -1251,42 +1295,45 @@ class pilomarimage():
 
     def NextInterpolation(self):
         """ Move on to the next available sampling method. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".NextInterpolation()",terminal=False)
+        self.Log("pilomarimage",self.Name,".NextInterpolation()",terminal=False)
         i = (self.ResizeMethods.index(self.ResizeMethod) + 1) % len(self.ResizeMethods)
         self.ResizeMethod = self.ResizeMethods[i]
         self.ActionList.append(['nextinterpolation',self.ResizeMethod])
         
     def PrevInterpolation(self):
         """ Move back to the previous available sampling method. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".PrevInterpolation()",terminal=False)
+        self.Log("pilomarimage",self.Name,".PrevInterpolation()",terminal=False)
         i = (self.ResizeMethods.index(self.ResizeMethod) - 1) % len(self.ResizeMethods)
         self.ResizeMethod = self.ResizeMethods[i]
         self.ActionList.append(['previnterpolation',self.ResizeMethod])
     
-    def Now(self):
+    def NowUTC(self):
         """ Return system UTC timestamp. """
         return datetime.now(timezone.utc)
         
     def Clear(self):
         """ Clear the image buffer and related attributes. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".Clear()",terminal=False)
+        self.Log("pilomarimage",self.Name,".Clear()",terminal=False)
         self._initialize()
         self.ActionList.append(['clear'])
-        self.CreatedTimestamp = self.Now()
-        self.ModifiedTimestamp = self.Now()
+        self.CreatedTimestamp = self.NowUTC()
+        self.ModifiedTimestamp = self.NowUTC()
         
     def LoadBuffer(self,imagebuffer):
         """ Import an existing OpenCV/Numpy image buffer. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".LoadBuffer()",terminal=False)
+        self.Log("pilomarimage",self.Name,".LoadBuffer()",terminal=False)
         self.Clear()
-        self.ImageBuffer = imagebuffer.copy()
-        self.ModifiedTimestamp = self.Now()
+        if type(imagebuffer) != type(None):
+            self.ImageBuffer = imagebuffer.copy()
+            self.ModifiedTimestamp = self.NowUTC()
+        else:
+            self.Log("pilomarimage",self.Name,".LoadBuffer(). FROM buffer is None.",terminal=False)
         return self.ImageExists()
         
     def AccumulateBuffer(self,buffer):
         """ Accumulate values in a buffer into a running total buffer. 
             buffer is a reference to another pilomarimage instance."""
-        if self.Log != None: self.Log("pilomarimage",self.Name,".AccumulateBuffer()",terminal=False)
+        self.Log("pilomarimage",self.Name,".AccumulateBuffer()",terminal=False)
         if isinstance(self.ImageAccumulator,type(None)): # Initialize accumulator.
             self.ImageAccumulator = np.zeros_like(buffer.ImageBuffer,np.uint16) # Create array of same dimensions, but with larger storage type.
             self.ImageCounter = np.zeros_like(buffer.ImageBuffer,np.uint8) # Create array of same dimensions but with uint8 storage type.
@@ -1294,11 +1341,11 @@ class pilomarimage():
         self.ImageAccumulator.add(self.ImageAccumulator,buffer.ImageBuffer)
         self.ImageCount += 1
         self.ActionList.append(['accumulatebuffer',buffer.Name])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def ResolveAccumulator(self):
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ResolveAccumulator()",terminal=False)
+        self.Log("pilomarimage",self.Name,".ResolveAccumulator()",terminal=False)
         if isinstance(self.ImageAccumulator,type(None)):
             print("pilomarimage.ResolveAccumulator(): ImageAccumulator is not initialised.")
             return False
@@ -1306,22 +1353,42 @@ class pilomarimage():
         self.ImageBuffer = np.zeros_like(self.ImageAccumulator,np.uint8) # Create array of same dimensions, but with regular image datatype.
         self.ImageBuffer[self.ImageCount != 0] = self.ImageAccumulator / self.ImageCount
         self.ActionList.append(['resolveaccumulator'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
-        
-    def LoadFile(self,filename):
+  
+    def GetExif(self,filename):
+        """ Given a disc file, load any EXIF tags available. 
+            Returns a dictionary of TAG name and value.
+            It does not populate self.ExifData dictionary. """
+        # from PIL import Image as PIL_Image
+        # from PIL import ExifTags as PIL_ExifTags
+        with PIL_Image.open('img.jpg') as img: # Use PIL to open the image.
+            raw_data = img.getexif() # Use PIL getexif() method to extract raw exif data.
+        if raw_data == None: raw_data = {} # No exif data available.
+        for key,val in raw_data.items(): # Convert the raw exif keys into recognisable tags.
+            if key in PIL_ExifTags: # Can convert key into a tag.
+                exif_data[PIL_ExifTags.TAGS[key]] = val
+            else: # Cannot convert the key.
+                exif_data[key] = val
+        return exif_data
+  
+    def LoadFile(self,filename,loadexif=False):
         """ Load image buffer from disc. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".LoadFile(",filename,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".LoadFile(",filename,")",terminal=False)
         self._initialize()
         self.ImageBuffer = cv2.imread(filename,cv2.IMREAD_COLOR)
         if self.ImageExists():
             self.ImageMask = np.ones_like(self.ImageBuffer,np.uint8) # All cells are active.
             self.ActionList.append(['load',filename])
-            self.CreatedTimestamp = self.Now()
+            self.CreatedTimestamp = self.NowUTC()
             result = True
+            if loadexif: # Also load the EXIF tags from the file.
+                self.ExifData = self.GetExif(filename)
+            else:
+                self.ExifData = {} # Empty.
         else:
             # File didn't load!
-            if self.Log != None: self.Log("pilomarimage",self.Name,".LoadFile(",filename,") failed.",terminal=False)
+            self.Log("pilomarimage",self.Name,".LoadFile(",filename,") failed.",terminal=False)
             result = False
         return result
 
@@ -1329,13 +1396,17 @@ class pilomarimage():
         """ Given a filename, return a lower case file type. """
         return filename.split('.')[-1].lower()
 
-    def SaveFile(self,filename):
+    def SaveFile(self,filename,quality=None):
         """ Save image buffer to disc.
             To specify the quality for jpeg files you can use a call like this...
-                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), 90] # 90% image quality. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".SaveFile(",filename,")",terminal=False)
+                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), 90] # 90% image quality.
+            Set the 'quality' input parameter when making this call to override the jpg quality to your preferred value. """
+        self.Log("pilomarimage",self.Name,".SaveFile(",filename,")",terminal=False)
         if self.ImageExists():
-            cv2.imwrite(filename,self.ImageBuffer) # Doesn't report errors very well, beware.
+            if quality != None: # Image quality was specified.
+                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]) # imwrite doesn't report errors very well, beware.
+            else: # Image quality can be default.
+                cv2.imwrite(filename,self.ImageBuffer) # imwrite doesn't report errors very well, beware.
             self.ActionList.append(['save',filename])
         else:
             print("pilomarimage.SaveFile(",filename,"): No ImageBuffer.")
@@ -1359,12 +1430,12 @@ class pilomarimage():
 
     def ClipImage(self,xstart,ystart,xend,yend):
         """ Clip the image. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ClipImage(",xstart,ystart,xend,yend,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".ClipImage(",xstart,ystart,xend,yend,")",terminal=False)
         gt = self.GetType()
         if gt == 'grayscale': self.ImageBuffer = self.ImageBuffer[ystart:yend,xstart:xend]
         else: self.ImageBuffer = self.ImageBuffer[ystart:yend,xstart:xend,:]
         self.ActionList.append(['clip',xstart,ystart,xend,yend])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def ScaleImage(self,scale=None,vscale=None,hscale=None):
@@ -1372,7 +1443,7 @@ class pilomarimage():
             scale is applied in both dimensions.
             vscale is applied to vertical only.
             hscale is applied to horizontal only. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ScaleImage(",scale,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".ScaleImage(",scale,")",terminal=False)
         if scale != None: # Same scale in both directions.
             vscale = scale
             hscale = scale
@@ -1384,17 +1455,17 @@ class pilomarimage():
             return False
         height = int(self.ImageBuffer.shape[0] * vscale)
         width = int(self.ImageBuffer.shape[1] * hscale)
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ScaleImage: Dimensions h",height,"w",width,terminal=False)
+        self.Log("pilomarimage",self.Name,".ScaleImage: Dimensions h",height,"w",width,terminal=False)
         self.ImageBuffer = cv2.resize(self.ImageBuffer,(width,height),interpolation=self.ResizeMethod) # Note RESIZE takes (width,height) rather than usual openCV (height,width)!
         self.ActionList.append(['scale',scale,vscale,hscale,(width,height)])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
     
     def HorizontalBlurImage(self,band):
         """ Shrink the current image buffer horizontally, averaging the colors. 
             Then return the image buffer to the correct width, blurring that average across the image. 
             band = the pixel width that the image is horizontally compressed to. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlurImage(",band,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".HorizontalBlurImage(",band,")",terminal=False)
         height = int(self.ImageBuffer.shape[0])
         originalwidth = int(self.ImageBuffer.shape[1])
         scale = band / originalwidth
@@ -1402,11 +1473,11 @@ class pilomarimage():
             print("pilomarimage.HorizontalBlurImage(scale",scale,") must be > 0.0")
             return False
         width = int(originalwidth * scale)
-        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
+        self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
         self.ImageBuffer = cv2.resize(self.ImageBuffer,(width,height),interpolation=cv2.INTER_AREA) # INTER_AREA better for SHRINKING.
         self.ImageBuffer = cv2.resize(self.ImageBuffer,(originalwidth,height),interpolation=cv2.INTER_LINEAR) # INTER_LINEAR and INTER_CUBIC best for STRETCHING.
         self.ActionList.append(['horizontalblurimage',scale,(width,height)])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def HorizontalBlurBuffer(self,buffer,band):
@@ -1414,7 +1485,7 @@ class pilomarimage():
             Then return the image buffer to the correct width, blurring that average across the image. 
             buffer = the image buffer to work on.
             band = the pixel width that the image is horizontally compressed to. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlurBuffer(",band,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".HorizontalBlurBuffer(",band,")",terminal=False)
         height = int(buffer.shape[0])
         originalwidth = int(buffer.shape[1])
         scale = band / originalwidth
@@ -1422,11 +1493,11 @@ class pilomarimage():
             print("pilomarimage.HorizontalBlurBuffer(scale",scale,") must be > 0.0")
             return False
         width = int(originalwidth * scale)
-        if self.Log != None: self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
+        self.Log("pilomarimage",self.Name,".HorizontalBlureImage: Dimensions h",height,"w",width,terminal=False)
         buffer = cv2.resize(buffer,(width,height),interpolation=cv2.INTER_AREA) # INTER_AREA better for SHRINKING.
         buffer = cv2.resize(buffer,(originalwidth,height),interpolation=cv2.INTER_LINEAR) # INTER_LINEAR and INTER_CUBIC best for STRETCHING.
         self.ActionList.append(['horizontalblurimage',scale,(width,height)])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return buffer
 
     def PercentageBuffer(self,buffer,percentage):
@@ -1434,23 +1505,23 @@ class pilomarimage():
             percentage = 0 : Buffer is fully black. 
             percentage = 50 : Buffer is reduced by 50%. 
             percentage = 100 : Buffer is returned unchanged. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".PercentageBuffer()",terminal=False)
+        self.Log("pilomarimage",self.Name,".PercentageBuffer()",terminal=False)
         pc = percentage / 100
         buffer = cv2.multiply(buffer,(pc,pc,pc,1.0))
         return buffer 
         
     def SubtractBuffer(self,buffer):
         """ Subtract 'buffer' from the main image buffer. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".SubtractBuffer()",terminal=False)
+        self.Log("pilomarimage",self.Name,".SubtractBuffer()",terminal=False)
         self.ImageBuffer = cv2.subtract(self.ImageBuffer,buffer)
         self.ActionList.append(['subtractbuffer'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
     
     def CloneImage(self,donor):
         """ Make this a copy of some other buffer.
             donor is a reference to another pilomarimage instance. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".CloneImage(",donor.Name,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".CloneImage(",donor.Name,")",terminal=False)
         if isinstance(donor.ImageBuffer,type(None)): self.ImageBuffer = None 
         else: self.ImageBuffer = donor.ImageBuffer.copy()
         if isinstance(donor.ImageMask,type(None)): self.ImageMask = None 
@@ -1475,7 +1546,7 @@ class pilomarimage():
             https://stackoverflow.com/questions/28717054/calculating-sharpness-of-an-image (Vektorsoft)
             low return values = More blurred. 
             high return values = More crisp. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".Sharpness()",terminal=False)
+        self.Log("pilomarimage",self.Name,".Sharpness()",terminal=False)
         canny = cv2.Canny(self.NewBufferType('grayscale'), 50,250) # Use canny edge detection.
         sharpness = np.mean(canny)
         return sharpness
@@ -1489,7 +1560,7 @@ class pilomarimage():
         tempimage = np.clip(tempimage,0,255).astype(np.uint8) # Clip to uint8 values.
         self.ImageBuffer = tempimage
         self.ActionList.append(['combineimage',donor.Name])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def MergeLayer(self,donor):
@@ -1497,7 +1568,7 @@ class pilomarimage():
             *Q* UNDER DEVELOPMENT! 
             Several ways to perform a merge. This is testing a couple of them. 
             Likely to change in the future. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".MergeLayer(",donor.Name,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".MergeLayer(",donor.Name,")",terminal=False)
         gt = self.GetType()
         if gt == 'grayscale': # Grayscale images inherit the average of the two arrays.
             self.ImageBuffer = ((self.ImageBuffer + donor.ImageBuffer) / 2).astype(np.uint8)
@@ -1513,7 +1584,7 @@ class pilomarimage():
             self.ImageBuffer = self.ImageBuffer * 255 # Scale back up to 0-255
             self.ImageBuffer = self.ImageBuffer.astype(np.uint8) # Convert from float back to uint8
         self.ActionList.append(['mergelayer',donor.Name])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
 
     def CenterCoordinates(self):
         """ Return current center of the image. """
@@ -1585,7 +1656,7 @@ class pilomarimage():
 
     def LineDetection(self):
         """ Detect lines (satellites, meteors). """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".LineDetection()",terminal=False)
+        self.Log("pilomarimage",self.Name,".LineDetection()",terminal=False)
         # Code based upon https://www.meteornews.net/2020/05/05/d64-nl-meteor-detecting-project/
         # Make a gray-scale copy and save the result in the variable 'gray'
         gray = self.NewBufferType('grayscale')
@@ -1602,7 +1673,7 @@ class pilomarimage():
                 x1, y1, x2, y2 = line[0] # Coordinates of each end of the line.
                 length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) # Length of the line.
                 if length < 10: continue # Too short.
-                if self.Log != None: self.Log("astrocamera",self.Name,".LineDetection: Line", i, ",", line[0], ", length", length,terminal=False)
+                self.Log("pilomarimage",self.Name,".LineDetection: Line", i, ",", line[0], ", length", length,terminal=False)
                 longest = max(length,longest) # Is this the longest line found so far?
                 linereturn.append([x1,y1,x2,y2]) # Add to the list of detected lines.
         return linereturn
@@ -1632,7 +1703,7 @@ class pilomarimage():
             area = int(moments['m00']) # Contour area.
             if area > mincloudpixels: 
                 cloudlist.append([center_x,center_y,area])
-                if self.Log != None: self.Log("astrocamera",self.Name,".CloudDetection (",center_x,",",center_y,")",area,"pixels",terminal=False)
+                self.Log("pilomarimage",self.Name,".CloudDetection (",center_x,",",center_y,")",area,"pixels",terminal=False)
         return cloudlist
     
     def GetType(self):
@@ -1659,7 +1730,7 @@ class pilomarimage():
             doesn't overwrite the original image buffer. """
         cvimagebuffer = self.ImageBuffer.copy()
         if not newtype in pilomarimage.IMAGETYPES:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".ChangeType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
+            self.Log("pilomarimage",self.Name,".ChangeType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
             return cvimagebuffer
         oldtype = self.GetType()
         if oldtype == 'bgra':
@@ -1681,7 +1752,7 @@ class pilomarimage():
         elif cvimagebuffer.shape[2] == 4:
             checktype = 'bgra'
         if checktype != newtype:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".ChangeType: Failed. From",oldtype,"to",newtype,"Found",checktype,terminal=False)
+            self.Log("pilomarimage",self.Name,".ChangeType: Failed. From",oldtype,"to",newtype,"Found",checktype,terminal=False)
         return cvimagebuffer
         
     def ChangeType(self,newtype):
@@ -1693,13 +1764,11 @@ class pilomarimage():
 
     def GetHeight(self):
         """ Return the ImageBuffer height in pixels. """
-        height = self.ImageBuffer.shape[0]
-        return height
+        return self.ImageBuffer.shape[0]
         
     def GetWidth(self):
         """ Return the ImageBuffer width in pixels. """
-        width = self.ImageBuffer.shape[1]
-        return width
+        return self.ImageBuffer.shape[1]
 
     def GetDepth(self):
         """ Return the ImageBuffer depth in pixels. """
@@ -1718,33 +1787,31 @@ class pilomarimage():
             x = column
             Converts datatype to int() """
         tg = self.GetType()
-        #if tg == 'grayscale': color = (int(self.ImageBuffer[x,y]),int(self.ImageBuffer[x,y]),int(self.ImageBuffer[x,y]))
-        #else: color = (int(self.ImageBuffer[x,y,0]),int(self.ImageBuffer[x,y,1]),int(self.ImageBuffer[x,y,2]))
         try:
             if tg == 'grayscale': color = (int(self.ImageBuffer[y,x]),int(self.ImageBuffer[y,x]),int(self.ImageBuffer[y,x]))
             else: color = (int(self.ImageBuffer[y,x,0]),int(self.ImageBuffer[y,x,1]),int(self.ImageBuffer[y,x,2]))
         except Exception as e:
-            if self.Log != None: 
-                self.Log("pilomarimage.GetPixelColor(",self.Name,",row",y,",col",x,") failed.",terminal=False)
-                self.ReportException(e,comment='pilomarimage.GetPixelColor()')
+            self.Log("pilomarimage.GetPixelColor(",self.Name,",row",y,",col",x,") failed.",terminal=False)
+            self.ReportException(e,comment='pilomarimage.GetPixelColor()')
             color = (0,0,0)
         return color
     
     def New(self,height,width,imagetype='bgr',datatype=np.uint8):
         """ Create a new empty ImageBuffer. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".New(",height,width,imagetype,datatype,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".New(",height,width,imagetype,datatype,")",terminal=False)
         if not imagetype in pilomarimage.IMAGETYPES:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
-            else: print("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES)
+            self.Log("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
+            print("pilomarimage",self.Name,".New(",imagetype,") must be in ",pilomarimage.IMAGETYPES)
             return False
         if max(height,width) > 65535: # Maximum jpeg size.
-            if self.Log != None: self.Log("pilomarimage: Dimensions exceed jpeg limits (",height,width,").",terminal=False)
+            self.Log("pilomarimage: Dimensions exceed jpeg limits (",height,width,").",terminal=False)
         if imagetype == 'bgr': self.ImageBuffer = np.zeros((height,width,3), datatype) # bgr image.
         elif imagetype == 'bgra': self.ImageBuffer = np.zeros((height,width,4), datatype) # bgra image.
         else: self.ImageBuffer = np.zeros((height,width), datatype) # grayscale image.
         self.ImageMask = np.ones_like(self.ImageBuffer,np.uint8)
-        self.CreatedTimestamp = self.Now()
-        self.ModifiedTimestamp = self.Now()
+        self.CreatedTimestamp = self.NowUTC()
+        self.ModifiedTimestamp = self.NowUTC()
+        self.ExifData = {} # Empty dictionary of any associated EXIF tags loaded from an image.
         self.ActionList = [['new',(height,width),imagetype,datatype]]
         return True
 
@@ -1962,7 +2029,7 @@ class pilomarimage():
     
     def RotateImage(self,angle):
         """ Accepts 0,90,180,270 """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".RotateImage(",angle,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".RotateImage(",angle,")",terminal=False)
         angle = angle % 360 # Always in range 0-360 degrees.
         if angle >= 45 and angle < 135: rotateCode = cv2.ROTATE_90_CLOCKWISE
         elif angle >= 135 and angle < 225: rotateCode = cv2.ROTATE_180
@@ -1970,7 +2037,7 @@ class pilomarimage():
         else: rotateCode = None
         if rotateCode != None:
             self.ImageBuffer = cv2.rotate(self.ImageBuffer, rotateCode)
-            self.ModifiedTimestamp = self.Now()
+            self.ModifiedTimestamp = self.NowUTC()
             self.ActionList.append(['rotateimage',angle])
         return True
         
@@ -1985,7 +2052,7 @@ class pilomarimage():
             maxstars = Maximum number of stars to return .
             threshold = The brightness level (0-255) above which something is considered a star. """
             
-        if self.Log != None: self.Log("pilomarimage",self.Name,".CountStars(",minval,',',maxval,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".CountStars(",minval,',',maxval,")",terminal=False)
         cvimagebuffer = self.NewBufferType('grayscale') # Return a copy of the image buffer in grayscale.
         # Threshold the image to make it more crisp.
         temp, threshed = cv2.threshold(cvimagebuffer, threshold, 255, cv2.THRESH_BINARY_INV|cv2.THRESH_OTSU)
@@ -2004,12 +2071,12 @@ class pilomarimage():
                 staritem = [ctr_x, ctr_y, dot_radius]
                 starlist.append(staritem) # Construct list of star locations.
             if starcount >= maxstars:
-                if self.Log != None: self.Log("pilomarimage",self.Name,".CountStars:",maxstars,"star limit hit.",terminal=False)
+                self.Log("pilomarimage",self.Name,".CountStars:",maxstars,"star limit hit.",terminal=False)
                 break
         self.StarList = starlist
         self.StarCount = starcount
         self.CalculateStarSpread() # How widely spread are the stars across the image? Indicates good/bad tracking tuning.
-        if self.Log != None: self.Log("pilomarimage",self.Name,".CountStars: End. Counted",starcount,terminal=False)
+        self.Log("pilomarimage",self.Name,".CountStars: End. Counted",starcount,terminal=False)
         return starcount, starlist
 
     def BVrange(self,BV):
@@ -2025,7 +2092,7 @@ class pilomarimage():
                 toi = len(pilomarimage.COLORPOINTS) - 1
                 fromi = toi - 1
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".BVRange:",str(BV),"failed:",str(e),level='error')
+            self.Log("pilomarimage",self.Name,".BVRange:",str(BV),"failed:",str(e),level='error')
             fromi = 0
             toi = 1
         return fromi, toi
@@ -2035,7 +2102,7 @@ class pilomarimage():
         try:
             result = pilomarimage.COLORPOINTS[toi][0] - pilomarimage.COLORPOINTS[fromi][0]
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".BVdX:",str(fromi),str(toi),"failed:",str(e),level='error')
+            self.Log("pilomarimage",self.Name,".BVdX:",str(fromi),str(toi),"failed:",str(e),level='error')
             result = 0
         return result
 
@@ -2044,7 +2111,7 @@ class pilomarimage():
         try:
             result = pilomarimage.COLORPOINTS[toi][1][0] - pilomarimage.COLORPOINTS[fromi][1][0]
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".BVdR:",str(fromi),str(toi),"failed:",str(e),level='error')
+            self.Log("pilomarimage",self.Name,".BVdR:",str(fromi),str(toi),"failed:",str(e),level='error')
             result = 0
         return result
 
@@ -2053,7 +2120,7 @@ class pilomarimage():
         try:
             result = pilomarimage.COLORPOINTS[toi][1][1] - pilomarimage.COLORPOINTS[fromi][1][1]
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".BVdG:",str(fromi),str(toi),"failed:",str(e),level='error')
+            self.Log("pilomarimage",self.Name,".BVdG:",str(fromi),str(toi),"failed:",str(e),level='error')
             result = 0
         return result
 
@@ -2062,7 +2129,7 @@ class pilomarimage():
         try:
             result = pilomarimage.COLORPOINTS[toi][1][2] - pilomarimage.COLORPOINTS[fromi][1][2]
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage.",self.Name,"BVdB:",str(fromi),str(toi),"failed:",str(e),level='error')
+            self.Log("pilomarimage.",self.Name,"BVdB:",str(fromi),str(toi),"failed:",str(e),level='error')
             result = 0
         return result
 
@@ -2079,7 +2146,7 @@ class pilomarimage():
             b = max(0,b)
             b = min(255,b)
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage.",self.Name,"BVInterpolate:",str(BV),str(fromi),str(toi),"failed:",str(e),level='error')
+            self.Log("pilomarimage.",self.Name,"BVInterpolate:",str(BV),str(fromi),str(toi),"failed:",str(e),level='error')
             r = b = g = 255
         return (int(b),int(g),int(r))
 
@@ -2099,7 +2166,7 @@ class pilomarimage():
             fromi, toi = self.BVrange(BV) # Which pair of sample colour points do we interpolate from?
             b,g,r = self.BVInterpolate(BV,fromi,toi)
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage.",self.Name,"BVtoBGR:",str(BV),"failed:",str(e),level='warning')
+            self.Log("pilomarimage.",self.Name,"BVtoBGR:",str(BV),"failed:",str(e),level='warning')
             b = g = r = 255
         return (b,g,r)
     
@@ -2126,7 +2193,7 @@ class pilomarimage():
             Each star in the list consists of x,y image positions.
                 [xpos,ypos] 
             Only the xpos and ypos entries are scaled, any extra terms remain unchanged. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ScaleStarList: Scale:",scalefactor,terminal=False)
+        self.Log("pilomarimage",self.Name,".ScaleStarList: Scale:",scalefactor,terminal=False)
         newlist = [] # The resulting list.
         for star in self.StarList: # Go through each star in turn.
             newstar = []
@@ -2137,7 +2204,7 @@ class pilomarimage():
             newlist.append(newstar)
         self.StarList = newlist
         self.ActionList = [['scalestarlist',scalefactor]]
-        if self.Log != None: self.Log("pilomarimage",self.Name,".ScaleStarList: Result:",newlist,terminal=False)
+        self.Log("pilomarimage",self.Name,".ScaleStarList: Result:",newlist,terminal=False)
         return True
         
     def ImageExists(self):
@@ -2154,13 +2221,13 @@ class pilomarimage():
     def SimplifyImage(self,blurradius=13):
         """ Backwards compatibility with earlier versions. """
         print("pilomarimage.SimplifyImage(): Deprecated. Please use pilomarimage.EnhanceStars() method now.")
-        if self.Log != None: self.Log("pilomarimage",self.Name,".SimplifyImage -> EnhanceStars: Begin",terminal=False)
+        self.Log("pilomarimage",self.Name,".SimplifyImage -> EnhanceStars: Begin",terminal=False)
         return self.EnhanceStars(blurradius=blurradius)
 
     def PrepareImage(self,blurradius=13):
         """ Backwards compatibility with earlier versions. """
         print("pilomarimage.PrepareImage(): Deprecated. Please use pilomarimage.EnhanceStars() method now.")
-        if self.Log != None: self.Log("pilomarimage",self.Name,".PrepareImage -> EnhanceStars: Begin",terminal=False)
+        self.Log("pilomarimage",self.Name,".PrepareImage -> EnhanceStars: Begin",terminal=False)
         return self.EnhanceStars(blurradius=blurradius)
 
     def EnhanceStars(self,blurradius=13,cloudthresh=100,starthresh=16,maxval=255):
@@ -2170,8 +2237,7 @@ class pilomarimage():
             - cloudthresh is the threshold to remove cloud (experimental).
             - starthresh is the threshold to single out the stars.    
             - maxval is the saturated value set for cells above the threshold. """
-        if self.Log != None: 
-            self.Log("pilomarimage",self.Name,".EnhanceStars: blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,"maxval",maxval,terminal=False)
+        self.Log("pilomarimage",self.Name,".EnhanceStars: blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,"maxval",maxval,terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.EnhanceStars: No image in the buffer.')
         self.ChangeType('grayscale') # Convert to grayscale.
         retval, self.ImageBuffer = cv2.threshold(self.ImageBuffer,cloudthresh,maxval,cv2.THRESH_BINARY) # 100 should ignore clouds more easily and just recognise brighter stars.
@@ -2184,8 +2250,8 @@ class pilomarimage():
         # - Adaptive means that the threshold limit between BLACK and WHITE is chosen by the function.
         retval, self.ImageBuffer = cv2.threshold(self.ImageBuffer,starthresh,maxval,cv2.THRESH_BINARY + cv2.THRESH_OTSU) # OTSU is adaptive threshold limits.
         self.ActionList.append(['enhancestars',blurradius])
-        self.ModifiedTimestamp = self.Now()
-        if self.Log != None: self.Log("pilomarimage",self.Name,".EnhanceStars: End.",terminal=False)
+        self.ModifiedTimestamp = self.NowUTC()
+        self.Log("pilomarimage",self.Name,".EnhanceStars: End.",terminal=False)
         return True
 
     def FS_Save(self,filterdata):
@@ -2199,9 +2265,9 @@ class pilomarimage():
             filename = filterdata['saveas']
             if filename != None and len(filename) > 0:
                 # Add filterdata information to the image.
-                self.AddText("filterdata:",x=10,y=int(self.GetHeight() / 2),color=pilomarimage.BGRWhite,bgcolor=pilomarimage.BGRBlack)
+                self.AddText("filterdata:",x=10,y=int(self.GetHeight() / 2),color=pilomarimage.BGRColor['White'],bgcolor=pilomarimage.BGRColor['Black'])
                 for key,value in filterdata.items():
-                    self.AddText(" " + str(key) + ":" + str(value),x=10,y=self.NextTextY,color=pilomarimage.BGRWhite,bgcolor=BGRBlack)
+                    self.AddText(" " + str(key) + ":" + str(value),x=10,y=self.NextTextY,color=pilomarimage.BGRColor['White'],bgcolor=pilomarimage.BGRColor['Black'])
                 self.Save(filename)
         return True
         
@@ -2210,12 +2276,11 @@ class pilomarimage():
             {'method':'grayscale',
              'comment':''}            """
         comment = filterdata.get('comment','') # Get any associated comment, default ''.
-        if self.Log != None: 
-            if comment != '': self.Log("pilomarimage",self.Name,".FS_Grayscale: Comment:",comment,terminal=False)
-            self.Log("pilomarimage",self.Name,".FS_Grayscale:",terminal=False)
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_Grayscale: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_Grayscale:",terminal=False)
         self.ChangeType('grayscale') # Convert to grayscale.
         self.ActionList.append(['FS_Grayscale'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
              
     def FS_Threshold(self,filterdata):
@@ -2234,12 +2299,11 @@ class pilomarimage():
         threshold_type = filterdata.get('type',cv2.THRESH_BINARY) # Get threshold calculation type, default THRESH_BINARY.
         if threshold_type == None: threshold_type = cv2.THRESH_BINARY
         comment = filterdata.get('comment','') # Get any associated comment, default ''.
-        if self.Log != None: 
-            if comment != '': self.Log("pilomarimage",self.Name,".FS_Threshold: Comment:",comment,terminal=False)
-            self.Log("pilomarimage",self.Name,".FS_Threshold(",threshold,",",maxval,",",threshold_type,")",terminal=False)
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_Threshold: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_Threshold(",threshold,",",maxval,",",threshold_type,")",terminal=False)
         calculatedthreshold, self.ImageBuffer = cv2.threshold(self.ImageBuffer,threshold,maxval,threshold_type)
         self.ActionList.append(['FS_Threshold',threshold,maxval,threshold_type])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def FS_GaussianBlur(self,filterdata):
@@ -2255,12 +2319,11 @@ class pilomarimage():
         if radius < 0: radius = 0 # Cannot be negative.
         if radius > 0 and radius % 2 == 0: radius += 1 # Must be odd if > 0.
         comment = filterdata.get('comment','') # Get any associated comment, default ''.
-        if self.Log != None: 
-            if comment != '': self.Log("pilomarimage",self.Name,".FS_GaussianBlur: Comment:",comment,terminal=False)
-            self.Log("pilomarimage",self.Name,".FS_GaussianBlur(",radius,")",terminal=False)
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_GaussianBlur: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_GaussianBlur(",radius,")",terminal=False)
         self.ImageBuffer = cv2.GaussianBlur(self.ImageBuffer,(radius,radius),0)    
         self.ActionList.append(['FS_GaussianBlur',radius])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FS_Dehaze(self,filterdata):
@@ -2275,9 +2338,8 @@ class pilomarimage():
         samples = filterdata.get('samples',1) # Number of samples along each image row, default 1
         strength = filterdata.get('strength',100) # How strong is the filter, default 100 (%).
         comment = filterdata.get('comment','') # Get any associated comment, default ''.
-        if self.Log != None: 
-            if comment != '': self.Log("pilomarimage",self.Name,".FS_Dehaze: Comment:",comment,terminal=False)
-            self.Log("pilomarimage",self.Name,".FS_Dehaze(",samples,",",strength,")",terminal=False)
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_Dehaze: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_Dehaze(",samples,",",strength,")",terminal=False)
         # Create a working buffer to construct the haze filter.
         buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
         buffer = self.HorizontalBlurBuffer(buffer,band=samples) # Horizontally blur the buffer.
@@ -2286,19 +2348,19 @@ class pilomarimage():
                 buffer = self.PercentageBuffer(buffer,strength) # Reduce the strength of the buffer.
             self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
         self.ActionList.append(['FS_Dehaze',samples,strength])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def RunFilterScript(self,scriptname):
         """ Given a script name, apply the filters and parameters defined in the script.
             filterrules is a dictionary """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
+        self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
         if not type(scriptname) == str: # Nothing useful set.
-            if self.Log != None: self.Log("RunFilterScript(): No valid script name.",terminal=False)
-            else: print("RunFilterScript(): No valid script name.")
+            self.Log("RunFilterScript(): No valid script name.",terminal=False)
+            print("RunFilterScript(): No valid script name.")
             return False 
         if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
-            if self.Log != None: self.Log("RunFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
+            self.Log("RunFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
             print("RunFilterScript(",scriptname,"). Script does not exist.")
             return False
         filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
@@ -2307,7 +2369,7 @@ class pilomarimage():
         result = True
         
         for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
-            if self.Log != None: self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running script...",terminal=False) # Report the name of the filter
+            self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running script...",terminal=False) # Report the name of the filter
             # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
             filtermethod = filterdata['method']
             result = True
@@ -2317,23 +2379,16 @@ class pilomarimage():
             elif filtermethod == 'save': result = self.FS_Save(filterdata) # Apply a threshold filter.
             elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
             else: # Filter method is not recognised.
-                if self.Log != None: self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
-                else: print("**ERROR** pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
+                self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
+                print("**ERROR** pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
                 result = False
             if not result: break # Failure.
             filtercount += 1 # Increment count.
         if not result:
-            if self.Log != None: self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
-            else: print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
+            self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
+            print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
         return result
 
-    #def UrbanFilterScript(self):
-    #    """ Experimental usage of RunFilterScript to replicate hardcoded filter solution. """
-    #    if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilterScript(): start",terminal=False)
-    #    result = self.RunFilterScript('UrbanFilter') # Fund the UrbanFilter script against the current image buffer.
-    #    if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilterScript(): result",result,terminal=False)
-    #    return result
-    
     def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255,strength=100):
         """ Primitive 'urban skies' filter. 
             This is used for star drift tracking. 
@@ -2344,9 +2399,9 @@ class pilomarimage():
             0 = No haze reduction.
             50 = 50% haze reduction.
             100 = Full haze reduction. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".UrbanFilter(): band",band,
-                                      "blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,
-                                      "maxval",maxval,"strength",strength,terminal=False)
+        self.Log("pilomarimage",self.Name,".UrbanFilter(): band",band,
+                 "blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,
+                 "maxval",maxval,"strength",strength,terminal=False)
         buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
         buffer = self.HorizontalBlurBuffer(buffer,band=band) # Horizontally blur the buffer.
         if strength > 0: # There needs to be some effect.
@@ -2366,13 +2421,15 @@ class pilomarimage():
         return b, g, r 
 
     def DimChannel(self,channel,ratio): # 3 references.
-        """ simple multiplier for single color channel. """
+        """ simple multiplier for single color channel.
+            ratio = 0.0 - 1.0        """
         channel = channel * ratio
         channel = min(max(channel,0),255) # 0 <= x <= 255
         return channel
 
     def DimColor(self,color,ratio): # 4 references.
-        """ Simple multiplier for BGR or BGRA color tuples. """
+        """ Simple multiplier for BGR or BGRA color tuples.
+            ratio = 0.0 - 1.0 """
         if len(color) == 4: # Adjust BGR, but not A.
             return (self.DimChannel(color[0],ratio),self.DimChannel(color[1],ratio),self.DimChannel(color[2],ratio),color[3])
         elif len(color) == 3: # Adjust BGR
@@ -2384,30 +2441,28 @@ class pilomarimage():
             Then enlarge the image to match the size of the target image. 
             Then combine the two images.
             *Q* Only handles bgr images at the moment.  """
-        if self.Log != None: self.Log("astrocamera.FakeField: Simulating electrical field noise.",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FakeField: No image in the buffer.')
         height = self.GetHeight()
         width = self.GetWidth()
         fieldimg = np.zeros((int(height/100),int(width/100),3),np.uint16) # 'bgr' at 1% of original size.
-        fieldimg = cv2.circle(fieldimg,(fieldimg.shape[1],fieldimg.shape[0]),int(fieldimg.shape[1]/3),pilomarimage.BGRVeryDarkRed,thickness=-1) # Simulate an electric field shadow.
+        fieldimg = cv2.circle(fieldimg,(fieldimg.shape[1],fieldimg.shape[0]),int(fieldimg.shape[1]/3),pilomarimage.BGRColor['VeryDarkRed'],thickness=-1) # Simulate an electric field shadow.
         fieldimg = cv2.resize(fieldimg,(width,height),interpolation=self.ResizeMethod) # Scale back up to full image size.
         fieldimg = np.add(self.ImageBuffer,fieldimg) # Combine
         self.ImageBuffer = np.clip(fieldimg,0,255).astype(np.uint8) # Clip to uint8 values.
         self.ActionList.append(['fakefield'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FakeNoise(self): # Generate fake image noise.
         """ Create a small blank image and add some fake image noise to it. 
             Return the combined image. 
             *Q* Only handles bgr images at the moment. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".FakeNoise()",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FakeNoise: No image in the buffer.')
         fieldimg = np.random.randint(0,25,(self.GetHeight(),self.GetWidth(),3),np.uint16) # 'bgr' buffer of random values.
         fieldimg = np.add(fieldimg,self.ImageBuffer)
         self.ImageBuffer = np.clip(fieldimg,0,255).astype(np.uint8) # Clip to uint8 values.
         self.ActionList.append(['fakenoise'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def TrimLine(self,x1,y1,x2,y2,trimfactor=None,trimpixels=None):
@@ -2415,7 +2470,6 @@ class pilomarimage():
             Given start and end locations and the amount to trim.
             trimfactor = 0.0 - 0.5 The proportion of the line to remove from each end. 
             trimpixels = nnn The number of pixels to trim from each end. """
-        #if self.Log != None: self.Log("pilomarimage",self.Name,".TrimLine()",terminal=False)
         if trimpixels != None: # Convert pixel count to factor.
             length = int(math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2))
             if length != 0.0: trimfactor = trimpixels / length
@@ -2431,9 +2485,8 @@ class pilomarimage():
     def FakeMeteor(self): # Generate fake meteor streak
         """ Add a random meteor like streak to an image.
             *Q* Only handles bgr images at the moment. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".FakeMeteor()",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FakeMeteor: No image in the buffer.')
-        color = self.SafeColor(pilomarimage.BGRWhite)
+        color = self.SafeColor(pilomarimage.BGRColor['White'])
         width = self.GetWidth()
         height = self.GetHeight()
         meteorimg = np.zeros((height,width,3),np.uint16) # 'bgr' buffer of zeros.
@@ -2455,7 +2508,7 @@ class pilomarimage():
         meteorimg = np.add(meteorimg,self.ImageBuffer)
         self.ImageBuffer = np.clip(meteorimg,0,255).astype(np.uint8) # Clip to uint8 values.
         self.ActionList.append(['fakemeteor'])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def PlotStars(self,radius,starlist):
@@ -2464,14 +2517,14 @@ class pilomarimage():
             This returns a GRAYSCALE image with all stars depicted at the same size.
             The size is the same for LATEST and TARGET images (Parameters.TrackingStarRadius), so that the 
             FindTransform() method has consistent images to compare. """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".PlotStars(",radius,")",terminal=False)
+        self.Log("pilomarimage",self.Name,".PlotStars(",radius,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.PlotStars: No image in the buffer.')
         GrayscaleWhite = (255)
         self.New(self.GetDimensions(),'grayscale',np.uint8) # GRAYSCALE image. HEIGHT, WIDTH inherited from reference image.
         for star_x, star_y, star_r in starlist:
             self.ImageBuffer = cv2.circle(self.ImageBuffer,(star_x,star_y),radius,GrayscaleWhite,thickness=-1) # White. All stars converted to standard 7 pixel radius.
         self.ActionList.append(['plotstars',radius])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def MeasureContrast(self):
@@ -2481,7 +2534,6 @@ class pilomarimage():
             2) standard deviation contrast
             Doesn't modify ImageBuffer
             """
-        if self.Log != None: self.Log("pilomarimage",self.Name,".MeasureContrast()",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.MeasureContrast: No image in the buffer.')
         michelson_contrast = None
         stddev_contrast = None
@@ -2489,19 +2541,18 @@ class pilomarimage():
         try:
             stddev_contrast = cvimagebuffer.std() # Standard deviation.
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".MeasureContrast: stddev_contrast failed.",terminal=False)
+            self.Log("pilomarimage",self.Name,".MeasureContrast: stddev_contrast failed.",terminal=False)
         try:
             min = float(np.min(cvimagebuffer))
             max = float(np.max(cvimagebuffer))
             michelson_contrast = (max - min) / (max + min) # 
         except Exception as e:
-            if self.Log != None: self.Log("pilomarimage",self.Name,".MeasureContrast: michelson_contrast failed.",terminal=False)
-        if self.Log != None: self.Log("pilomarimage",self.Name,".MeasureContrast: min",min,", max",max,", michelson_contrast",michelson_contrast,"stddev_contrast",stddev_contrast,terminal=False)
+            self.Log("pilomarimage",self.Name,".MeasureContrast: michelson_contrast failed.",terminal=False)
+        self.Log("pilomarimage",self.Name,".MeasureContrast: min",min,", max",max,", michelson_contrast",michelson_contrast,"stddev_contrast",stddev_contrast,terminal=False)
         return michelson_contrast, stddev_contrast
     
     def FillColor(self,color):
         """ Fill the image buffer with a specific color. """
-        if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FillColor(",color,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillColor: No image in the buffer.')
         color = self.SafeColor(color)
         if self.GetType == 'grayscale': # Single depth grayscale image. Just fill all cells with the same value.
@@ -2511,7 +2562,7 @@ class pilomarimage():
                 if self.ImageBuffer.shape[2] > i: # Channel must exist.
                     self.ImageBuffer[:,:,i] = c # Set all values of the channel.
         self.ActionList.append(['fillcolor',color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def InBounds(self,x,y):
@@ -2558,7 +2609,7 @@ class pilomarimage():
         if type(color) == type(None): color = self.GetPenColor()
         if type(color) == type(None):
             if depth == 1: color = 255 # Grayscale
-            elif depth == 3: color = pilomarimage.BGRBlack # BGR
+            elif depth == 3: color = pilomarimage.BGRColor['Black'] # BGR
             elif depth == 4: color = (255,255,255,255) # BGRA
         # Convert color (received as int or tuple) into a list for looping through.
         if isinstance(color,int): ct = [color]
@@ -2594,7 +2645,6 @@ class pilomarimage():
         
     def DrawLine(self,startcoord,endcoord,color=None,thickness=None,arrowpixels=None):
         """ Use opencv linedrawing. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawLine(",startcoord,endcoord,color,thickness,arrowpixels,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawLine: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2607,12 +2657,11 @@ class pilomarimage():
             arrowproportion = arrowpixels / distance # ArrowedLine specifies arrow size as proportion of line length. We need constant 10pixel arrow heads.
             self.ImageBuffer = cv2.arrowedLine(self.ImageBuffer, startcoord, endcoord, color, thickness=thickness, line_type=cv2.LINE_AA, tipLength=arrowproportion)
         self.ActionList.append(['drawline',startcoord,endcoord,color,thickness,arrowpixels])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawEdgeLine(self,startcoord,endcoord,color=None,edgecolor=None,thickness=None,edgethickness=1,arrowpixels=None):
         """ Use opencv linedrawing. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawEdgeLine(",startcoord,endcoord,color,edgecolor,thickness,edgethickness,arrowpixels,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeLine: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2628,19 +2677,18 @@ class pilomarimage():
             self.ImageBuffer = cv2.arrowedLine(self.ImageBuffer, startcoord, endcoord, edgecolor, thickness=int(thickness + (2 * edgethickness)), line_type=cv2.LINE_AA, tipLength=arrowproportion)
             self.ImageBuffer = cv2.arrowedLine(self.ImageBuffer, startcoord, endcoord, color, thickness=thickness, line_type=cv2.LINE_AA, tipLength=arrowproportion)
         self.ActionList.append(['drawedgeline',startcoord,endcoord,color,edgecolor,thickness,edgethickness,arrowpixels])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawCircle(self,center_x,center_y,rad,color=None,thickness=None):
         """ Draw a circle on the image. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawCircle(",center_x,center_y,color,rad,thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawCircle: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(center_x, center_y), rad, color, thickness=thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawcircle',center_x,center_y,rad,color,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def DrawEdgeCircle(self,center_x,center_y,rad,color=None,thickness=None,edgecolor=None,edgethickness=1):
@@ -2652,36 +2700,32 @@ class pilomarimage():
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(center_x, center_y), rad, edgecolor, thickness=thickness + (2 * edgethickness), lineType=cv2.LINE_AA)
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(center_x, center_y), rad, color, thickness=thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawedgecircle',center_x,center_y,rad,color,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FillCircle(self,center_x,center_y,rad,color=None):
         """ Fill a circle on the image. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FillCircle(",center_x,center_y,color,rad,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillCircle: No image in the buffer.')
         color = self.SafeColor(color)
-        #print("pilomarimage.FillCircle:",center_x,center_y,rad,color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(center_x, center_y), rad, color, thickness=-1, lineType=cv2.LINE_AA)
         self.ActionList.append(['fillcircle',center_x,center_y,rad,color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def SetPixel(self,center_x,center_y,color=None):
         """ Set a single pixel on the image. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".SetPixel(",center_x,center_y,color,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.SetPixel: No image in the buffer.')
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         self.ImageBuffer[center_y,center_x] = color
         self.ActionList.append(['setpixel',center_x,center_y,color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def GetPixel(self,center_x,center_y):
         """ Return value of a single pixel on the image.
             Doesn't convert datatype! """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".GetPixel(",center_x,center_y,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.GetPixel: No image in the buffer.')
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         color = tuple(self.ImageBuffer[center_y,center_x])
@@ -2710,7 +2754,6 @@ class pilomarimage():
 
     def FadeCircle(self,center_x,center_y,rad,color=None,fadecolor=None):
         """ Fill a circle on the image, but the color fades from center to edge """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FadeCircle(",center_x,center_y,color,rad,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FadeCircle: No image in the buffer.')
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
@@ -2724,7 +2767,7 @@ class pilomarimage():
                 self.ImageBuffer = cv2.circle(self.ImageBuffer,(center_x, center_y), i, gradedcolor, thickness=-1, lineType=cv2.LINE_AA)
                 prevcolor = gradedcolor
         self.ActionList.append(['fadecircle',center_x,center_y,rad,color,fadecolor])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def GetTextArea(self,text,size=1.0,thickness=None):
@@ -2737,7 +2780,6 @@ class pilomarimage():
         ydim = label_height + baseline
         return xdim,ydim,baseline
 
-    ### BEGIN DEVELOPMENT ###
     def TextBoundary(self,text,fromx,fromy,size=1.0,thickness=None,hjust='l',vjust='t',border=None):
         """ Return boundaries of a text line.
             Given a single line, this returns the two corners of the surrounding text box
@@ -2776,10 +2818,10 @@ class pilomarimage():
 
             """
         thickness = self.SafeThickness(thickness)
-        if type(textlines) != type(list): textlines = [textlines] # Make sure it's a list we're handling.
+        if type(textlines) is str: textlines = [textlines] # Make sure it's a list we're handling.
         nl = []
         for line in textlines: # Split on newline character too.
-            nlines = line.split('\n')
+            nlines = str(line).split('\n')
             nl = nl + nlines
         textlines = nl 
         minx = maxx = fromx # Start/stop x dimensions of text block.
@@ -2811,7 +2853,6 @@ class pilomarimage():
             else: # subsequent lines.
                 self.AddText(line,fromx,self.NextTextY,color=color,size=size,thickness=thickness,hjust=hjust,vjust=vjust,border=None,bgcolor=None)
         return True
-    ### END DEVELOPMENT ###
 
     def AddText(self,text,fromx,fromy,color=None,size=1.0,thickness=None,hjust='l',vjust='t',border=None,bgcolor=None):
         """ Add text to an image.
@@ -2864,7 +2905,6 @@ class pilomarimage():
             *Q* TODO: OpenCV only supports basic 127 ASCII characters, to add UNICODE etc convert to PIL,
                 add the extended characters there, then convert back. 
                 """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".AddText(",text,fromx,fromy,color,size,thickness,hjust,vjust,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.AddText: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2884,7 +2924,6 @@ class pilomarimage():
         if border != None: b = border
         else: b = 0
         if self.TextCollision(x - b,y + ybase + b,x + xdim + b,y - ydim + ybase - b): # This would collide with existing text, so don't add it.
-            #self.DrawRectangle((x - b,y + ybase + b),(x + xdim + b,y - ydim + ybase - b),color=self.SafeColor(pilomarimage.BGROrangeRed),thickness=thickness)
             OK2Draw = False # It's not safe to draw.
         else:
             OK2Draw = True # It's safe to draw.
@@ -2898,7 +2937,7 @@ class pilomarimage():
             # Store where the 'next' line of text would go if we're printing multiple lines. (Text must remain same size!)
             self.ImageBuffer = cv2.putText(self.ImageBuffer,text,self.OrientCoord((x,y)),self.Font,size,color,thickness,lineType=cv2.LINE_AA)
             self.ActionList.append(['addtext',text,fromx,fromy,color,size,thickness,hjust,vjust])
-            self.ModifiedTimestamp = self.Now()
+            self.ModifiedTimestamp = self.NowUTC()
         self.NextTextX = fromx # If printing multiple lines of text, this is the start point for the next line if you're printing downwards.
         self.NextTextY = fromy + ydim + 1 # If printing multiple lines of text, this is the start point for the next line if you're printing downwards.
         self.PrevTextX = fromx # If printing multiple lines of text, this is the start point for the previous line if your printing upwards.
@@ -2968,7 +3007,6 @@ class pilomarimage():
                 ONLY SUPPORTS 90DEGREE ANGLE SO FAR. 
                 
             NOTE: This is SLOW!! """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".AddAngleText(",text,fromx,fromy,color,size,thickness,hjust,vjust,angle,")",terminal=False)
         angle = angle % 360
         supportedangles = [0,90] # Which angles are supported?
         if not angle in supportedangles:
@@ -3026,7 +3064,7 @@ class pilomarimage():
             # Now turn image the right way round again.
             self.RotateImage(angle)
         self.ActionList.append(['addangletext',text,fromx,fromy,color,size,thickness,hjust,vjust,angle])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def AddEdgeText(self,text,fromx,fromy,color=None,edgecolor=None,size=1.0,thickness=None,edgethickness=None,hjust='l',vjust='t',border=None,bgcolor=None):
@@ -3077,7 +3115,6 @@ class pilomarimage():
                 self.AddText('prevline',x,self.PrevTextY,size=2) # Print previous (higher) line next.
                 
                 """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".AddText(",text,fromx,fromy,color,size,thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.AddEdgeText: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         if edgethickness == None: edgethickness = 1 # center thickness + 1 pixel either side.
@@ -3112,26 +3149,24 @@ class pilomarimage():
         self.PrevTextX = fromx # If printing multiple lines of text, this is the start point for the previous line if your printing upwards.
         self.PrevTextY = fromy - ydim # If printing multiple lines of text, this is the start point for the previous line if your printing upwards.
         self.ActionList.append(['addedgetext',text,fromx,fromy,color,size,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawPolygon(self,pointlist,color=None,thickness=None):
         """ Draw polygon. 
             pointlist is a list of (x,y) tuples. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawPolygon(",pointlist,color,thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawPolygon: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
         # *Q* OrientCoord() to do.
         cv2.drawPoly(self.ImageBuffer, np.array([pointlist]), color=color,thickness=thickness)
         self.ActionList.append(['drawpolygon',pointlist,color,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def DrawEdgePolygon(self,pointlist,color=None,edgecolor=None,thickness=None,edgethickness=None):
         """ Draw polygon. 
             pointlist is a list of (x,y) tuples. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawEdgePolygon(",pointlist,color,edgecolor,thickness,edgethickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage",self.Name,''.DrawEdgePolygon: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         if edgethickness == None: edgethickness = 1 # center thickness + 1 pixel either side.
@@ -3141,24 +3176,22 @@ class pilomarimage():
         cv2.drawPoly(self.ImageBuffer, np.array([pointlist]), color=edgecolor,thickness=int(thickness + (2 * edgethickness)))
         cv2.drawPoly(self.ImageBuffer, np.array([pointlist]), color=color,thickness=thickness)
         self.ActionList.append(['drawedgepolygon',pointlist,color,edgecolor,thickness,edgethickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def FillPolygon(self,pointlist,color=None):
         """ Draw filled polygon. 
             pointlist is a list of (x,y) tuples. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FillPolygon(",pointlist,color,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillPolygon: No image in the buffer.')
         color = self.SafeColor(color)
         # *Q* OrientCoord() to do.
         cv2.fillPoly(self.ImageBuffer, np.array([pointlist]), color=color)
         self.ActionList.append(['fillpolygon',pointlist,color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def DrawRectangle(self,startcoord,endcoord,color=None,thickness=None):
         """ Draw a Rectangle on the image. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawRectangle(",startcoord,endcoord,color,thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawRectangle: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -3166,24 +3199,22 @@ class pilomarimage():
         endcoord = self.OrientCoord(endcoord) # Get height right way up.
         self.ImageBuffer = cv2.rectangle(self.ImageBuffer, startcoord, endcoord, color, thickness)
         self.ActionList.append(['drawrectangle',startcoord, endcoord, color, thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
         
     def FillRectangle(self,startcoord,endcoord,color=None):
         """ Draw a filled Rectangle on the image. """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FillRectangle(",startcoord,endcoord,color,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillRectangle: No image in the buffer.')
         color = self.SafeColor(color)
         startcoord = self.OrientCoord(startcoord) # Get height right way up.
         endcoord = self.OrientCoord(endcoord) # Get height right way up.
         self.ImageBuffer = cv2.rectangle(self.ImageBuffer, startcoord, endcoord, color, thickness=-1)
         self.ActionList.append(['fillrectangle',startcoord, endcoord, color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FadeRectangle(self,startcoord,endcoord,color=None,fadecolor=None):
         """ Fill a ractangle on the image, but the color fades from center to edge """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FadeRectangle(",center_x,center_y,color,rad,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FadeRectangle: No image in the buffer.')
         color = self.SafeColor(color)
         if fadecolor == None: fadecolor = self.SafeColor(0) # Default to Black.
@@ -3206,7 +3237,7 @@ class pilomarimage():
                 self.ImageBuffer = cv2.rectangle(self.ImageBuffer, startcoord, endcoord, gradedcolor, thickness=-1)
                 prevcolor = gradedcolor
         self.ActionList.append(['faderectangle',startcoord,endcoord,color,fadecolor])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawEllipse(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None, thickness=None):
@@ -3216,7 +3247,6 @@ class pilomarimage():
             angle = 0-360
             startAngle = 0-360
             endAngle = 0-360 """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawEllipse",self.Name,"(", center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color, thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEllipse: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -3225,7 +3255,7 @@ class pilomarimage():
         # *Q* OrientHeight needs to switch angles too.
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawellipse',center_x,center_y,axis_x,axis_y,angle,startAngle,endAngle,color,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawEdgeEllipse(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None, edgecolor=None, thickness=None, edgethickness=1):
@@ -3235,7 +3265,6 @@ class pilomarimage():
             angle = 0-360
             startAngle = 0-360
             endAngle = 0-360 """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawEllipse",self.Name,"(", center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color, thickness,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeEllipse: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -3247,7 +3276,7 @@ class pilomarimage():
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), edgecolor, (thickness + 2 * edgethickness), lineType=cv2.LINE_AA)
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawedgeellipse',center_x,center_y,axis_x,axis_y,angle,startAngle,endAngle,color,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FillEllipse(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None):
@@ -3257,22 +3286,20 @@ class pilomarimage():
             angle = 0-360
             startAngle = 0-360
             endAngle = 0-360 """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FillEllipse(", center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color,")",terminal=False)
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillEllipse: No image in the buffer.')
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y)
         # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness=-1, lineType=cv2.LINE_AA)
         self.ActionList.append(['fillellipse', center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def FadeEllipse(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None, fadecolor=None):
         """ Fill an ellipse on the image, but the color fades from center to edge """
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".FadeEllipse(", center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color,")",terminal=False)
         if self.ImageMissing(): 
             print('pilomarimage',self.Name,'.FadeEllipse: No image in the buffer.')
-            if self.Log != None: self.Log('pilomarimage',self.Name,'.FadeEllipse: No image in the buffer.',level='error',terminal=True)
+            self.Log('pilomarimage',self.Name,'.FadeEllipse: No image in the buffer.',level='error',terminal=True)
 
         color = self.SafeColor(color)
         if fadecolor == None: fadecolor = self.SafeColor(0) # Default to Black.
@@ -3291,7 +3318,7 @@ class pilomarimage():
                 self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (xt, yt), int(angle), int(startAngle), int(endAngle), gradedcolor, thickness=-1, lineType=cv2.LINE_AA)
                 prevcolor = gradedcolor
         self.ActionList.append(['fadeellipse', center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color, fadecolor])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True
 
     def DrawDumbbell(self,drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow,thickness=None):
@@ -3312,10 +3339,9 @@ class pilomarimage():
              x   x                     .  x   x
               xxx                     .    xxx                   """
             
-        #if self.Log != None and self.LogDrawing: self.Log("pilomarimage",self.Name,".DrawDumbbell(", drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow,thickness,")",terminal=False)
         if self.ImageMissing(): 
             print('pilomarimage',self.Name,'.DrawDumbbell: No image in the buffer.')
-            if self.Log != None: self.Log('pilomarimage',self.Name,'.DrawDumbbell: No image in the buffer.',level='error',terminal=True)
+            self.Log('pilomarimage',self.Name,'.DrawDumbbell: No image in the buffer.',level='error',terminal=True)
         drawfrom = self.OrientCoord(drawfrom) # Get height right way around.
         drawto = self.OrientCoord(drawto)
         fromx = drawfrom[0] # center of the FROM circle.
@@ -3347,11 +3373,9 @@ class pilomarimage():
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(fromx, fromy), rad, fromcolor, thickness=thickness, lineType=cv2.LINE_AA)
         self.ImageBuffer = cv2.circle(self.ImageBuffer,(tox, toy), rad, tocolor, thickness=thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawdumbbell',drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow,thickness])
-        self.ModifiedTimestamp = self.Now()
+        self.ModifiedTimestamp = self.NowUTC()
         return True # The image now has the 'dumbbell' drawn on it.
 
-    ### BEGIN DEVELOPMENT ###
-    
     def BrightnessHistogram(self):
         """ Return array of brightness levels. 
             Uses a grayscale representation of the current image to calculate the brightness.
@@ -3370,8 +3394,6 @@ class pilomarimage():
         wb = round(weightedtotal / pixeltotal,0) - 1 # Calculate weighted average, but subtract 1 to return '0' brightness pixels within range again.
         return wb
 
-    ### END DEVELOPMENT ###
-    
     def DescribeImage(self):
         """ Print information about the current image buffer. """
         print("Describe image:")
@@ -3390,101 +3412,66 @@ class pilomarimage():
         print("Pen: Color:",self.PenColor,"Thickness:",self.PenThickness)
         print("ActionList:",self.ActionList)
 
-### BEGIN DEVELOPMENT ###
-class keograph():
-    """ Experimental 'keograph' object. 
-        Takes a strip of pixels from a series of images and aligns them side-by-side to create a keograph. 
-        Really designed for plotting aurora activity.
-        Done as an experiment here. """
-        
-    def Now(self):
-        """ Return system UTC timestamp. """
-        return datetime.now(timezone.utc)
-        
-    def __init__(self,height,width,logger=None,durationhours=6):
-        height = int(height)
-        width = int(width)
-        if height < 1 or width < 1:
-            raise Exception("keograph.__init__() invalid dimensions",height,width)
-        self.SetLogger(logger) # Any method which supports pilomar's .Log() methods.
-        self.Keograph = pilomarimage(name='keograph',logger=logger)
-        self.Keograph.New(height,width) # ,imagetype='bgr')
-        self.Keograph.FillColor((0,0,0,255)) # Fill black.
-        self.StartTime = self.Now()
-        self.EndTime = self.StartTime + timedelta(hours=durationhours) # What's the time span of the keograph?
-        self.Radius = 0 # Pixel additional radius to extract color from. 0 = target pixel only.
-        self.MeanRatio = 1.0 # Proportion of 'mean' sample to apply.
-        self.MinRatio = 0.0 # Proportion of 'minimum' sample to apply.
-        self.MaxRatio = 0.0 # Proportion of 'maximum' sample to apply.
+class pilomarkeogram():
+    """ Simple keogram builder. 
+        Usage
+        MyKeo = pilomarkeogram('keogram',widthpixels,heightpixels) 
+        MyKeo.Extract(imagehandler1)
+        MyKeo.Extract(imagehandler2)
+        MyKeo.Extract(imagehandler3)
+        MyKeo.Extract(imagehandler4)
+        MyKeo.BuildImageBuffer()
+        ... you can now manipulate/markup the MyKeo.Keogram image instance.
+        MyKeo.SaveFile('keogram.jpg')
+        """
+    
+    def __init__(self,name,width,height):
+        self.Name = name # A name for this instance.
+        self.Width = width # Width of target image.
+        self.Height = height # Height of target image.
+        self.KeogramPixels = None # List of data sampled.
+        self.SampleCount = 0 # How many sample strips have we captured.
+        self.Keogram = pilomarimage(name='keogram',logger=None) # Create a pilomarimage instance for the resulting keogram.
 
-    def SetLogger(self,logger):
-        """ Set up link to logging class and shortcuts to common methods. """
-        self.Logger = logger # Logger instance.
-        self.Log = None
-        self.ReportException = None # Report exception details to logfile.
-        self.RaiseException = None # Report and raise exception. 
-        if hasattr(logger,'Log'): self.Log = logger.Log # Log method.
-        if hasattr(logger,'ReportException'): self.ReportException = logger.ReportException # Report exception details to logfile.
-        if hasattr(logger,'RaiseException'): self.RaiseException = logger.RaiseException # Report and raise exception. 
-        if self.Log != None: self.Log("pilomarimage.SetLogger(",self.Name,"): Linked to this log file.",terminal=False)
-        return True
+    def Extract(self,imagehandler): # Extract data for a keogram.
+        """ Extract data for a Keogram.
+            imagehandler is an instance of pilomarimage containing the latest live image.
+            Extracts a vertical band from each image received,
+            Finds the brightest pixel in each row,
+            Appends these brightest pixels to the data set from all images. """
+        source_width = imagehandler.GetWidth()
+        source_height = imagehandler.GetHeight()
+        band = int(source_width * 0.10) # Take middle 10% of image.
+        workbuf = imagehandler.ImageBuffer.copy() # Grab a copy of the light buffer.
+        xstart = int((source_width - band) / 2) # Left side of the sample band.
+        xend = int((source_width + band) / 2) # Right side of the sample band.
+        workbuf = workbuf[:,xstart:xend,:] # Extract sample band.
+        gray_image = cv2.cvtColor(workbuf, cv2.COLOR_BGR2GRAY) # Convert to grayscale
+        n_width = workbuf.shape[1] # New width of the band.
+        column = [] # Empty column of pixel data we are about to extract.
+        for r in range(source_height): # Process each row of the sample in turn.
+            max_brightness = 0 # Location of the brightest pixel. 
+            max_pixel = [0,0,0] # Color of the brightest pixel.
+            for c in range(n_width): # Check each column in turn.
+                brightness = gray_image[r][c] # Brightness is the pixel value from the grayscale image.
+                if brightness > max_brightness: # We have a new maximum value.
+                    max_brightness = brightness # Record the new maximum.
+                    max_pixel = workbuf[r,c,:] # Record the actual BGR vales for that pixel.
+            column.append([[max_pixel[0],max_pixel[1],max_pixel[2]]]) # Add the pixel value to the values for this column.
+        if type(self.KeogramPixels) == type(None): # No pre-existing pixel data. Create it now.
+            self.KeogramPixels = np.array(column).astype(np.uint8) # Create a single column image in Numpy.
+        else:
+            self.KeogramPixels = np.append(self.KeogramPixels,column,axis=1) # Add a new column to existing image in Numpy.
+        self.SampleCount += 1 # Increment count of samples.
 
-    def GetPixelColor(self,source,col,row):
-        """ Extract pixel value from given location.
-            Can apply various sampling methods if needed.
-            This currently handles bgr colors only. """
-        if self.Radius < 1: # Simple single pixel extraction.
-            color = source.GetPixelColor(row,col) # What color is the source image providing?
-        else: # More complex analysis of surrounding pixels.
-            colortotal = colormean = colormin = colormax = [0,0,0]
-            pixelcount = 0
-            height, width = source.GetDimensions()
-            for c in range(col - self.Radius, col + self.Radius + 1): # Go through all the columns in range.
-                for r in range(row - self.Radius, row + self.Radius + 1): # Go through all the rows in range.
-                    if (0 <= r < height) and (0 <= c < width): # Pixel exists.
-                        cellcolor = source.GetPixelColor(r,c)
-                        for i in range(3): 
-                            colortotal[i] += cellcolor[i] # Total color.
-                            if pixelcount == 0 or cellcolor[i] < colormin[i]: colormin[i] = cellcolor[i] # Select dimmest color.
-                            if pixelcount == 0 or cellcolor[i] > colormax[i]: colormax[i] = cellcolor[i] # Select brightest color.
-                        pixelcount += 1
-            # Now calculate the final value as bgr values.
-            for i in range(3):
-                colormean[i] = int(self.MeanRatio * colortotal[i] / pixelcount) # Ratio the possible return values.
-                colormin[i] = int(self.MinRatio * colormin[i])
-                colormax[i] = int(self.MaxRatio * colormax[i])
-            color = (colormean[0] + colormin[0] + colormax[0], # Construct final return color.
-                     colormean[1] + colormin[1] + colormax[1],
-                     colormean[2] + colormin[2] + colormax[2])
-        return color
+    def BuildImageBuffer(self):
+        """ """
+        writebuffer = cv2.resize(self.KeogramPixels,(self.Width,self.Height),interpolation=cv2.INTER_AREA)
+        self.Keogram.LoadBuffer(writebuffer)
 
-    def ExtractStrip(self,source):
-        """ Given another pilomarimage object as a source, extract the strip of pixels and apply it to the keograph. """
-        height,width = source.GetDimensions()
-        column = int(width / 2) # Select centre column.
-        now = self.Now()
-        if now > self.EndTime: return False # Off the end of the image.
-        timeslot = (self.Now() - self.StartTime) / (self.EndTime - self.StartTime) # Proportion of timespan that this column represents.
-        endcolumn = self.Keograph.GetWidth()
-        targetcolumn = int(endcolumn * timeslot) # Convert to a specific column.
-        if self.Log != None: self.Log("keograph.ExtractStrip(): TargetColumn",targetcolumn,"TimeSlot",timeslot,"Start",self.StartTime,"End",self.EndTime,"Columns",endcolumn,terminal=False)
-        for r in range(height): # Go through each pixel in the column in turn.
-            color = self.GetPixelColor(source,r,column) # What color is the source image providing?
-            #print("ExtractStrip: color",color,"row",r)
-            self.Keograph.DrawLine((targetcolumn,r),(endcolumn,r),color) # Apply that color from the timeslot forward to the keograph.
-        # Draw time marker during development.
-        self.Keograph.DrawLine((targetcolumn,height),(targetcolumn,height - 50),color=self.Keograph.BGRWhite)
-
-    def SaveFile(self,filename,text=None):
-        """ Save the keograph. """
-        # Add time range to image.
-        self.Keograph.AddText("Start: " + str(self.StartTime).split(".")[0] + " UTC",10,self.Keograph.GetHeight() - 10,size=0.5,color=self.Keograph.BGRWhite,bgcolor=self.Keograph.BGRBlack)
-        self.Keograph.AddText("End: " + str(self.EndTime).split(".")[0] + " UTC",self.Keograph.GetWidth() - 10,self.Keograph.GetHeight() - 10,size=0.5,color=self.Keograph.BGRWhite,bgcolor=self.Keograph.BGRBlack,hjust='r')
-        if text != None: 
-            self.Keograph.AddText(text,int(self.Keograph.GetWidth() / 2),self.Keograph.GetHeight() - 10,size=1,color=self.Keograph.BGRWhite,bgcolor=self.Keograph.BGRBlack,hjust='c')
-        self.Keograph.SaveFile(filename)
-        
-### END DEVELOPMENT ###
+    def SaveFile(self,filename):        
+        """ Export and save the keogram data as a .jpg file on disc. """    
+        self.Keogram.SaveFile(filename) # imwrite doesn't report errors very well, beware.
 
 if __name__ == '__main__':
     pi = pilomarimage()

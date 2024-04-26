@@ -60,9 +60,17 @@ class textcolor:
                 print(textcolor.red('Hello'))
                 
         It includes various constants such as names of colors.
-        It also makes some unicode symbols available via a dictionary so you can refer to them by name. """
+        It also makes some unicode symbols available via a dictionary so you can refer to them by name.
 
-    __version__ = '0.0.5'
+        Usage :-
+
+            from textcolor import textcolor
+            print(textcolor.yellow("Hello") 
+                     Would print "Hello" in yellow text on default background. 
+                     
+            """
+
+    __version__ = '0.0.6'
     TermType = None
     Mode = 'putty' # 'putty' = full colour remote terminal, 'simple' = No colour, 'local' = Direct connection colour.
     # Some standard color names (XTERM names & a couple of common aliases).
@@ -330,7 +338,7 @@ class textcolor:
               }
 
     @staticmethod
-    def TextBox(linelist,row=None,col=None,fg=None,bg=None,textfg=None,textbg=None,borderfg=None,borderbg=None):
+    def TextBox(linelist,row=None,col=None,fg=None,bg=None,textfg=None,textbg=None,borderfg=None,borderbg=None,minwidth=None,justify=None):
         """ Receive a single string or list of strings.
             Embedded newline characters will also split the text into separate lines within the bounding box.
             Make all lines the same length, surrounded with a box using line drawing characters.
@@ -339,8 +347,11 @@ class textcolor:
             Colors are applied if specified. 
             - fg/bg applies to text and border. 
             - textfg/textbg applies to text only. 
-            - borderfg/borderbg applies to border only. """
+            - borderfg/borderbg applies to border only.
+            - minwidth = minimum character width.
+            - justify = 'l'(left),'c'(center),'r'(right) """
         if type(linelist) != type([]): linelist = [linelist] # Convert single values to list for simpler processing.
+        if justify != None: justify = justify[0].lower() # standardise code.
         # Convert embedded newline characters into separate list elements.
         templinelist = []
         for line in linelist: # Read all the input lines.
@@ -353,7 +364,8 @@ class textcolor:
         if borderbg == None: borderbg = bg # Use same color scheme for text and border.
         maxlen = 0
         for line in linelist: maxlen = max(maxlen,len(line)) # What's the longest line?
-        lines = [line.ljust(maxlen) for line in linelist] # Make all lines the same length.
+        if minwidth != None: maxlen = max(maxlen,minwidth) # Respect minwidth.
+        #lines = [line.ljust(maxlen) for line in linelist] # Make all lines the same length.
         printlines = [] # List of color constructed lines to print.
         # 1: Construct top of box.
         if borderfg != None and borderbg != None: # Border color is specified.
@@ -363,13 +375,19 @@ class textcolor:
             temp = textcolor.SYMBOLS['corner_tl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_tr']
             printlines.append(temp)
         # 2: Construct text lines and box edges.
-        for line in lines:
+        for line in linelist:
             temp = ''
             # Vertical edge on left. Color if needed.
             if borderfg != None and borderbg != None: # Border color is specified.
                 temp += textcolor.fgbgcolor(borderfg,borderbg,textcolor.SYMBOLS['vertical'])
             else: temp += textcolor.SYMBOLS['vertical']
             # Text inside box. Color if needed.
+            # - Justify.
+            if justify == 'l': line = line.strip().ljust(maxlen) # left justify (default).
+            elif justify == 'c': line = line.strip().center(maxlen) # center justify.
+            elif justify == 'r': line = line.strip().rjust(maxlen) # right justify.
+            else: line = (line + " " * maxlen)[:maxlen] # Just pad whatever we were given.
+            # - Add color.
             if textfg != None and textbg != None: # Text color is specified.
                 temp += textcolor.fgbgcolor(textfg,textbg,line)
             else: temp += line
@@ -399,6 +417,19 @@ class textcolor:
     def safetype(raw):
         if type(raw) != type(str): raw = str(raw)
         return raw     
+
+    @staticmethod
+    def booltocolor(value,fgtrue=None,fgfalse=None):
+        """ Given a boolean (or text) value, return it as colored text. 
+            True values are colored fgtrue color. 
+            False valuse are colored fgfalse color. 
+            None values are not colored. """
+        if fgtrue == None: fgtrue = textcolor.GREEN
+        if fgfalse == None: fgfalse = textcolor.RED
+        temp = str(value)
+        temp = temp.replace("True",textcolor.fgbgcolor(fgtrue,textcolor.BLACK,"True"))
+        temp = temp.replace("False",textcolor.fgbgcolor(fgfalse,textcolor.BLACK,"False"))
+        return temp
 
     @staticmethod
     def listtotext(arglist,sep=' '):
@@ -493,6 +524,24 @@ class textcolor:
                 break
         return result, prefix, symbol
 
+    @staticmethod
+    def stripcodes(line):
+        """ Remove embedded terminal display codes from a line of text.
+            Removes any text starting with "\033[" up to the first letter. (A-Z,a-z) """
+        result = ''
+        CodeStart = "\033["
+        InCode = False
+        if line is None or line == '': result = line
+        else: # Need to process the characters.
+            for i in range(len(line)):
+                if line[i:].startswith(CodeStart): InCode = True # We've started a code sequence.
+                if not InCode: # We have printable characters.
+                    result += line[i]
+                if InCode: # We're in a code sequence. Check for it ending.
+                    if "a" <= line[i].lower() <= "z": # Code terminator.
+                        InCode = False
+        return result
+        
     @staticmethod
     def oscommand(cmd): # Common
         """ Execute a command,result is returned as clean list of lines. """
@@ -737,14 +786,14 @@ class textcolor:
                 line += textcolor.fgbgcolor(0,code, str(code).rjust(4))
             print (line)
         print (textcolor.reset())
-        print (textcolor.black('BLACK'))
-        print (textcolor.red('RED'))
-        print (textcolor.green('GREEN'))
-        print (textcolor.blue('BLUE'))
-        print (textcolor.yellow('YELLOW'))
-        print (textcolor.aqua('AQUA'))
-        print (textcolor.white('WHITE'))
-        print (textcolor.magenta('MAGENTA'))
+        print (textcolor.black('Black'))
+        print (textcolor.red('Red'))
+        print (textcolor.green('Green'))
+        print (textcolor.blue('Blue'))
+        print (textcolor.yellow('Yellow'))
+        print (textcolor.aqua('Aqua'))
+        print (textcolor.white('White'))
+        print (textcolor.magenta('Magenta'))
         print ("termtype",textcolor.GetTermType())
 
     @staticmethod
@@ -1123,7 +1172,7 @@ class field():
 
         Field can be regular data fields or progress bars. """
     
-    __version__ = '0.0.1'
+    __version__ = '0.0.2'
     
     def __init__(self,name,row,col,length=10,justify='l'):
         """ justify = 'l' left, 'r' right. """
@@ -1153,17 +1202,11 @@ class field():
         
     def Justified(self):
         sval = str(self.Value) # Convert to string.
+        jcode = self.Justify[0].lower()
         if len(sval) < self.Length: # Does the field need padding?
-            jval = ' ' * (self.Length - len(sval))
-        else:
-            jval = ''
-        if self.Justify[0].lower() == 'r': sval = jval + sval # Right justify
-        elif self.Justify[0].lower() == 'c': # Centre justify
-            i = len(jval) # How many spaces to share out?
-            if i > 0:
-                i = i // 2 # Half the spaces (rounded down using integer division)
-                sval = jval[:i] + sval + jval[i:] # Half the spaces + text + remaining spaces.
-        else: sval = sval + jval # Left justify
+            if jcode == 'r': sval = sval.strip().rjust(self.Length)
+            elif jcode == 'c': sval = sval.strip().center(self.Length)
+            else: sval = sval.strip().ljust(self.Length)
         return sval
 
 # -------------------------------------------------------------------------------------------------------------------------------- 
@@ -1175,7 +1218,7 @@ class colordisplay():
         Supports sprites.
         Supports labelled data fields. """
     
-    __version__ = '0.0.5'
+    __version__ = '0.0.6'
     DefinedWindows = [] # Handles of all defined windows. Useful for scanning/updating all available windows.
                         # The defining class contains some methods which can perform general updates via this list.
     CDLayout = [] # Array of major rows/columns that colordisplay instances can self-align with.
@@ -1194,7 +1237,6 @@ class colordisplay():
                 if temp >= startcol: startcol = temp + 1 # Start at next free column (with 1 space for border).
         startcol = max(startcol,1) # Must be at least 1 (1st column)
         colordisplay.CDLayout.append([startcol,colwidth])
-        #print("colordisplay.AddCDEntry:",colordisplay.CDLayout)
         return True
     
     def __init__(self,rows,columns=None,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None,cdlayout=None):
@@ -1215,7 +1257,7 @@ class colordisplay():
             -------------------------
             After instantiation, you can also set self.ClipWindow = True to allow the window to truncate display if insufficient realestate available.
                Otherwise the entire window will be suppressed until the display is big enough to accomodate the entire window. """
-        self.DisplayName = name
+        self.DisplayName = name # A label for the display instance.
         if columns == None and cdlayout == None:
             raise Exception("colordisplay.__init__(): You must specify columns or cdlayout parameter to define a window.")
         if self.DisplayName == '':
@@ -1470,14 +1512,14 @@ class colordisplay():
     def CopyFieldColor(self,fromname,toname):
         """ Copy color of one field to another. """
         FoundIt = False
-        fromfield = None
-        tofield = None
+        fromfield = None # Handle to the FROM instance.
+        tofield = None # Handle to the TO instance.
         for f in self.Fields: # Find the source field.
-            if f.Name == fromname:
+            if f.Name == fromname: # Found the FROM instance.
                 fromfield = f
                 break
         for g in self.Fields: # Find the target field.
-            if g.Name == toname:
+            if g.Name == toname: # Found the TO instance.
                 tofield = g
                 break
         if fromfield != None and tofield != None: # Transfer the colors.
@@ -1584,15 +1626,12 @@ class colordisplay():
                             the display and ONLY these characters get overwritten, this lets
                             you have overlapping titles or gaps in the box if needed by using
                             other characters that are not in the overwritelist """
-        #print("textcolor.DrawBox:",fromloc,toloc)
         (fromrow, fromcol) = fromloc
         (torow, tocol) = toloc
-        #print("textcolor.DrawBox: From",fromrow,fromcol,"To",torow,tocol)
         fromrow = self.ClipRow(fromrow)
         torow = self.ClipRow(torow)
         fromcol = self.ClipCol(fromcol)
         tocol = self.ClipCol(tocol)
-        #print("textcolor.DrawBox: Clipped From",fromrow,fromcol,"To",torow,tocol)
         if border: # Draw lines around box.
             for c in range(fromcol,tocol + 1):
                 # Draw top
@@ -1740,11 +1779,8 @@ class colordisplay():
         if lines < 1: lines = 1
         if lines > self.DisplayRows: lines = self.DisplayRows
         for i in range(lines):
-            # temprow = self.character.pop(self.FirstScrollRow) # Remove entire 1st data row.
             self.character.pop(self.FirstScrollRow) # Remove entire 1st data row.
-            #tempfg = self.fgcolor.pop(self.FirstScrollRow)
             self.fgcolor.pop(self.FirstScrollRow)
-            #tempbg = self.bgcolor.pop(self.FirstScrollRow)
             self.bgcolor.pop(self.FirstScrollRow)
             self.character.append([' ' for c in range(self.DisplayColumns)]) # Add empty row at end of window.
             self.fgcolor.append([self.DefaultFGs[self.FGColorIndex] for c in range(self.DisplayColumns)])
