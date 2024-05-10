@@ -37,13 +37,12 @@ class astrolens():
         
     LensList = [] # List of declared lenses. 
     
-    def __init__(self,length,horizontal_fov,vertical_fov,aperture=2.8,logger=None,parameters=None,driver='raspistill'):
+    def __init__(self,length,horizontal_fov,vertical_fov,aperture=2.8,logger=None,parameters=None):
         self.SetLogger(logger) # CamLog # Handle to the class that handles logging and error tracing.
         self.oscommand = oscommand(logger=logger.Log) # Create OS command executor.
         self.osCmd = self.oscommand.Execute
         self.CameraWindow = None
         self.ErrorWindow = None
-        self.CameraDriver = driver # raspistill or libcamera?
         self.Parameters = parameters # Must define parameter file before using instance.
         self.BaseLength = length # The length of the lense WITHOUT any multiplier effect.
         self.Length = length # 'focal length' of the lens.
@@ -179,12 +178,12 @@ class astrosensor():
 
     def DenoiseStatus(self):
         """ With libcamera the denoise / onchip cleanup is set via the command template rather than the parameter file. """
-        if self.CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
+        if self.Parameters.CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
             result = not self.Parameters.DisableCleanup # Onchip cleanup is ENABLED unless we can prove otherwise.
         else:
             result = True # Denoise is ON unless explicitly turned off in the command line (checked next).
         try:
-            elements = self.Parameters.CameraLightCommand.split(" ") # Check all the options.
+            elements = self.Parameters._CameraLightCommand.split(" ") # Check all the options.
             for i,element in enumerate(elements):
                 if element == '--denoise': # We've found a denoise instruction in the camera command template.
                     if elements[i + 1] == 'off': # Onchip cleanup is disabled.
@@ -196,7 +195,7 @@ class astrosensor():
             self.Log("astrosensor.DenoiseStatus(): Command template is incomplete.",terminal=False)
         return result
 
-    def __init__(self,sensor_type='',pixel_width=4056,pixel_height=3040,max_seconds=200,min_seconds=0.0000001,logger=None,parameters=None,driver='raspistill',channel=None):
+    def __init__(self,sensor_type='',pixel_width=4056,pixel_height=3040,max_seconds=200,min_seconds=0.0000001,logger=None,parameters=None,channel=None):
         """ Create new instance of astrosensor. 
         
             sensor_type: Optional sensor type, can set some parameters automatically if recognised. eg imx477
@@ -215,7 +214,6 @@ class astrosensor():
         self.osCmd = self.oscommand.Execute
         self.CameraWindow = None
         self.ErrorWindow = None
-        self.CameraDriver = driver # raspistill or libcamera?
         self.Parameters = parameters # Must declare the parameter file before you can use the instance.
         self.PixelWidth = pixel_width
         self.PixelHeight = pixel_height
@@ -313,7 +311,7 @@ class astrosensor():
             Even in RAW capture mode, the sensor will perform some image cleanup by default.
             This cleanup degrades the raw data that astro photo stacking software will work with.
             Therefore it is advisable to disable this cleanup before taking photos for stacking.            """
-        if self.CameraDriver == 'raspistill': #if OS_name in ['buster']:
+        if self.Parameters.CameraDriver == 'raspistill': #if OS_name in ['buster']:
             print (textcolor.yellow("Disabling sensor cleanup to improve purity of sensor raw data."))
             if not self.Type in ['imx477']: # Check that the sensor cleanup function actually can be disabled.
                 self.Log("AstroSensor.DisableCleanup is not supported for " + self.Type + " sensors. Ignored.",level='warning')
@@ -336,7 +334,7 @@ class astrosensor():
         """ Enable the on-chip image cleanup for the sensor.
             This returns the on-chip image cleanup back to the default state (ON)
             It is recommended to have it disabled for image stacking of raw images. """
-        if self.CameraDriver == 'raspistill': #if OS_name in ['buster']:
+        if self.Parameters.CameraDriver == 'raspistill': #if OS_name in ['buster']:
             print (textcolor.yellow("Enabling sensor cleanup to restore factory functionality."))
             if not self.Type in ['imx477']:
                 self.Log("AstroSensor.EnableCleanup is not supported for " + self.Type + " sensors. Ignored.",level='warning')
@@ -387,7 +385,7 @@ class astrocamera():
     
     """ Object representing the camera assembly being used.
         It contains the LENS and SENSOR objects, also various attributes and settings of the overall camera. """
-    def __init__(self,inp_sensor,inp_lens,exposure=10.0,trackingexposure=5.0,logger=None,parameters=None,driver='raspistill',imagesimulator=None):
+    def __init__(self,inp_sensor,inp_lens,exposure=10.0,trackingexposure=5.0,logger=None,parameters=None,imagesimulator=None):
         self.SetLogger(logger) # CamLog # Handle to the class that handles logging and error tracing.
         self.oscommand = oscommand(logger=logger.Log) # Create OS command executor.
         self.osCmd = self.oscommand.Execute
@@ -402,8 +400,8 @@ class astrocamera():
         self.Parameters = parameters # Must define the parameter file before using the instance.
         self.FolderHandler = None # Local copy of the FolderList telling where to store files.
         # - 
+        self.FileTypes = ['jpg','dng'] # List of file types to make available.
         self.ObjectType = None # What is the target type? Set by SetObservationParameters() from session information.
-        self.CameraDriver = driver # raspistill or libcamera?
         self.Mctl = None # Handle to the microcontroller. Can monitor it for restarts.
         self.Sensor = inp_sensor # The sensor that makes up the camera.
         self.Lens = inp_lens # The lens that makes up the camera.
@@ -411,9 +409,9 @@ class astrocamera():
         self.TrackingExposureSeconds = trackingexposure # Tracking photos are always 5 second exposure.
         self.TimelapseSeconds = None # Delay between successive exposures if taking timelapse images.
         self.TimelapseTimer = None # Handle to timelapse timer if set.
-        self.PixelsPerFovDegreeWidth = 0 # Set by ModeChange() below.
-        self.PixelsPerFovDegreeHeight = 0 # Set by ModeChange() below. 
-        self.PixelFovWidth = 0 # Set by ModeChange() below. # Field of view of an individual pixel (very approximate).
+        self.PixelsPerFovDegreeWidth = 0 # Set by ModeChange() below. How many pixels represent 1 degree image width.
+        self.PixelsPerFovDegreeHeight = 0 # Set by ModeChange() below. How many pixels represent 1 degree image height.
+        self.PixelFovWidth = 0 # Set by ModeChange() below. # Approximate field of view of an individual pixel.
         self.PixelFovHeight = 0 # Set by ModeChange() below.
         self.SecondsPerPixel = 0.0 # Set by ModeChange() below. Specifies how long an object takes to traverse one pixel of an image.
         self.ModeChange() # Set values based upon sensor mode. 
@@ -432,11 +430,12 @@ class astrocamera():
         # Observation specific settings. These override the general parameters in instances where the general parameters don't make sense. Eg meteor monitoring.
         self.CameraSaveDng = True
         self.CameraSaveJpg = True
+        self.CameraSaveFits = False
         self.FastImageCapture = False
         self.CameraOptions = '' # The camera options passed to raspistill. These depend upon the image type being captured.
         self.RxCount = 0 # Number of messages received by camera thread.
         self.TxCount = 0 # Number of messages sent by camera thread.
-        if self.CameraDriver == 'raspistill':
+        if self.Parameters.CameraDriver == 'raspistill':
             from pidng.core import RPICAM2DNG # DNG data extraction from RPi camera RAW images. From https://github.com/schoolpost/pidng Needs to be 3.4.6 version. Later versions are not compatible.
             self.PiDNG = RPICAM2DNG() # RPICAM2DNG() needed for Buster O/S raspistill operation.
         else:
@@ -578,6 +577,13 @@ class astrocamera():
                 self.CameraSaveDng = False
         else: self.CameraSaveDng = self.Parameters.CameraSaveDng # Revert to parameter preference.
         self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveDng",self.CameraSaveDng,terminal=False)
+
+        if self.ObjectType in ['aurora','meteor']: # Disable DNG generation if taking AURORA or METEOR images. 
+            if self.CameraSaveFits: 
+                self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will not capture FITS (raw) images.",terminal=False)
+                self.CameraSaveFits = False
+        else: self.CameraSaveFits = self.Parameters.CameraSaveFits # Revert to parameter preference.
+        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveFits",self.CameraSaveFits,terminal=False)
 
         if self.ObjectType in ['aurora','meteor']: # Turn on JPG generation if not already set.
             if not self.CameraSaveJpg:
@@ -1043,7 +1049,7 @@ class astrocamera():
             if tempfile: outputfile = file_root + 'temp.jpg' # This is the 'intermediate' jpg generated by the camera.
             else: outputfile = file_root + self.UtcTimeStamp() + "_" + frame + '.jpg' # This is the 'intermediate' jpg generated by the camera.
             self.Log("astrocamera.CaptureSetFull(): Capturing",outputfile,"...",terminal=False)
-            cmd = camera_command.replace('{&output}',outputfile)
+            cmd = camera_command.replace('{&output}',outputfile) # *Q* TODO: Perform safety check for remaining & symbols.
             if self.Mctl != None: # Microcontroller handle is defined.
                 remoterestarts = self.Mctl.RemoteRestarts # If this changes during exposure, the microcontroller has reset and we should reject the image.
             else:
@@ -1089,7 +1095,7 @@ class astrocamera():
             self.LastImageDateTime = self.NowUTC() # *Q* This timestamp is AFTER the image has been captured. Can it be estimated better? CaptureStart + (CaptureEnd - CaptureStart) / 2 ?
             self.Log("astrocamera.CaptureSetFull(): Image loaded.",terminal=False)
             if (" -r " in (camera_command + ' ') or " --raw " in (camera_command + ' ')) and self.Parameters.CameraEnabled: # The jpg contains RAW data in the file tags, extract it. Convert it.
-                if self.CameraDriver == 'raspistill': # We need to manually extract the DNG data.
+                if self.Parameters.CameraDriver == 'raspistill': # We need to manually extract the DNG data.
                     # with raspistill convert to RAW. We have to extract the raw data RAW for .dng files to be saved.
                     self.Log("astrocamera.CaptureSetFull(): Converting to RAW (.DNG) file...",terminal=False)
                     dngname = outputfile.replace('.jpg','.dng')
@@ -1110,6 +1116,10 @@ class astrocamera():
                         self.osCmd(cmd,output='log')
                     else:
                         if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " " + dngname.split('/')[-1]) # Just the dng filename.
+                elif self.Parameters.CameraDriver == 'pilomarfits': # The .fits file will have been made automatically for us.
+                    fitsname = outputfile.replace('.jpg','.fits') # Construct the .fits filename we expect.
+                    self.Log("astrocamera.CaptureSetFull(): FITS file should have been generated too.",terminal=False)
+                    if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " " + fitsname.split('/')[-1]) # Just the dng filename.
             if tempfile: # Delete the temporary file.
                 cmd = 'rm ' + outputfile
                 self.osCmd(cmd,output='log')
@@ -1157,7 +1167,7 @@ class astrocamera():
             if tempfile: outputfile = file_root + 'temp.jpg' # This is the 'intermediate' jpg generated by the camera.
             else: outputfile = file_root + self.UtcTimeStamp() + "_" + frame + '.jpg' # This is the 'intermediate' jpg generated by the camera.
             self.Log("astrocamera.CaptureSetFast(): Capturing",outputfile,"...",terminal=False)
-            cmd = camera_command.replace('{&output}',outputfile)
+            cmd = camera_command.replace('{&output}',outputfile) # *Q* TODO: Perform safety check for remaining & symbols.
             if self.Mctl != None: # Microcontroller handle is defined.
                 remoterestarts = self.Mctl.RemoteRestarts # If this changes during exposure, the microcontroller has reset and we should reject the image.
             else:
@@ -1437,11 +1447,12 @@ class astrocamera():
         FileRoot=self.FolderHandler.PrepFile('light','light_')
         # raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}
         # libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}
-        CameraCommand = self.Parameters.CameraLightCommand
-        CameraCommand = CameraCommand.replace('{&shutter}',str(ExposureMicroseconds))
+        # python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --denoise off --shutter {&shutter}
+        CameraCommand = self.Parameters._CameraLightCommand
+        CameraCommand = CameraCommand.replace('{&shutter}',str(int(ExposureMicroseconds)))
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        if self.CameraSaveDng: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            CameraCommand += ' ' + self.Parameters.CameraRawSwitch + ' ' # Append RAW data to the image.
+        if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG/FITS raw data at some point, we need to capture the bayer matrix.
+            CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand,terminal=terminal,cleanup=False)
         if not result:
             self.Log("astrocamera.TakePhoto: CaptureSet failed.",level='error')
@@ -1463,6 +1474,7 @@ class astrocamera():
         CameraOptions += '-h ' + str(self.Sensor.PixelHeight) + ' ' # Specify the pixel size of the image to match the maximum that the mode supports.
         CameraOptions += '-ss ' + str(ExposureMicroseconds) + ' ' # Use the global SHUTTER time to match the DARK and LIGHT frames.
         if self.CameraSaveDng and not '-r ' in CameraOptions: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+            # *Q* Expand for FITS files too.
             CameraOptions += '-r ' # Raw is appended to JPEG file. Needs extracting later.
         CameraOptions += '-ag 16.0 ' # Set analog gain to 16.0. Apparently this is better for Astro photographs as it increases signal-to-noise ratio significantly.
         # Offer the default settings to the user, but let them enter something else.
@@ -1541,9 +1553,9 @@ class astrocamera():
         ExposureMicroseconds = self.TrackingExposureSeconds * 1000000
         self.SetImageType('tracking') # Tell the camera we are taking tracking photos.
         FileRoot=self.FolderHandler.PrepFile('tracking','tracking_')
-        CameraCommand = self.Parameters.CameraTrackingCommand
+        CameraCommand = self.Parameters._CameraTrackingCommand
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        CameraCommand = CameraCommand.replace('{&shutter}',str(ExposureMicroseconds))
+        CameraCommand = CameraCommand.replace('{&shutter}',str(int(ExposureMicroseconds)))
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand,tempfile=True,terminal=terminal,cleanup=False)
         self.Log("astrocamera.TakeTrackingPhoto: Complete",terminal=False)
         return result
@@ -1561,11 +1573,11 @@ class astrocamera():
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Dark image set...')
-        CameraCommand = self.Parameters.CameraDarkCommand
+        CameraCommand = self.Parameters._CameraDarkCommand
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        CameraCommand = CameraCommand.replace('{&shutter}',str(ExposureMicroseconds))
-        if self.CameraSaveDng: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            CameraCommand += ' ' + self.Parameters.CameraRawSwitch + ' ' # Append RAW data to the image.
+        CameraCommand = CameraCommand.replace('{&shutter}',str(int(ExposureMicroseconds)))
+        if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+            CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand)
         return result
 
@@ -1574,6 +1586,7 @@ class astrocamera():
         result = ''
         if self.CameraSaveJpg: result += 'jpg,'
         if self.CameraSaveDng: result += 'dng,'
+        if self.CameraSaveFits: result += 'fits,'
         result = result.strip(',')
         return result
 
@@ -1590,11 +1603,11 @@ class astrocamera():
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Dark-Flat image set...')
-        CameraCommand = self.Parameters.CameraDarkFlatCommand
+        CameraCommand = self.Parameters._CameraDarkFlatCommand
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        CameraCommand = CameraCommand.replace('{&shutter}',str(ExposureMicroseconds))
-        if self.CameraSaveDng: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            CameraCommand += ' ' + self.Parameters.CameraRawSwitch + ' ' # Append RAW data to the image.
+        CameraCommand = CameraCommand.replace('{&shutter}',str(int(ExposureMicroseconds)))
+        if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+            CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand)
         return result
 
@@ -1613,10 +1626,10 @@ class astrocamera():
         self.Log("Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Flat image set...')
-        CameraCommand = self.Parameters.CameraFlatCommand
+        CameraCommand = self.Parameters._CameraFlatCommand
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        if self.CameraSaveDng: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            CameraCommand += ' ' + self.Parameters.CameraRawSwitch + ' ' # Append RAW data to the image.
+        if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+            CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand)
         return result
 
@@ -1633,11 +1646,11 @@ class astrocamera():
         self.Log("Lens cap must be ON.")
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Bias image set...')
-        CameraCommand = self.Parameters.CameraBiasCommand
+        CameraCommand = self.Parameters._CameraBiasCommand
         # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
-        CameraCommand = CameraCommand.replace('{&shutter}',str(ExposureMicroseconds))
-        if self.CameraSaveDng: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            CameraCommand += ' ' + self.Parameters.CameraRawSwitch + ' ' # Append RAW data to the image.
+        CameraCommand = CameraCommand.replace('{&shutter}',str(int(ExposureMicroseconds)))
+        if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+            CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
         result = self.CaptureSet(file_root=FileRoot,batch_size=batch_size,camera_command=CameraCommand)
         return result
         
@@ -1661,11 +1674,12 @@ class astrocamera():
                 break
             dt = self.CleanDatetimeString(str(self.NowUTC()))
             filename = FileRoot + dt + '.jpg'
-            CameraCommand = self.Parameters.CameraAutoCommand
+            CameraCommand = self.Parameters._CameraAutoCommand
             CameraCommand = CameraCommand.replace('{&mode}',str(self.Sensor.Mode))
             CameraCommand = CameraCommand.replace('{&width}',str(self.Sensor.PixelWidth))
             CameraCommand = CameraCommand.replace('{&height}',str(self.Sensor.PixelHeight))
             CameraCommand = CameraCommand.replace('{&output}',filename)
+            # *Q* TODO: Perform safety check for remaining & symbols.
             self.osCmd(CameraCommand)
             print ("-", filename)
         return True

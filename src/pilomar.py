@@ -90,6 +90,7 @@
 # 0.3.0    12.03.2024 2024-03-issues items addressed.
 # 1.0.0    20.04.2024 Refactored code.
 #                     Preparations for RPi5 support.
+# 1.1.0    07.05.2024 Bookworm/64bit can now generate .fits image files.
 
 
 # Versioning
@@ -97,7 +98,7 @@
 # - MAJOR = Breaking change. Not fully compatible with previous versions. Usually requires RPI and MICROCONTROLLER updates together.
 # - MINOR = New features but backwards compatible. Usually allows RPI or MICROCONTROLLER to be updated independently.
 # - MICRO = Development/bugfix releases.
-VERSION = '1.0.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+VERSION = '1.1.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
 print("Version:",VERSION)
 ACCEPTABLECONTROLLERVERSIONS = ['1.0'] # Microcontroller versions that this will work with. Ignore patch level.
 
@@ -410,6 +411,20 @@ def HRBytes(bytecount: int) -> str:
         print(e) # Trap all the exception information in the main log file.
         print("HRBytes: textcolor.HRNumber(",bytecount,") failed.")
         raise Exception("HRBytes() failed.") from e # Continue with regular exception stack.
+    return line
+
+# ------------------------------------------------------------------------------------------------------
+
+def HRHertz(hertz: int) -> str:
+    """ Turn a large number into human readable format.
+        Turns 1,000,000 into 1MHz etc. """
+    try:    
+        line, _, _ = textcolor.HRNumber(hertz,base=1000,decimals=1)
+        line += "Hz"
+    except Exception as e:
+        print(e) # Trap all the exception information in the main log file.
+        print("HRHertz: textcolor.HRNumber(",hertz,") failed.")
+        raise Exception("HRHertz() failed.") from e # Continue with regular exception stack.
     return line
 
 # ------------------------------------------------------------------------------------------------------
@@ -740,7 +755,7 @@ OS_id, OS_name, OS_type, OS_bits, OS_processor = OSVersion()
 OS_systemkey = RPiNum + "/" + OS_name + "/" + str(OS_bits)
 MainLog.Log("RPi: Model:",RPIMODEL,"Num:",RPiNum,"OStype:",OS_type,"OSid:",OS_id,"OSname:",OS_name,"OSbits:",OS_bits,"OSproc:",OS_processor,"SysKey:",OS_systemkey,terminal=True)
 RASPISTILL_SYSTEMS = ['wheezy','jessie','stretch','buster'] # These all came with raspistill for camera support.
-SUPPORTED_SYSTEMS = ['3/buster/32','4/buster/32','4/bookworm/64'] # The software is designed to run under these hardware/os combinations.
+SUPPORTED_SYSTEMS = ['3/buster/32','4/buster/32','4/bookworm/64','5/bookworm/64'] # The software is designed to run under these hardware/os combinations.
 if OS_name in RASPISTILL_SYSTEMS: CameraDriver = 'raspistill'
 else: CameraDriver = 'libcamera' # 'bullseye' and 'bookworm' come with libcamera installed.
 MainLog.Log(OS_name,"O/S found, assuming camera driver is",CameraDriver,terminal=False)
@@ -845,6 +860,14 @@ class parameters(attributemaster): # Common
         self._Dictionary = {} # The json parameter file loaded from disc at start, saved to disc at end.
         self._Defaults = {} # Maintain a list of default values, used to highlight changes when reviewing parameters.
         self.ParamFileName = filename # The disc copy of the parameter file. This is overwritten if the program completes correctly.
+        self.LoadParameters()
+        self.RequireRestart = False # These parameters are safe to consistently configure microcontroller and run observations.
+                                    # Set to FALSE if they change and require a software restart.
+        
+    def LoadParameters(self):
+        """ If parameter file exists, it's loaded into the parameters. 
+            If anything is missing it's defaulted to initial values. 
+            Called during __init__(), and can be called again if needed. """
         if os.path.isfile(self.ParamFileName): # If the dictionary file exists, we'll import it now.
             with open(self.ParamFileName,'r') as f:
                 self.Log("Loading parameters from file: " + self.ParamFileName)
@@ -870,8 +893,6 @@ class parameters(attributemaster): # Common
         
         # The following parameters control hardware features.
         self.CameraEnabled = self.GetParmVal('CameraEnabled',True) # Is the camera on?
-        if CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
-            self.DisableCleanup = self.GetParmVal('DisableCleanup',True) # Set to TRUE to disable the on-chip cleanup. (More pure RAW image is captured.) #raspistill only!
         self.BacklashEnabled = self.GetParmVal('BacklashEnabled',False) # ENABLE to let the motors make extra moves to cope with gear backlash.
         self.FaultSensitive = self.GetParmVal('FaultSensitive',False) # ENABLE to make motorcontroller respect the DRV8825 'fault' signal.
         self.MctlLedStatus = self.GetParmVal('MctlLedStatus',True) # Turn on STATUS LEDs on microcontroller.
@@ -927,42 +948,50 @@ class parameters(attributemaster): # Common
         # The following parameters decide which types of images are stored.
         self.CameraSaveJpg = self.GetParmVal('CameraSaveJpg',True) # Save the jpg image from observations, but will strip out the embedded RAW data.
         self.CameraSaveDng = self.GetParmVal('CameraSaveDng',True) # Save the raw image data as .dng file.
-        if self.CameraSaveJpg or self.CameraSaveDng: pass # OK
+        self.CameraSaveFits = self.GetParmVal('CameraSaveFits',False) # Save the raw image data as a .fit file. # Needs libcamera & Picamera2.
+        if self.CameraSaveJpg or self.CameraSaveDng or self.CameraSaveFits: pass # OK
         else: self.Log("No image types are saved according to the parameters.",level='warning')
         
-        if CameraDriver == 'raspistill': # These are the default commands for raspistill captures.
-            self.CameraLightCommand = self.GetParmVal('CameraLightCommand',
-                'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}') # Camera settings for 'light' images.
-            self.CameraDarkCommand = self.GetParmVal('CameraDarkCommand',
-                'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}') # Camera settings for 'dark' images.
-            self.CameraBiasCommand = self.GetParmVal('CameraBiasCommand',
-                'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}') # Camera settings for 'bias' images.
-            self.CameraFlatCommand = self.GetParmVal('CameraFlatCommand',
-                'raspistill -o {&output} -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0') # Camera settings for 'flat' images.
-            self.CameraDarkFlatCommand = self.GetParmVal('CameraDarkFlatCommand',
-                'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}') # Camera settings for 'darkflat' images.
-            self.CameraAutoCommand = self.GetParmVal('CameraAutoCommand',
-                'raspistill -o {&output} -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height}') # Camera settings for 'auto' images.
-            self.CameraTrackingCommand = self.GetParmVal('CameraTrackingCommand',
-                'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ss {&shutter}') # Camera settings for 'tracking' images.
-            self.CameraRawSwitch = self.GetParmVal('CameraRawSwitch','-r') # How do you turn on RAW image extraction?
-        else: # These are the default Commands for libcamera-still captures.
-            self.CameraLightCommand = self.GetParmVal('CameraLightCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}') # Camera settings for 'light' images.
-            self.CameraDarkCommand = self.GetParmVal('CameraDarkCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}') # Camera settings for 'dark' images.            
-            self.CameraBiasCommand = self.GetParmVal('CameraBiasCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}') # Camera settings for 'bias' images.
-            self.CameraFlatCommand = self.GetParmVal('CameraFlatCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0') # Camera settings for 'flat' images.
-            self.CameraDarkFlatCommand = self.GetParmVal('CameraDarkFlatCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}') # Camera settings for 'darkflat' images.
-            self.CameraAutoCommand = self.GetParmVal('CameraAutoCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off') # Camera settings for 'auto' images.
-            self.CameraTrackingCommand = self.GetParmVal('CameraTrackingCommand',
-                'libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --shutter {&shutter}') # Camera settings for 'tracking' images.
-            self.CameraRawSwitch = self.GetParmVal('CameraRawSwitch','--raw') # How do you turn on RAW image extraction?
-
+        cameracommands = {
+            'raspistill': { # These are the default commands for raspistill captures.
+                'light':'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}',
+                'dark':'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}',
+                'bias':'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}',
+                'flat':'raspistill -o {&output} -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0',
+                'darkflat':'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}',
+                'auto':'raspistill -o {&output} -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height}',
+                'tracking':'raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ss {&shutter}', 
+                'imagetypes':['jpg','dng'],
+                'osnames':['buster'],
+                'rawswitch':'-r'},
+            'pilomarfits': { # If picamera2 and astropy are installed you can get 'fits' images with pilomarfits.py
+                'light':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --shutter {&shutter} --tuning-file imx477_noir.json',
+                'dark':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --shutter {&shutter} --tuning-file imx477_noir.json',
+                'bias':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --shutter {&shutter} --tuning-file imx477_noir.json',
+                'flat':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --tuning-file imx477_noir.json',
+                'darkflat':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --shutter {&shutter} --tuning-file imx477_noir.json',
+                'auto':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --tuning-file imx477_noir.json',
+                'tracking':'python3 pilomarfits.py --output {&output} --quality 100 --width {&width} --height {&height} --shutter {&shutter} --tuning-file imx477_noir.json',
+                'imagetypes':['jpg','fits'],
+                'osnames':['bullseye','bookworm'],
+                'rawswitch':'--raw'}, # No raw image extraction switch needed.
+            'libcamera': { # These are the default Commands for libcamera-still captures.
+                'light':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}',
+                'dark':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}',
+                'bias':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}',
+                'flat':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0',
+                'darkflat':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}',
+                'auto':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off',
+                'tracking':'rpicam-still --output {&output} --timeout 1 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --shutter {&shutter}',
+                'imagetypes':['jpg','dng'],
+                'osnames':['bullseye','bookworm'],
+                'rawswitch':'--raw'}, # How do you turn on RAW image extraction?
+            }
+        self.CameraCommands = self.GetParmVal('CameraCommands',cameracommands)
+        self.DisableCleanup = self.GetParmVal('DisableCleanup',True) # Set to TRUE to disable the on-chip cleanup. (More pure RAW image is captured.) # Applies to raspistill only!
+        self.CameraDriver = self.GetParmVal('CameraDriver',CameraDriver) # Set outside the Parameters object.
+        self.SetCameraDriver(self.CameraDriver) # Load appropriate camera commands into working fields.
+        
         # The following parameters control DriftTracking activity.
         self.UseTracking = self.GetParmVal('UseTracking',True) # TRUE = Use image tracking. FALSE = No tracking.
         # LatestTrackingFilter and RunFilterScript are new features being tested. If used, they override PrepImagesForTracking and TrackingUrbanFilter parameters.
@@ -1063,6 +1092,24 @@ class parameters(attributemaster): # Common
         self.FilterScripts = self.GetParmVal('FilterScripts',pilomarimage.FILTERSCRIPTS) # Default is the initial set of filter scripts defined in the pilomarimage class.
         pilomarimage.FILTERSCRIPTS = self.FilterScripts # Now assign whatever we have loaded back to pilomarimage.
 
+    def SetCameraDriver(self,cameradriver):
+        """ This will set cameradriver (raspistill,libcamera,pilomarfits) then 
+            load the correct camera commands from the Parameters table. """
+        if cameradriver in self.CameraCommands: # CameraDriver is recognised.
+            self.CameraDriver = cameradriver # Select the camera driver.
+            self.CameraImageTypes = self.CameraCommands[self.CameraDriver]['imagetypes']
+            self._CameraLightCommand = self.CameraCommands[self.CameraDriver]['light'] # Camera settings for 'light' images.
+            self._CameraDarkCommand = self.CameraCommands[self.CameraDriver]['dark'] # Camera settings for 'dark' images.
+            self._CameraBiasCommand = self.CameraCommands[self.CameraDriver]['bias'] # Camera settings for 'bias' images.
+            self._CameraFlatCommand = self.CameraCommands[self.CameraDriver]['flat'] # Camera settings for 'flat' images.
+            self._CameraDarkFlatCommand = self.CameraCommands[self.CameraDriver]['darkflat'] # Camera settings for 'darkflat' images.
+            self._CameraAutoCommand = self.CameraCommands[self.CameraDriver]['auto'] # Camera settings for 'auto' images.
+            self._CameraTrackingCommand = self.CameraCommands[self.CameraDriver]['tracking'] # Camera settings for 'tracking' images.
+            self._CameraRawSwitch = self.CameraCommands[self.CameraDriver]['rawswitch'] # How do you turn on RAW image extraction?
+        else:
+            MainLog.Log("**ERROR**: parameters.SetCameraDriver: Does not recognise:",cameradriver,level='error',terminal=True)
+            exit()
+        
     def GetParmVal(self,name,default,oldnames=None):
         """ Get a value from the parameter file. 
         
@@ -1332,6 +1379,15 @@ KeyboardTimer = timer(period=Parameters.KeyboardScanDelay) # This says how frequ
 
 # ------------------------------------------------------------------------------------------------------
 
+def RestartRequired():
+    lines = ["THE PARAMETER FILE HAS BEEN EDITED",
+             " ",
+             "For safety you must restart the software to make",
+             "sure all new values are consistently applied."]
+    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK,justify="c")
+    
+# ------------------------------------------------------------------------------------------------------
+
 def UTCtoLocal(dt: datetime) -> datetime:
     """ Convert a timezone aware datetime into the local timezone. 
         Will only convert the timezone if the value is timezone aware.
@@ -1434,6 +1490,39 @@ def RelativeAltAz(StarAlt,StarAz,LookAtAlt,LookAtAz):
     
 # ------------------------------------------------------------------------------------------------------
 
+def CalculateVector(FromX, FromY, ToX, ToY):
+    """ Return ANGLE and PIXEL DISTANCE from 1 point to another. """
+    XDist = ToX - FromX
+    YDist = ToY - FromY
+    PixDist = round(math.sqrt((XDist ** 2) + (YDist ** 2)),0)
+    PixAngle = round(math.degrees(math.atan2(XDist,YDist)),0)
+    return PixDist, PixAngle
+
+# ------------------------------------------------------------------------------------------------------
+
+def DistortionTableIndex(PixDist,PixAngle):
+    """ Given DISTANCE and ANGLE values, calculate the index to the lens distortion table. """
+    DistRange = round(PixDist / 50,0) * 50 # Nearest 50 pixels.
+    AngleRange = round(PixAngle / 5,0) * 5 # Nearest 5 degrees.
+    return DistRange, AngleRange
+
+# ------------------------------------------------------------------------------------------------------
+
+def VectorToPixel(FromX, FromY, PixDist, PixAngle):
+    """ Given ANGLE and PIXEL DISTANCE from 1 point, return the resulting point. """
+    rad = math.radians(PixAngle)
+    ToX = PixDist * math.sin(rad) + FromX
+    ToY = PixDist * math.cos(rad) + FromY
+    return int(ToX), int(ToY)
+
+# ------------------------------------------------------------------------------------------------------
+
+def PixelToCentreVector(ToX, ToY, width, height):
+    """ Given any pixel location in an image, return its vector relative to the centre of the image. """
+    PixDist, PixAngle = CalculateVector(int(width/2),int(height/2), ToX, ToY)
+    return PixDist, PixAngle
+
+# ------------------------------------------------------------------------------------------------------
 def ConvertArcsecondsToPixels(arcseconds):
     """ Convert an arcsecond value into a pixel count. 
         Used for calculating the size of objects in an image. """
@@ -1605,9 +1694,6 @@ def TextToFloat(text) -> float:
 def VerifyFolder(FN):
     """ Check that all directorys in the list exist. 
         If they don't create them. """
-        #*Q* Should this use the os.mkdir function instead? 
-        #    - Or from pathlib import Path
-        #         Path("/my/directory").mkdir(parents=True, exist_ok=True).
     result = False
     try:
         if FN[-1:] == "/": FN = FN[:-1] # Remove trailing directory separator if found.
@@ -2091,14 +2177,12 @@ LensInUse = astrolens(length=Parameters.LensLength,
                       horizontal_fov=Parameters.LensHorizontalFov, 
                       vertical_fov=Parameters.LensVerticalFov,
                       logger=CamLog,
-                      parameters=Parameters,
-                      driver=CameraDriver)
+                      parameters=Parameters)
 LensInUse.ErrorWindow = ErrorWindow # Point LensInUse to a window for displaying error messages.
 LensInUse.CameraWindow = CameraWindow # Point LensInUse to a window for displaying camera events.
 SensorInUse = astrosensor(sensor_type=Parameters.SensorType,
                           logger=CamLog,
-                          parameters=Parameters,
-                          driver=CameraDriver)
+                          parameters=Parameters)
 SensorInUse.ErrorWindow = ErrorWindow # Point SensorInUse to a window for displaying error messages.
 SensorInUse.CameraWindow = CameraWindow # Point SensorInUse to a window for displaying camera events.
 CameraInUse = astrocamera(inp_sensor=SensorInUse, 
@@ -2106,8 +2190,7 @@ CameraInUse = astrocamera(inp_sensor=SensorInUse,
                           exposure=10.0, 
                           trackingexposure=Parameters.TrackingExposureSeconds,
                           logger=CamLog,
-                          parameters=Parameters,
-                          driver=CameraDriver)
+                          parameters=Parameters)
 CameraInUse.ErrorWindow = ErrorWindow # Point CameraInUse to a window for displaying error messages.
 CameraInUse.CameraWindow = CameraWindow # Point CameraInUse to a window for displaying camera events.
 CameraInUse.StorageMonitor = ImageStorageMonitor # Point CameraInUse to the ImageStorageMonitor instance to check available storage.
@@ -2139,7 +2222,7 @@ def DetectRaspistill(canenable=False,candisable=False):
         tempresult = False
     if tempresult: # Camera appears to be working.
         if Parameters.CameraEnabled: # Camera is enabled and available.
-            MainLog.Log("Camera is accessible and enabled.")
+            MainLog.Log("Camera is accessible and enabled.",terminal=False)
         else: # Camera is available but not accessible. Warn that it will need to be enabled from the menu.
             if canenable:
                 Parameters.CameraEnabled = True
@@ -2177,7 +2260,7 @@ def DetectLibcamera(canenable=False,candisable=False):
         tempresult = False
     if tempresult: # Camera appears to be working.
         if Parameters.CameraEnabled: # Camera is enabled and available.
-            MainLog.Log("Camera is accessible and enabled.")
+            MainLog.Log("Camera is accessible and enabled.",terminal=False)
         else: # Camera is available but not accessible. Warn that it will need to be enabled from the menu.
             if canenable:
                 Parameters.CameraEnabled = True
@@ -2199,7 +2282,7 @@ def DetectLibcamera(canenable=False,candisable=False):
 
 def DetectCamera(canenable=False,candisable=False):
     """ Test for presence of a camera via raspistill or libcamera. """
-    if CameraDriver == 'raspistill': #if OS_name in ['buster']:
+    if Parameters.CameraDriver == 'raspistill': #if OS_name in ['buster']:
         return DetectRaspistill(canenable=canenable,candisable=candisable)
     else: # Expect libcamera.
         return DetectLibcamera(canenable=canenable,candisable=candisable)
@@ -2228,10 +2311,39 @@ def CalibrateFovMenu():
         
 # ---------------------------------------------------------------------------------------------------- 
 
+def CameraEnabledChange():
+    """ Call this when setting CameraEnabled flag. 
+        It handles some related changes and messages. """
+    if Parameters.CameraEnabled:
+        print (textcolor.green("Camera enabled"))
+        MainLog.Log("The camera can be disabled in the parameters file if you don't want to take actual photographs.",terminal=False)
+        if Parameters.CameraDriver == 'raspistill': # Only raspistill does this, libcamera handles denoise via the command line.
+            if Parameters.DisableCleanup: SensorInUse.DisableCleanup()
+            else: MainLog.Log("NOTE: on-chip cleanup has not changed state.",terminal=True)
+        if not DetectCamera(): # Check there really IS a camera connected!
+            MainLog.Log("CameraEnabledChange(): Camera has been enabled. But there is no camera detected. You may get errors.",level='error')
+    else: 
+        print (textcolor.red("Camera disabled"))
+        MainLog.Log("The program will generate simulated images instead.",terminal=False)
+        lines = ["The camera is disabled . The program will generate  simulated  images",
+                 "instead . The simulated images will show approximate  star and target",
+                 "locations.",
+                 "Simulated images may take longer to calculate  than a true photograph",
+                 "would take . Therefore the  telescope  may gather 'light' images more",
+                 "slowly than you would expect."]
+        textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)         
+
+# Check if camera is available.
+tempresult = DetectCamera(candisable=True)
+CameraEnabledChange() # Handle related changes.
+
+# ---------------------------------------------------------------------------------------------------- 
+
 def EnableCamera():
     """ This enables the camera, even if it is not installed. """
     Parameters.CameraEnabled = True
     MainLog.Log("Camera has been manually enabled.",level='warning',terminal=True)
+    CameraEnabledChange() # Handle related changes.
 
 # ---------------------------------------------------------------------------------------------------- 
 
@@ -2239,28 +2351,9 @@ def DisableCamera():
     """ This disables the camera. """
     Parameters.CameraEnabled = False
     MainLog.Log("Camera has been manually disabled.",level='warning',terminal=True)
+    CameraEnabledChange() # Handle related changes.
 
 # ---------------------------------------------------------------------------------------------------- 
-
-# Check if camera is available.
-tempresult = DetectCamera(candisable=True)
-
-if Parameters.CameraEnabled:
-    print (textcolor.green("Camera enabled"))
-    MainLog.Log("The camera can be disabled in the parameters file if you don't want to take actual photographs.",terminal=False)
-    if CameraDriver == 'raspistill': # Only raspistill does this, libcamera handles denoise via the command line.
-        if Parameters.DisableCleanup: SensorInUse.DisableCleanup()
-        else: MainLog.Log("NOTE: on-chip cleanup has not changed state.",terminal=True)
-else: 
-    print (textcolor.red("Camera disabled"))
-    MainLog.Log("The program will generate simulated images instead.",terminal=False)
-    lines = ["The camera is disabled . The program will generate  simulated  images",
-             "instead . The simulated images will show approximate  star and target",
-             "locations.",
-             "Simulated images may take longer to calculate  than a true photograph",
-             "would take . Therefore the  telescope  may gather 'light' images more",
-             "slowly than you would expect."]
-    textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)         
 
 # ///////////////////////////////////////////////////////////////////////////////////
 # GPIO setup.
@@ -2697,6 +2790,7 @@ class microcontroller(attributemaster):
             while len(self.WriteQueue) > 0:
                 TryCount += 1
                 self.Log("WriteFlush: Queue currently",len(self.WriteQueue),"entries",terminal=False)
+                self.Log("WriteFlush: 1st in queue:",self.WriteQueue[0],terminal=False)
                 self.WritePoll() # Send next chunk of data from output buffer if allowed.
                 time.sleep(0.1) # Pause until the CommsLoop thread has cleared the buffer.
                 if TryCount >= 500:
@@ -2785,7 +2879,16 @@ def InitiateMctl():
     MainLog.Log('Establishing serial UART communication with microcontroller...',terminal=False)
     mctl = None
     try:
-        mctl = microcontroller(port='/dev/serial0',resetpin=Parameters.MctlResetPin,boardtype=Parameters.BoardType,logger=MainLog) # Create communication with microcontroller over uart0 serial port.
+        if RPiNum in ['3','4']:
+            mctl = microcontroller(port='/dev/serial0',
+                                   resetpin=Parameters.MctlResetPin,
+                                   boardtype=Parameters.BoardType,
+                                   logger=MainLog) # Create communication with microcontroller over uart0 serial port.
+        else:
+            mctl = microcontroller(port='/dev/ttyAMA0',
+                                   resetpin=Parameters.MctlResetPin,
+                                   boardtype=Parameters.BoardType,
+                                   logger=MainLog) # Create communication with microcontroller over uart0 serial port.
         mctl.ReportBoard() # Log the board type now that the log file is defined.
         mctl.Initiate() # Initiate communication.
     except Exception as e:
@@ -3890,6 +3993,9 @@ class sessionstatus(attributemaster):
                 if self.TerminateMctlHandler:
                     self.Log('sessionstatus.MctlHandler(): Terminate signal received.',terminal=False)
                     break
+                if threading.main_thread().is_alive() == False: # Check if parent is still alive. Quit if it is nolonger there.
+                    self.Log('sessionstatus.MctlHandler(): Main thread nolonger alive.',terminal=False)
+                    break
                 if len(Mctl.Lines) > 0: # Something to handle.
                     line = Mctl.Read() # Pull next available message from microcontroller.
                     # Are all the same messages received, processed, logged or ignored in the same way?
@@ -3919,7 +4025,7 @@ class sessionstatus(attributemaster):
             self.Log("sessionstatus.MctlHandler: Failed!",level='error')
             MainLog.ReportException(e,comment='MctlHandler failed.') # Trap all the exception information in the main log file.
         self.TerminateMctlHandler = False # Reset the termination flag.
-        self.Log('sessionstatus.MctlHandler(): End.',terminal=True)
+        self.Log('sessionstatus.MctlHandler(): End.',terminal=False)
 
     def TimeDiffSecs(self):
         # Convert self.TimeDiff into an absolute number of seconds.
@@ -4966,17 +5072,19 @@ comets = (comets.sort_values('reference')
 CometList = comets['designation'].tolist() # Convert comet designations column into a list for searching later on.
 
 def CometDataAge():
-    """ Report the age of the comet trajectory data from the Minor Planet Center. """
+    """ Report the age of the comet trajectory data from the Minor Planet Center. 
+        warn = True : Will issue warning here. """
     filename = ProjectRoot + '/data/CometEls.txt' 
+    filedays = None
     if os.path.exists(filename): # The cache data exists, check its age.
         with open(filename,'r') as f:
             line = f.readline() # Take 1st line as an example.
             filedt = MctlStringToDatetime(line[81:89] + "000000") # YYYYMMDD portion of the record.
             filedays = round((NowUTC() - filedt).total_seconds() / (24 * 60 * 60),0)
-            MainLog.Log("Comet data cache is from",filedt,filedays,"days old.",terminal=False)
+            MainLog.Log("Comet data cache is from",filedt,",",filedays,"days old.",terminal=False)
             if filedays > 60: # After 2 months, consider refreshing the file.
-                MainLog.Log("Comet data cache is from",filedays,"days old. Consider refreshing it to maintain accuracy.",terminal=True)
-            
+                MainLog.Log("Comet data cache is",filedays,"days old. Consider refreshing it to maintain accuracy.",level='warning',terminal=True)
+    return filedays
 
 CometDataAge() # If the data cache exists, how old is the content?
 
@@ -5723,6 +5831,63 @@ class target(attributemaster):
         else: result = False
         return result
 
+    def ForecastPath(self,time=None,days=30,stephours=24,fov=None):
+        """ Calculate the path that the target will take through the sky for the next xxx days. 
+            Returns list of timestamps, ra and dec co-ordinates (both as degree values).
+            time = start timestamp for forecast.
+            days = number of days to forecast.
+            stephours = number of hours between each forecast position. 
+            fov = field of view (degrees). Forecast stops when path leaves FOV.
+                  If None, the camera values are used as a basis. """
+        Points = [] # List of points on the path.
+        if time != None: temp_ts = time
+        else: temp_ts = self.CurrentTime()
+        temp_ts = TsDelta(self.CurrentTime(),s=0) # This truncates the fractions of a second from the timestamp, makes display cleaner.
+        cutoff_ts = TsDelta(temp_ts,dd=days) # When does the forecast stop?
+        if fov is None: # Default the field of view.
+            # Use 80% of the narrowest field-of-view of the configured lens.
+            fov = min(CameraInUse.Lens.FovHorizontal,CameraInUse.Lens.FovHorizontal) * 0.8
+        min_ra = max_ra = None
+        min_dec = max_dec = None
+        while temp_ts.utc_datetime() <= cutoff_ts.utc_datetime(): # Run forwards xxx days.
+            ra, dec = self.RaDecDegrees(time=temp_ts)
+            # Check the span of motion. It cannot exceed the image field of view.
+            if min_ra is None or min_ra > ra: min_ra = ra
+            if max_ra is None or max_ra < ra: max_ra = ra
+            if min_dec is None or min_dec > dec: min_dec = dec
+            if max_dec is None or max_dec < dec: max_dec = dec
+            if abs(max_ra - min_ra) > fov or abs(max_dec - min_dec) > fov: # Motion exceeds the field of view.
+                break # Quit the loop.
+            Points.append((temp_ts, ra, dec))
+            temp_ts = TsDelta(temp_ts,h=stephours) # Roll forward xxx hours for the next position.
+        print ('ForecastPath',self.Name,':')
+        print('Date'.rjust(10),'RA'.rjust(14),'Dec'.rjust(10),'Min RA'.rjust(14),'Max RA'.rjust(14),'Min Dec'.rjust(10),'Max Dec'.rjust(10),sep='\t')
+        iah, iam, ias = AngleToHMS(min_ra) # Convert degrees to H,M,S units.
+        aah, aam, aas = AngleToHMS(max_ra)
+        for tt,ra,dec in Points:
+            rah, ram, ras = AngleToHMS(ra) # Convert degrees to H,M,S units.
+            self.Log(str(tt.utc_datetime()).split(' ')[0],DisplayHMS(rah,ram,ras,14),DisplayDegree(dec,9) + DegreeSymbol,DisplayHMS(iah,iam,ias,14),DisplayHMS(aah,aam,aas,14),DisplayDegree(min_dec,9) + DegreeSymbol,DisplayDegree(max_dec,9) + DegreeSymbol,sep='\t',terminal=False)
+        return Points
+    
+    def ForecastRange(self,time=None,days=30):
+        """ Forecast the path of the target for xxx days and return the min/max ra/dec of the target during that period. """
+        Points = self.ForecastPath(time=time,days=days)
+        min_ra = max_ra = Points[0][1]
+        min_dec = max_dec = Points[0][2]
+        for tt,ra,dec in Points:
+            min_ra = min(min_ra,ra)
+            iah, iam, ias = AngleToHMS(min_ra)
+            max_ra = max(max_ra,ra)
+            aah, aam, aas = AngleToHMS(max_ra)
+            min_dec = min(min_dec,dec)
+            max_dec = max(max_dec,dec)
+        return min_ra, min_dec, max_ra, max_dec
+
+    def ForecastCentre(self,time=None,days=30):
+        """ Forecast the path of the target for xxx days and return the centre of it's motion during that period. 
+            Returned as ra/dec (both as degree values) """
+        min_ra, min_dec, max_ra, max_dec = self.ForecastRange(time=time,days=days)
+        return ((min_ra + max_ra) / 2), ((min_dec + max_dec) / 2)
 
     def ApparentCometMagnitudeGK(self):
         """ Calculate comet apparent magnitude using GK model. 
@@ -5921,6 +6086,7 @@ def ChooseComet(prechosen=None):
         'prechosen' means that the input is provided externally, the function will not prompt.
         If the prechosen parameters is not recognised, the user is asked fora value instead. """
         
+    CometDataAge() # If the data cache exists, how old is the content?
     Result = ""
     desc = None
     obstarget = None
@@ -6735,6 +6901,9 @@ def HomePosition():
     """ Return the whole mechanism to its home position.
         If the Microcontroller resets at any time, this repeats until successful. """
     print (textcolor.yellow("HomePosition"))
+    if Parameters.RequireRestart:
+        RestartRequired()
+        return
     
     StopMotors() # Clear anything that's still programmed for the motors. 
     Session.SetMotorControlMode('direct') # We will directly control the movement of the microcontroller, no trajectory needs sending.
@@ -6762,6 +6931,9 @@ def HomePosition():
 def SetMotorAngle(motor_name=None):
     """ Move motor to specific angle. """
     print (textcolor.yellow("SetMotorAngle " + str(motor_name)+ "."))
+    if Parameters.RequireRestart: # Warn that movements cannot be made until software is restarted.
+        RestartRequired()
+        return
     print("(The motor will physically move.)")
     c = ""
     for i in MotorControls: # Scan all the motors available.
@@ -6807,6 +6979,9 @@ def AltitudeAngle(): # For menu
 
 def ExerciseMotor(motor_name=None):
     print (textcolor.yellow("ExerciseMotor " + str(motor_name)+ "."))
+    if Parameters.RequireRestart: # Warn that movements cannot be made until software is restarted.
+        RestartRequired()
+        return
     a = ""
     sweep = 0
     lFound = False
@@ -6858,6 +7033,9 @@ def TunePosition(motor_name=None):
         Or if the motor has slipped during an observation and you want to correct for that. 
         The optical drift tracking mechanism uses this function to keep the target centered too. """
     MainLog.Log("TunePosition:",motor_name,"begin",terminal=False)
+    if Parameters.RequireRestart: # Warn that movements cannot be made until software is restarted.
+        RestartRequired()
+        return
     print (textcolor.yellow("TunePosition " + str(motor_name)+ "."))
     print (textcolor.white("This will move the motor to match where the computer thinks it is pointing.",invert=True))
     print (textcolor.white("This will finetune the physical position of the motor, but leave its logical position unchanged."))
@@ -7161,6 +7339,37 @@ def MarkupPreview(drift_pixels_x=None,drift_pixels_y=None,astrotime=None):
         else: 
             NewImageBuffer.AddEdgeText("Dec+",XL4 - 10,YL4,thickness=2,edgecolor=pilomarimage.BGR('Black'),vjust='c',hjust='r')
             NewImageBuffer.AddEdgeText("Dec-",XL1 + 10,YL1,thickness=2,edgecolor=pilomarimage.BGR('Black'),vjust='c')
+
+    if True: # Draw arcs to show field rotation over differing timescales.
+        # To do this, choose another point in the sky slightly offset from the target.
+        # Then estimate how this point rotates around the target as the sky/telescope moves.
+        CamLog.Log("MarkupPreview: FieldRotation.",terminal=False)
+        xpos = int(width/2)
+        ypos = int(height/2)
+        gap = 60
+        NewImageBuffer.SetPenColor(pilomarimage.BGR('HotPink'))
+        for i,span in enumerate([3600,1800,CameraInUse.ExposureSeconds]): # List of exposure times, including the selected exposure time.
+            rotation = Session.Target.RotationArc(span=span) # Calculate field rotation angle over the chosen timespan.
+            CamLog.Log("MarkupPreview: Calculated rotation",span,rotation,DegreeSymbol,terminal=False)
+            if rotation > 0: 
+                textpos = xpos - 10 # To left of vertical axis.
+                hjust = 'r' # Justify right.
+            else: 
+                hjust = 'l' # Justify left.
+                textpos = xpos + 10 # To right of vertical axis.
+            CamLog.Log("MarkupPreview: Calculated rotation",span,rotation,DegreeSymbol,"label justification",hjust,terminal=False)
+            r = (i + 10) * gap # How far down the 'y' axis do we draw this arc?
+            # Put label left or right of the arc depending upon which way it is moving.
+            if i == 0: # Print header above first instance.
+                NewImageBuffer.AddEdgeText("Field rotation",textpos,ypos + (9 * gap),color=pilomarimage.BGR('HotPink'),edgecolor=pilomarimage.BGR('Black'),hjust=hjust,bgcolor=pilomarimage.BGR('Black')) # Explain and demonstrate the field rotation that the telescope is currently experiencing.
+            NewImageBuffer.AddEdgeText(HRSeconds(span) + " is " + str(round(rotation,2)) + "deg",textpos,ypos + r,color=pilomarimage.BGR('HotPink'),edgecolor=pilomarimage.BGR('Black'),hjust=hjust,vjust='c',bgcolor=pilomarimage.BGR('Black')) # Show rotation value.
+            if abs(rotation) > 180: # Too big to be useful  
+                NewImageBuffer.AddEdgeText(Deg3dp(rotation),textpos,ypos + r,color=pilomarimage.BGR('HotPink'),edgecolor=pilomarimage.BGR('Black'),hjust=hjust,bgcolor=pilomarimage.BGR('Black')) # Explain and demonstrate the field rotation that the telescope is currently experiencing.
+            elif abs(rotation) > 0.1: # Big enough for an arc to appear.
+                NewImageBuffer.DrawEdgeEllipse(xpos,ypos,r,r,90,0                    ,rotation * -1,thickness=3,edgecolor=pilomarimage.BGR('Black')) # Draw arc representing the rotation.
+            else: # Too short for an arc to appear. Draw a dot instead.
+                NewImageBuffer.DrawEdgeCircle(xpos,ypos + r,1,thickness=2,edgecolor=pilomarimage.BGR('Black')) # Draw dot representing insignificant rotation.
+
     if True: # Parameters.MarkupShowCrosshairs: # Target cross hairs
         CamLog.Log("MarkupPreview: ShowCrosshairs",terminal=False)
         # Draw cross hairs. Gap in the centre so that target is still visible.
@@ -7869,7 +8078,7 @@ def ImageCount_Session():
         So it avoids double-counting images if multiple image types are being generated. """
     result = ''
     campaignkey = FolderHandler.GetPath('campaign') # Only interested in files within the campaign structure.
-    imagetypes = ['jpg','dng']
+    imagetypes = ['jpg','dng','fits']
     for key,value in FolderHandler.FolderList.items(): # Python3: Check each folder.
         vpath = value['path'] # Get the path.
         if not value['exists']: continue # Folder hasn't been created yet.
@@ -7901,6 +8110,7 @@ def ImageCount_Campaign():
     if Parameters.CameraEnabled != True: selext = '.jpg' # No camera, so only count the simulated jpgs.
     elif CameraInUse.FastImageCapture: selext = '.jpg' # Fast image capture, only initial jpgs exist so far.
     elif CameraInUse.CameraSaveJpg: selext = '.jpg' # Looking for .jpg will detect more than .dng
+    elif CameraInUse.CameraSaveFits: select = '.fits'
     elif CameraInUse.CameraSaveDng: selext = '.dng'
     else: selext = '.jpg'
     basedir = FolderHandler.GetPath('campaign')
@@ -8139,7 +8349,7 @@ def CameraHandler(outboundqueue,inboundqueue):
                 if not CameraInUse.TimelapseDue(): # Check timelapse mechanism.
                     CamLog.Log('CameraHandler: Image task. Timelapse is active but not due.',terminal=False)
                 else: # Timelapse is inactive, or due.
-                    CamLog.Log('CameraHandler: Image task. Timelapse in inactive or due.',terminal=False)
+                    CamLog.Log('CameraHandler: Image task. Timelapse is inactive or due.',terminal=False)
                     # Now take the actual observation photo ('light' image).
                     obs_start = NowUTC()
                     CamLog.Log('CameraHandler: Begin image capture',terminal=False)
@@ -8363,6 +8573,9 @@ def GoToTarget(target_object):
     """ Point camera at the target. But don't begin an observation. 
         Observations can only start once the microcontroller has a trajectory available to follow. """
     print (textcolor.yellow("GoToTarget: Pointing camera at target."))
+    if Parameters.RequireRestart: # Warn that movements cannot be made until software is restarted.
+        RestartRequired()
+        return
     
     StopMotors() # Clear anything that's still programmed for the motors. 
     Session.SetMotorControlMode('direct') # We will directly control the movement of the microcontroller, no trajectory needs sending.
@@ -8893,6 +9106,7 @@ def ObservationRun():
         print(textcolor.yellow("If you want to extract raw (.dng) data you must do it separately after the observation."))
     SessionWindow.Clear(immediate=False) # Clear old messages from the session window.
     DebugTimer = timer(120) # In debug mode, update summary status every 2 minutes.
+    _ = ImageStorageMonitor.FreeBytes(force=True) # Force disc space refresh.
     # After this point all messages to the terminal should respect WINDOW and DEBUG MODE selections, otherwise they get overwritten/corrupted.
     if Session.DebugMode: 
         # Do not clear the screen in debug mode. We don't want to lose error messages.
@@ -9043,7 +9257,7 @@ def ObservationRun():
         #MainLog.Log("ObservationRun: Target: Acquired=",ReadyToObserve,", Alt=",alt,", Az=",az,", ra=",ra,", dec=",dec,", AltSpeed=",Session.Target.AltSpeed,", AzSpeed=",Session.Target.AzSpeed,terminal=False) 
 
         # If we're on target, then activate the camera (it runs in a separate thread until told to stop).
-        if True: # Was Parameters.CameraEnabled:
+        if True: 
             if PrevReadyToObserve != ReadyToObserve: # 'on target' status has changed.
                 # It is always safe to turn OFF the camera.
                 # But only turn the camera ON if the microcontroller reports that it has got AutonomousControl (ie a valid trajectory in place).
@@ -9098,8 +9312,11 @@ def ObservationRun():
         ImageStatusWindow.FieldValue('IMAGES',str(ImageCount()),fg=OSW_TEXT_GOOD) 
         # Calculate total accumulated image time.
         AccumulatedTime = PhotoCount * CameraInUse.ExposureSeconds
-        ImageStatusWindow.FieldValue('ACCTIME',HRSeconds(AccumulatedTime),fg=OSW_TEXT_GOOD)
-        if True: # Was Parameters.CameraEnabled:
+        if AccumulatedTime >= 1: # Show in HH:MM:SS
+            ImageStatusWindow.FieldValue('ACCTIME',HRSeconds(AccumulatedTime),fg=OSW_TEXT_GOOD)
+        else: # Show in 0.00000s
+            ImageStatusWindow.FieldValue('ACCTIME',str(AccumulatedTime) + "s",fg=OSW_TEXT_GOOD)
+        if True:
             pceta = '' # Don't know the estimated completion time yet.
             if PhotoCount > 0 and ObservationStartUTC != None: # We can estimate when the batch of photographs will be completed.
                 pcprogress = float(PhotoCount) / Parameters.BatchSize # Percentage of way through the image batch.
@@ -9208,7 +9425,7 @@ def ObservationRun():
     # Observation is over at this point.
     print(textcolor.clearforward()) # Clear the screen from the current location forward, makes the following messages easier to read.
     ReadyToObserve = False
-    if True: # Was Parameters.CameraEnabled: # Tell the camera it is all over.
+    if True: # Tell the camera it is all over.
         ControlMessage = {'TimeStamp' : NowUTC(), 'ReadyToObserve' : False}
         CameraControlQueue.put(ControlMessage) # Keep sending the CameraEnabled status to the camera.
         Session.CameraTxCount += 1 # We sent another message to the camera.
@@ -9257,7 +9474,7 @@ def DisableCleanup(): # For menu
         print ("The Raspberry Pi HQ sensor performs some on-chip image cleanup.")
         print ("On-chip cleanup may degrade the raw image data.")
         print ("It is recommended to disable this feature for astrophotography.")
-        if CameraDriver == 'raspistill':
+        if Parameters.CameraDriver == 'raspistill':
             print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
             if AskYesNo("Disable on-sensor cleanup? [y/N]",False):
                 SensorInUse.DisableCleanup()
@@ -9275,7 +9492,7 @@ def EnableCleanup(): # For menu
         print ("The Raspberry Pi High Quality camera can perform some on-chip image cleanup.")
         print ("It is often disabled for astrophotography because it degrades the raw image data slightly.")
         print ("It is recommended to enable this for regular photography.")
-        if CameraDriver == 'raspistill':
+        if Parameters.CameraDriver == 'raspistill':
             if AskYesNo("Enable on-sensor cleanup? [y/N]",False):
                 print ("- You may get warning messages displayed by this action, they are generally OK to ignore.")
                 SensorInUse.EnableCleanup()
@@ -9478,29 +9695,20 @@ def FlushCommandQueue(): # For menu
 
 # ------------------------------------------------------------------------------------------------------
 
-def ReloadParameters(): # For menu
-    global Parameters
-    Parameters = parameters(filename=ParameterFileName,log=MainLog.Log) # Create and load parameters.
-    Parameters.Show()
-
-# ------------------------------------------------------------------------------------------------------
-
 def ShowParameters(): # For menu
     Parameters.Show()
 
 # ------------------------------------------------------------------------------------------------------
 
 def EditParameters(): # For menu
-    global Parameters
+    # global Parameters
     Parameters.SaveAttributes(Parameters.ParamFileName) # Save current values.
     osCmd("cp " + Parameters.ParamFileName + " " + Parameters.ParamFileName.split(".")[0] + "_" + CleanDatetimeString(UtcTimeStamp()) + ".bak") # Backup current values.
     os.system("nano " + Parameters.ParamFileName) # Edit
-    Parameters = parameters(filename=ParameterFileName,log=MainLog.Log) # Create and load parameters.
-    Parameters.Show()
-    lines = ["If  you  have  changed  values  in the  parameter  file",
-             "you should restart this program and the microcontroller",
-             "to be sure that all changes take effect."]
-    textcolor.TextBox(line,fg=textcolor.YELLOW,bg=textcolor.BLACK)    
+    Parameters.LoadParameters() # Reload into memory - this prevents OLD values overwriting the new ones when you exit the program.
+    Parameters.RequireRestart = True # Flag that the parameters are nolonger safe until the program is restarted.
+    RestartRequired() # Warn the user that the software now needs to be restarted.
+    _ = input(textcolor.cyan("[ENTER] to continue"))    
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -9541,6 +9749,9 @@ def SelectTarget(): # For menu
 # ------------------------------------------------------------------------------------------------------
 
 def BeginObservation(): # For menu
+    if Parameters.RequireRestart: # Warn that movements cannot be made until software is restarted.
+        RestartRequired()
+        return
     print(textcolor.yellow(SummariseObservationParameters()))
     if AskYesNo('OK to start observation? [y/N]',default=False):
         ObservationRun()
@@ -9707,6 +9918,13 @@ def ZipTrajectoryLog():
 
 # ------------------------------------------------------------------------------------------------------
 
+def ZipMotorStatusLog():
+    MainLog.Log("ZipMotorStatusLog",terminal=True)
+    zipfile = MainLog.PackageSearchResult('RPi received: motor status',ignorecase=True)
+    MainLog.Log("ZipMotorStatusLog: Generated",zipfile,terminal=True)
+
+# ------------------------------------------------------------------------------------------------------
+
 def MonitorCommsHelp():
     """ Show the functions available in the MonitorComms utility. """
     print(textcolor.yellow("MonitorComms"))
@@ -9753,6 +9971,7 @@ def ShowMotorStatus():
     print("  Backlash enabled:",Parameters.BacklashEnabled)
     print("   Fault sensitive:",Parameters.FaultSensitive)
     print("Motor status delay:",Parameters.MotorStatusDelay,"s")
+    print("  Restart required:",Parameters.RequireRestart) # Parameters have been changed, system needs restart.
     print(" ")
     for i in MotorControls:
         i.ShowMotorStatus()
@@ -9951,7 +10170,14 @@ def AboutCamera():
     print(textcolor.yellow("About Camera"))
     
     print(textcolor.white(" O/S"))
-    print("  CameraDriver:",CameraDriver,"(",OS_name,")")
+    print("  CameraDriver:",Parameters.CameraDriver,"(",OS_name,")")
+    print("  CameraDetected:",textcolor.booltocolor(DetectCamera()))
+    
+    print(textcolor.white(" CameraHandler"))
+    try:
+        print("  CameraHandler running:",textcolor.booltocolor(CameraThread.is_alive()))
+    except:
+        print("  CameraHandler running:",textcolor.red("False"),"(not found)")
 
     print(textcolor.white(" Sensor"))
     print("  Sensor width:",SensorInUse.PixelWidth,"px")
@@ -9964,7 +10190,7 @@ def AboutCamera():
     print("    Defines characteristics of the camera.")
     print("  Sensor ID:",SensorInUse.ID)
     print("  Sensor mode:",SensorInUse.Mode)
-    if CameraDriver == 'raspistill': # DisableCleanup / OnChipCleanup is handled differently between raspistill and libcamera.
+    if Parameters.CameraDriver == 'raspistill': # DisableCleanup / OnChipCleanup is handled differently between raspistill and libcamera.
         print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(DisableCleanup parameter)"))
     else:
         print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(Libcamera command template parameter)"))
@@ -10002,14 +10228,14 @@ def AboutCamera():
     print("  Pixel FoV height:",round(CameraInUse.PixelFovHeight,4),DegreeSymbol)
 
     print(textcolor.white(" Command templates"))
-    print("  Light:",Parameters.CameraLightCommand)
-    print("  Dark:",Parameters.CameraDarkCommand)
-    print("  Bias/Offset:",Parameters.CameraBiasCommand)
-    print("  Flat:",Parameters.CameraFlatCommand)
-    print("  Dark flat:",Parameters.CameraDarkFlatCommand)
-    print("  Auto:",Parameters.CameraAutoCommand)
-    print("  Tracking:",Parameters.CameraTrackingCommand)
-    print("  Raw switch:",Parameters.CameraRawSwitch)
+    print("  Light:",Parameters._CameraLightCommand)
+    print("  Dark:",Parameters._CameraDarkCommand)
+    print("  Bias/Offset:",Parameters._CameraBiasCommand)
+    print("  Flat:",Parameters._CameraFlatCommand)
+    print("  Dark flat:",Parameters._CameraDarkFlatCommand)
+    print("  Auto:",Parameters._CameraAutoCommand)
+    print("  Tracking:",Parameters._CameraTrackingCommand)
+    print("  Raw switch:",Parameters._CameraRawSwitch)
     
     print(textcolor.white(" Camera handler"))
     print("  Fast image capture parameter:",Parameters.FastImageCapture)
@@ -10069,19 +10295,45 @@ def About():
 
 def ChooseImageTypes():
     """ User can decide which images types to record. """
+    MainLog.Log("ChooseImageTypes:",terminal=False)
+    MainLog.Log("Currently: Driver=",Parameters.CameraDriver,
+                ": jpg",Parameters.CameraSaveJpg,
+                ": dng",Parameters.CameraSaveDng,
+                ": fits",Parameters.CameraSaveFits,terminal=False)
     option = None
-    ImageOptions = {
-        'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False},
-        'dng':{'label':'DNG only', 'value':'dng', 'SaveJpg':False, 'SaveDng':True},
-        'jpgdng':{'label':'JPG & DNG', 'value':'jpgdng', 'SaveJpg':True, 'SaveDng':True},
+    AllOptions = {
+        'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
+        'dng':{'label':'DNG only', 'value':'dng', 'SaveJpg':False, 'SaveDng':True, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
+        'jpgdng':{'label':'JPG & DNG', 'value':'jpgdng', 'SaveJpg':True, 'SaveDng':True, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
+        'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera','pilomarfits']},
+        'dng':{'label':'DNG only', 'value':'dng', 'SaveJpg':False, 'SaveDng':True, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera']},
+        'jpgdng':{'label':'JPG & DNG', 'value':'jpgdng', 'SaveJpg':True, 'SaveDng':True, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera']},
+        'fits':{'label':'FITS only', 'value':'fits', 'SaveJpg':False, 'SaveDng':False, 'SaveFits':True, 'oslist':['bookworm'], 'handlers':['pilomarfits']},
+        'jpgfits':{'label':'JPG & FITS', 'value':'jpgfits', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':True, 'oslist':['bookworm'], 'handlers':['pilomarfits']}
     }
-    OptionMenu = optionmenu(ImageOptions,'Select combination',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
-
+    FilteredOptions = {}
+    for key,value in AllOptions.items(): # Consider all available combinations of type, OS and driver.
+        if OS_name in value['oslist']: # Offer those supported by this OS.
+            FilteredOptions[key] = value
+    MainLog.Log("ChooseImageTypes: Offering:",FilteredOptions,terminal=False)
+            
+    OptionMenu = optionmenu(FilteredOptions,'Select combination',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
     option, found = OptionMenu.Prompt() # Ask the user to select an option from the menu.
+    MainLog.Log("ChooseImageTypes: Chose:", option, found,terminal=False)
+    
     if found: # A choice was made.
-        Parameters.CameraSaveJpg = ImageOptions[option]['SaveJpg']
-        Parameters.CameraSaveDng = ImageOptions[option]['SaveDng']
-        MainLog.Log("ChooseImageTypes: Camera image types to: JPG:",Parameters.CameraSaveJpg,", DNG:",Parameters.CameraSaveDng)
+        Parameters.CameraSaveJpg = AllOptions[option]['SaveJpg']
+        Parameters.CameraSaveDng = AllOptions[option]['SaveDng']
+        Parameters.CameraSaveFits = AllOptions[option]['SaveFits']
+        if not Parameters.CameraDriver in AllOptions[option]['handlers']: # Need to switch handler.
+            newdriver = AllOptions[option]['handlers'][0]
+            MainLog.Log("ChooseImageTypes: Switching cameradriver from",Parameters.CameraDriver,"to",newdriver,terminal=True)
+            Parameters.SetCameraDriver(newdriver)
+    MainLog.Log("Finally: Driver=",Parameters.CameraDriver,
+                ": jpg",Parameters.CameraSaveJpg,
+                ": dng",Parameters.CameraSaveDng,
+                ": fits",Parameters.CameraSaveFits,terminal=False)
+    
     return
 
 # ------------------------------------------------------------------------------------------------------
@@ -10131,6 +10383,7 @@ MotorMenuOptions = {
     'AltitudeAngle':          {'label':'Move altitude to angle',    'call':AltitudeAngle},
     'ExerciseAzimuth':        {'label':'Exercise azimuth motor',    'call':ExerciseMotorAzimuth},
     'ExerciseAltitude':       {'label':'Exercise altitude motor',   'call':ExerciseMotorAltitude},
+    'ZipMotorStatusLog':      {'label':'Zip motor status log',      'call':ZipMotorStatusLog},
     'StopAllMotors':          {'label':'Stop all motors',           'call':StopMotors},
 }
 MotorMenu = proceduremenu(MotorMenuOptions,'Motor tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
@@ -10172,7 +10425,6 @@ MiscMenuOptions = {
     'About':                  {'label':'About system',               'call':About},
     'ShowParameters':         {'label':'Show parameters',            'call':ShowParameters},
     'EditParameters':         {'label':'Edit parameters',            'call':EditParameters},
-    'ReloadParameters':       {'label':'Reload parameters',          'call':ReloadParameters},
     'TrackingStatus':         {'label':'Tracking status',            'call':TrackingStatus},
     'SetLocalTZ':             {'label':'Set local timezone',         'call':DefineLocalTZ},
     'EditTargetHistory':      {'label':'Edit target history',        'call':EditTargetHistory},
@@ -10192,7 +10444,6 @@ DevMenuOptions = {
     'GpioStatus':             {'label':'GPIO status',                'call':GpioStatus},
     'ShowParameters':         {'label':'Show parameters',            'call':ShowParameters},
     'EditParameters':         {'label':'Edit parameters',            'call':EditParameters},
-    'ReloadParameters':       {'label':'Reload parameters',          'call':ReloadParameters}
 }
 
 DevMenu = proceduremenu(DevMenuOptions,'Development tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
@@ -10239,7 +10490,8 @@ CameraAlt, CameraAz = LastReportedAltAz() # What is the last reported alt/az loc
 HomeAlt, HomeAz = HomeAltAz() # Home position for camera.
 if round(CameraAlt,1) != round(HomeAlt,1) or round(CameraAz,1) != round(HomeAz,1): # Camera is not at home position.
     print(textcolor.yellow("The camera is currently at " + AzAltText(CameraAz,CameraAlt)))
-    answer = AskYesNo("Would you like to home the camera before powering off? [y/N]",False)
+    if Parameters.RequireRestart: answer = False # Do not offer to move the motors if parameter file has been changed.
+    else: answer = AskYesNo("Would you like to home the camera before powering off? [y/N]",False)
     if answer:
         print ("Returning camera to home position...")
         HomePosition()
@@ -10262,6 +10514,8 @@ for i in MotorControls:
     i.StoreRecoveryAngle(force=True) # Write the final position of each motor to disc. Force the write.
     
 print (' ')
+ShutdownCamera() # Terminate the CameraHandler thread.
+print (' ')
 print (textcolor.yellow('Stopping microcontroller communication...'))
 Mctl.Reset(planned=True) # For safety, reset the microcontroller. This prevents the stepper motors triggering due to out-of-date instructions. 
 MainLog.Log('Stopping microcontroller communication: send STOP...')
@@ -10272,7 +10526,7 @@ if MctlThread.is_alive():
 else:
     MainLog.Log('Stopping microcontroller communication: MctlThread already stopped.')
 print (' ')
-ShutdownCamera() # Terminate the CameraHandler thread.
+#ShutdownCamera() # Terminate the CameraHandler thread.
 ShutdownMessage() # Terminate the MessageHandler thread.
 print (' ')
 GPIOCleanup() # Reset the GPIO state.
