@@ -1,7 +1,6 @@
 #!/bin/bash
 # ####################################################################
 # script: buildpilomar_bookworm64
-# Save as UNIX file.
 # 11.Feb.2024 / Rasbian bookworm 64bit only
 # 28.Feb.2024 / Log file location is more dynamically calculated.
 # ####################################################################
