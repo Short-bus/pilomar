@@ -27,13 +27,15 @@ class logfile(): # 2 references.
 
     __version__ = '0.1.1'
 
-    def __init__(self,filename : str, clockoffset=None, flush=False):
+    def __init__(self,filename : str, clockoffset=None, flush=False, append=True):
         """ filename is the destination log file. 
             clockoffset (seconds) is used by NowUTC() method to create offset timestamps. 
             flush : False. Log file writes are flushed to disc efficiently and more slowly by the OS. 
                            But there's a risk that you lose the last few messages in a catastrophic failure.
                     True. Log file writes are immediately flushed to disc. Hits the SD card hard!
-                          But there's less risk of losing the last few messages if something bad happens. """
+                          But there's less risk of losing the last few messages if something bad happens.
+            append: True.  Existing log file is appended to.
+                    False. Fresh log file is started. """
         self.FileName = filename
         self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
         self.PrevLogTime = self.NowUTC()
@@ -44,6 +46,14 @@ class logfile(): # 2 references.
         self.DetailFilter = ['u','f','d'] # Specify the detail levels that are recorded (user choices, flow, detail).
         self.LevelFilter = ['i','w','e'] # Specify which message types are recorded (info, warning, error).
         self.FastFlush = False # If TRUE all writes to the log file are immediately flushed. Hits the SD card hard!
+        if os.path.exists(filename):
+            if append == True:
+                self.Log("logfile: Appending to existing",filename,terminal=False)
+            else:
+                os.remove(filename) # Remove previous filename.
+                self.Log("logfile: Overwriting previous",filename,terminal=False)
+        else:
+            self.Log("logfile: Starting new",filename,terminal=False)
 
     #def NowUTC(self) -> datetime: # Many references.
     #    """ Get system clock as UTC (timezone aware) 

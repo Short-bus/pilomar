@@ -173,6 +173,21 @@ def SourceCode() -> str:
 ProgramTitle = SourceCode().split('/')[-1].split('.')[0].lower() # Used in display titles and also filenaming to separate different generations of the program.
 print(textcolor.clearforward()) # Clear the screen from the start point forward. 
 print(ProgramTitle,VERSION)
+WarningFlags = {} # Dictionary of 'toggles' so that warnings do not repeat too often. 
+
+def FirstWarningFlag(flagname):
+    """ Given a flag name, return True if this is the first time it's been triggered.
+        This is used to prevent warning messages repeating when a condition is triggered.
+        Using this mechanism we know that the warning is already issued, so don't repeat it. """
+    result = WarningFlags.get(flagname,False)
+    if not result: WarningFlags[flagname] = True # 1st occurrence, so flag it as such. 
+    return result
+    
+def ResetWarningFlag(flagname):
+    """ Given a flag name, reset it to False.
+        This is used to prevent warning messages repeating when a condition is triggered.
+        Using this mechanism we know that the warning is already issued, so don't repeat it. """
+    WarningFlags[flagname] = False
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -1060,7 +1075,7 @@ class parameters(attributemaster): # Common
         self.LensHorizontalFov = self.GetParmVal('LensHorizontalFov',21.8) # Degrees FoV horizontally
         self.LensVerticalFov = self.GetParmVal('LensVerticalFov',16.4) # Degrees FoV vertically.
         self.SensorType = self.GetParmVal('SensorType','imx477') # Sensor type. 
-        self.IRFilter = self.GetParmVal('IRFilter',True) # Is Infra Red filter fitted?
+        self.IRFilter = self.GetParmVal('IRFilter',True) # Is Infrared filter fitted?
         self.PollutionFilter = self.GetParmVal('PollutionFilter',False) # Is light pollution filter fitted?
         
         # The following parameters dictate how the trajectory is calculated for the motorcontroller.
@@ -1880,8 +1895,8 @@ InstructionWindow = colordisplay(rows=3,cdlayout=0,fg=PrintColorList,bg=OSW_TEXT
 InstructionWindow.PlaceString('  [r]Refresh    [t]Tracking on/off     [p]Preview      [m]Menu      [d]Debug on/off   ',row=1,col=0)
 InstructionWindow.PlaceString('  [+]/[-]Exposure                                                   [x]Quit           ',row=2,col=0)
 InstructionWindow.ClipWindow = True # Allow the display to be clipped if there's not enough terminal space available for the entire display.
-InstructionWindow.DrawBorder = True # Draw border around window.
 InstructionWindow.SetBorderColors(OSW_BORDER_FG,OSW_BORDER_BG) # Set border colors.
+InstructionWindow.DrawBorder = True # Draw border around window.
 
 # - The ERROR WINDOW shows any error messages raised by the software.
 ErrorWindow = colordisplay(rows=6,cdlayout=0,name='ERROR',fg=PrintColorList,bg=OSW_TEXT_BG,titlefg=OSW_TITLE_FG,titlebg=OSW_TITLE_BG,title="Error messages") 
@@ -3671,10 +3686,13 @@ def LastReportedAltAz():
     az_degree = 0.0
     alt_degree = 0.0
     for i in MotorControls:
+        WarningFlagName = "LastReportedAltAz_Stale_" + i.MotorName # Which warning message are we considering?
         if i.StatusMctlTimestamp != None:
             td = abs(NowUTC() - i.StatusMctlTimestamp).total_seconds()
             if td > 20: # Position is > 20 seconds old. Expect an update more regularly than this.
-                MainLog.Log("LastReportedAltAz(",i.MotorName,") position ",Deg3dp(i.CurrentAngle),"deg is stale.",td,"s since",i.StatusMctlTimestamp,"UTC",terminal=False)
+                if FirstWarningFlag(WarningFlagName): # Only issue the warning message once, don't keep repeating it.
+                    MainLog.Log("LastReportedAltAz(",i.MotorName,") position ",Deg3dp(i.CurrentAngle),"deg is stale.",td,"s since",i.StatusMctlTimestamp,"UTC",terminal=False)
+            else: ResetWarningFlag(WarningFlagName) # Reset so that warning will be reissued if the condition arises again.
         else:
             MainLog.Log("LastReportedAltAz(",i.MotorName,") StatusMctlTimestamp is None.",terminal=False)
         if i.MotorName == "azimuth": 
@@ -4972,7 +4990,7 @@ def GenerateNGCDataframe(NGCDict):
     # Store some repeated calculations in the dictionary to improve performance later on.
     count = 0
     for NGCEntry,NGCValues in NGCDict.items():
-        MainLog.Log("GenerateNGCDataframe: Loading:",NGCEntry,terminal=False)
+        #MainLog.Log("GenerateNGCDataframe: Loading:",NGCEntry,terminal=False)
         TempRAH = NGCValues['rah'] # Right Ascension HOURS
         TempRAM = NGCValues['ram'] # Right Ascension MINUTES
         TempRAS = NGCValues['ras'] # Right Ascension SECONDS
@@ -4996,7 +5014,7 @@ def GenerateNGCDataframe(NGCDict):
             NGCValues['typelabel'] = n_type
         NGCValues['ralabel'] = str(TempRAH) + "h " + str(TempRAM) + "m " + str(TempRAS) + "s"
         NGCValues['declabel'] = str(TempDED) + "d " + str(TempDEM) + "' " + str(TempDES) + '"'
-        MainLog.Log("GenerateNGCDataframe: Record",count,":",NGCEntry,": RA deg",NGCValues['radeg'],"Dec deg",NGCValues['decdeg'],n_type,NGCValues['typelabel'],terminal=False)
+        #MainLog.Log("GenerateNGCDataframe: Record",count,":",NGCEntry,": RA deg",NGCValues['radeg'],"Dec deg",NGCValues['decdeg'],n_type,NGCValues['typelabel'],terminal=False)
         count += 1
 
     # Convert the dictionary to a pandas dataframe.
@@ -6504,7 +6522,7 @@ class sessionentry(attributemaster):
         if dictionary != None: self._Dictionary = dictionary # Update the dictionary attribute with the latest version.
         # Attributes that can be saved/loaded via a dictionary.
         self.ImportExportList = ['Name','LastObserved','SearchTerm','SearchGroup','TargetType',
-                                 'RA','Dec','Alt','Az','ExposureSeconds','TimelapsePeriod','SensorMode',
+                                 'RA','Dec','Alt','Az','ExposureSeconds','TimelapsePeriod', # 'SensorMode',
                                  'ObservationStart','ObservationEnd','ObservationFrames']
         self.Name = self.GetParmVal("Name",None)
         self.LastObserved = self.GetDatetimeVal("LastObserved",None) # Needs converting from string to datetime with UTC tz.
@@ -6517,7 +6535,7 @@ class sessionentry(attributemaster):
         self.Az = self.GetParmVal("Az",None)
         self.ExposureSeconds = self.GetParmVal("ExposureSeconds",None)
         self.TimelapsePeriod = self.GetParmVal("TimelapseSeconds",None)
-        self.SensorMode = self.GetParmVal("SensorMode",None)
+        # self.SensorMode = self.GetParmVal("SensorMode",None)
         self.ObservationStart = self.GetDatetimeVal("ObservationStart",None) # Needs converting from string to datetime with UTC tz.
         self.ObservationEnd = self.GetDatetimeVal("ObservationEnd",None) # Needs converting from string to datetime with UTC tz.
         self.ObservationDuration = self.GetParmVal("ObservationDuration",None)
@@ -6529,7 +6547,8 @@ class sessionentry(attributemaster):
             This is so we can recognise duplicates. """
         signature = ''
         # Which attributes are used to identify an entry uniquely?
-        fieldlist = ['SearchTerm','TargetType','ExposureSeconds','TimelapsePeriod','SensorMode','ObservationStart','ObservationEnd','ObservationDuration','ObservationFrames']
+        #fieldlist = ['SearchTerm','TargetType','ExposureSeconds','TimelapsePeriod','SensorMode','ObservationStart','ObservationEnd','ObservationDuration','ObservationFrames']
+        fieldlist = ['SearchTerm','TargetType','ExposureSeconds','TimelapsePeriod','ObservationStart','ObservationEnd','ObservationDuration','ObservationFrames']
         for i,fieldname in enumerate(fieldlist):
             fieldvalue = dictionary.get(fieldname,None)
             if i > 0: signature += "/"
@@ -9564,6 +9583,7 @@ def ExposureStrings():
     ES += ", Types: "
     if CameraInUse.CameraSaveJpg: ES += "jpg "
     if CameraInUse.CameraSaveDng: ES += "dng "
+    if CameraInUse.CameraSaveFits: ES += "fits "
     if Parameters.CameraEnabled == False:
         ES += "(Disabled)"
     returnlist.append(ES)
@@ -9648,7 +9668,7 @@ def DocumentSession():
         f.write("Sensor type\t" + SensorInUse.Type + "\n")
         f.write("Pixels per FOV degree width\t" + str(CameraInUse.PixelsPerFovDegreeWidth) + "\n")
         f.write("Pixels per FOV degree height\t" + str(CameraInUse.PixelsPerFovDegreeHeight) + "\n")
-        f.write("Infra red filter\t" + str(Parameters.IRFilter) + "\n")
+        f.write("Infrared filter\t" + str(Parameters.IRFilter) + "\n")
         f.write("Light pollution filter\t" + str(Parameters.PollutionFilter) + "\n")
         f.write("Timelapse delay\t" + str(CameraInUse.TimelapseSeconds) + "seconds\n")
     # Append key values to 'recent target list'. This is useful if recovering from system failure, or resuming a previous observation at a later date.
@@ -9659,7 +9679,7 @@ def DocumentSession():
                         'SearchGroup':Session.Target.SearchGroup,
                         'SearchTerm':Session.Target.SearchTerm,
                         'ExposureSeconds':CameraInUse.ExposureSeconds,
-                        'SensorMode':SensorInUse.Mode,
+                        # 'SensorMode':SensorInUse.Mode,
                         'LastObserved':str(NowUTC()),
                         'TimelapsePeriod':CameraInUse.TimelapseSeconds})
     SessionHistory.SortByAge() # Sort youngest first.
@@ -9676,6 +9696,7 @@ def SummariseObservationParameters():
     result += 'Observation of ' + Session.Target.Name + ' will capture ' + str(int(Parameters.BatchSize)) + " images of " + str(CameraInUse.ExposureSeconds) + 's. ('
     if CameraInUse.CameraSaveJpg: result += "jpg "
     if CameraInUse.CameraSaveDng: result += "dng "
+    if CameraInUse.CameraSaveFits: result += "fits "
     result = result.strip() + ")"
     return result
 
@@ -10194,7 +10215,7 @@ def AboutCamera():
         print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(DisableCleanup parameter)"))
     else:
         print("  On chip cleanup:",SensorInUse.OnChipCleanup,textcolor.blue("(Libcamera command template parameter)"))
-    print("  Infra red filter:",Parameters.IRFilter) # Is Infra Red filter fitted?
+    print("  Infrared filter:",Parameters.IRFilter) # Is Infrared filter fitted?
     print("    Information only.")
 
     print(textcolor.white(" Lens"))
@@ -10228,20 +10249,24 @@ def AboutCamera():
     print("  Pixel FoV height:",round(CameraInUse.PixelFovHeight,4),DegreeSymbol)
 
     print(textcolor.white(" Command templates"))
-    print("  Light:",Parameters._CameraLightCommand)
-    print("  Dark:",Parameters._CameraDarkCommand)
+    print("        Light:",Parameters._CameraLightCommand)
+    print("         Dark:",Parameters._CameraDarkCommand)
     print("  Bias/Offset:",Parameters._CameraBiasCommand)
-    print("  Flat:",Parameters._CameraFlatCommand)
-    print("  Dark flat:",Parameters._CameraDarkFlatCommand)
-    print("  Auto:",Parameters._CameraAutoCommand)
-    print("  Tracking:",Parameters._CameraTrackingCommand)
-    print("  Raw switch:",Parameters._CameraRawSwitch)
+    print("         Flat:",Parameters._CameraFlatCommand)
+    print("    Dark flat:",Parameters._CameraDarkFlatCommand)
+    print("         Auto:",Parameters._CameraAutoCommand)
+    print("     Tracking:",Parameters._CameraTrackingCommand)
+    print("   Raw switch:",Parameters._CameraRawSwitch)
     
     print(textcolor.white(" Camera handler"))
     print("  Fast image capture parameter:",Parameters.FastImageCapture)
     print("    Default for regular targets.")
     print("  Fast image capture current setting:",CameraInUse.FastImageCapture)
     print("    Setting for the current target.")
+    print("  Image types:")
+    print("    jpg:",CameraInUse.CameraSaveJpg,textcolor.blue("(Param:",Parameters.CameraSaveJpg,")"))
+    print("    dng:",CameraInUse.CameraSaveDng,textcolor.blue("(Param:",Parameters.CameraSaveDng,")"))
+    print("    fits:",CameraInUse.CameraSaveFits,textcolor.blue("(Param:",Parameters.CameraSaveFits,")"))
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -10329,10 +10354,11 @@ def ChooseImageTypes():
             newdriver = AllOptions[option]['handlers'][0]
             MainLog.Log("ChooseImageTypes: Switching cameradriver from",Parameters.CameraDriver,"to",newdriver,terminal=True)
             Parameters.SetCameraDriver(newdriver)
+        CameraInUse.SetObservationParameters(Session) # Update camera settings.
     MainLog.Log("Finally: Driver=",Parameters.CameraDriver,
-                ": jpg",Parameters.CameraSaveJpg,
-                ": dng",Parameters.CameraSaveDng,
-                ": fits",Parameters.CameraSaveFits,terminal=False)
+                ": jpg",CameraInUse.CameraSaveJpg,
+                ": dng",CameraInUse.CameraSaveDng,
+                ": fits",CameraInUse.CameraSaveFits,terminal=True)
     
     return
 
@@ -10372,8 +10398,107 @@ def GpioStatus():
     
 # ------------------------------------------------------------------------------------------------------
 
+def ConfigMicrostepping(slewmicrosteps,observemicrosteps):
+    """ Given slew and observe microstep values, change motor config. """
+    MainLog.Log("ConfigMicrostepping: Slew",slewmicrosteps,"Observe",observemicrosteps,terminal=True)
+    if slewmicrosteps != 1:
+        print("When slewing the telescope for large moves (GOTO/HOME) the motors will use",slewmicrosteps,"microsteps")
+    else:
+        print("When slewing the telescope for large moves (GOTO/HOME) the motors will use FULL steps")
+    if observemicrosteps != 1:
+        print("When the telescope is observing the motors will use",observemicrosteps,"microsteps")
+    else:
+        print("When the telescope is observing the motors will use FULL steps.")
+
+    # Check we're homed.
+    CameraAlt, CameraAz = LastReportedAltAz() # What is the last reported alt/az location of the centre of the image?
+    HomeAlt, HomeAz = HomeAltAz() # Home position for camera.
+    if round(CameraAlt,1) != round(HomeAlt,1) or round(CameraAz,1) != round(HomeAz,1): # Camera is not at home position.
+        MainLog.Log("ConfigMicrostepping: The camera needs to be HOMED before changing microstepping.",terminal=True,level='warning')
+        return
+        
+    # Set parameters.
+    if slewmicrosteps != observemicrosteps:
+        Parameters.SlewMicrosteps = True # Allow SLEW moves to be faster than OBSERVE moves.
+    else:
+        Parameters.SlewMicrosteps = False # SLEW and OBSERVE moves use the same microstepping values.
+    Parameters.AzimuthMicrostepRatio = observemicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
+    Parameters.AzimuthSlewMicrostepRatio = slewmicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
+    Parameters.AltitudeMicrostepRatio = observemicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
+    Parameters.AltitudeSlewMicrostepRatio = slewmicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
+
+    if slewmicrosteps == 1 or observemicrosteps == 1:
+        if slewmicrosteps == 1: print("Slew moves will use FULL STEPS.")
+        if observemicrosteps == 1: print("Observation moves will use FULL STEPS.")
+        print("NOTE: FULL STEPS are fast, but noisy.")
+        print("      Increasing microstepping values slows the telescope down, but gives quieter and smoother motion.")
+    
+    # Flag restart required.
+    Parameters.RequireRestart = True # Flag that the parameters are nolonger safe until the program is restarted.
+    RestartRequired() # Warn the user that the software now needs to be restarted.
+    
+    # Save parameters.
+    print (textcolor.yellow("Saving parameters..."))
+    Parameters.SaveAttributes(Parameters.ParamFileName) # Write current operating parameters back to disc.
+    print (textcolor.yellow("Done."))
+    
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_1_1():
+    print(textcolor.yellow("No microstepping"))
+    ConfigMicrostepping(slewmicrosteps=1,observemicrosteps=1)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_2_2():
+    print(textcolor.yellow("Slew 1/2 microsteps, Observe 1/2 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=2,observemicrosteps=2)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_4_4():
+    print(textcolor.yellow("Slew 1/4 microsteps, Observe 1/4 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=4,observemicrosteps=4)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_1_2():
+    print(textcolor.yellow("Slew full steps, Observe 1/2 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=1,observemicrosteps=2)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_1_4():
+    print(textcolor.yellow("Slew full steps, Observe 1/4 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=1,observemicrosteps=4)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_2_4():
+    print(textcolor.yellow("Slew 1/2 microsteps, Observe 1/4 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=2,observemicrosteps=4)
+
+# ------------------------------------------------------------------------------------------------------
+
+def Microstepping_4_8():
+    print(textcolor.yellow("Slew 1/4 microsteps, Observe 1/8 microsteps."))
+    ConfigMicrostepping(slewmicrosteps=4,observemicrosteps=8)
+
+# ------------------------------------------------------------------------------------------------------
 # Create menu structure.
 
+StepMenuOptions = {
+    'ShowMotorStatus':        {'label':'About motors',              'call':ShowMotorStatus},
+    'Microstepping_1_1':      {'label':'No microstepping',          'call':Microstepping_1_1},
+    'Microstepping_2_2':      {'label':'Slew 1/2, Observe 1/2',     'call':Microstepping_2_2},
+    'Microstepping_4_4':      {'label':'Slew 1/4, Observe 1/4',     'call':Microstepping_4_4},
+    'Microstepping_1_2':      {'label':'Slew full, Observe 1/2',    'call':Microstepping_1_2},
+    'Microstepping_1_4':      {'label':'Slew full, Observe 1/4',    'call':Microstepping_1_4},
+    'Microstepping_2_4':      {'label':'Slew 1/2, Observe 1/4',     'call':Microstepping_2_4},
+    'Microstepping_4_8':      {'label':'Slew 1/4, Observe 1/8',     'call':Microstepping_4_8}
+}
+StepMenu = proceduremenu(StepMenuOptions,'Microstepping options',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
+    
 MotorMenuOptions = {
     'ShowMotorStatus':        {'label':'About motors',              'call':ShowMotorStatus},
     'HomeAllMotors':          {'label':'Home all motors',           'call':HomePosition},
@@ -10383,6 +10508,7 @@ MotorMenuOptions = {
     'AltitudeAngle':          {'label':'Move altitude to angle',    'call':AltitudeAngle},
     'ExerciseAzimuth':        {'label':'Exercise azimuth motor',    'call':ExerciseMotorAzimuth},
     'ExerciseAltitude':       {'label':'Exercise altitude motor',   'call':ExerciseMotorAltitude},
+    'MicrosteppingOptions':   {'label':'Microstepping options',     'call':StepMenu},
     'ZipMotorStatusLog':      {'label':'Zip motor status log',      'call':ZipMotorStatusLog},
     'StopAllMotors':          {'label':'Stop all motors',           'call':StopMotors},
 }
@@ -10526,9 +10652,10 @@ if MctlThread.is_alive():
 else:
     MainLog.Log('Stopping microcontroller communication: MctlThread already stopped.')
 print (' ')
-#ShutdownCamera() # Terminate the CameraHandler thread.
 ShutdownMessage() # Terminate the MessageHandler thread.
 print (' ')
+MainLog.Log('Powering off the microcontroller.',terminal=False)
+Mctl.ResetPin.Off() # Turn off the microcontroller power. Turn off regardless of GPIO/USB connectivity.
 GPIOCleanup() # Reset the GPIO state.
 print (textcolor.yellow("Saving parameters..."))
 Parameters.SaveAttributes(Parameters.ParamFileName) # Write current operating parameters back to disc.
