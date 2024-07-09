@@ -130,7 +130,7 @@ class inputpin_gpio():
         
     def Status(self):
         """ Return a string describing the current status of the pin. """
-        temp = "GPIO: BCM:" + str(self.Pin) + ", IN:" + \
+        temp = "GPIO: BCM:" + str(self.Pin) + ", INPUT:" + \
                " Ena:" + str(self.Enabled).rjust(5) + \
                " Inv:" + str(self.Invert).rjust(5) + \
                " IsOn:" + str(self.IsOn()).rjust(5) + \
@@ -240,7 +240,7 @@ class outputpin_gpio():
         
     def Status(self):
         """ Return a string describing the current status of the pin. """
-        temp = "GPIO: BCM:" + str(self.Pin) + ", OUT:" + \
+        temp = "GPIO: BCM:" + str(self.Pin) + ", OUTPUT:" + \
                " Ena:" + str(self.Enabled).rjust(5) + \
                " Inv:" + str(self.Invert).rjust(5) + \
                " IsOn:" + str(self.IsOn()).rjust(5) + \
@@ -354,7 +354,7 @@ class inputpin_gpiod():
         
     def Status(self):
         """ Return a string describing the current status of the pin. """
-        temp = "GPIOD: BCM:" + str(self.Pin) + ", IN:" + \
+        temp = "GPIOD: BCM:" + str(self.Pin) + ", INPUT:" + \
                " Ena:" + str(self.Enabled).rjust(5) + \
                " Inv:" + str(self.Invert).rjust(5) + \
                " IsOn:" + str(self.IsOn()).rjust(5) + \
@@ -426,6 +426,54 @@ class outputpin_gpiod():
             self.Line.set_value(1) # High
         else:
             self.Line.set_value(0) # Low
+            
+    def IsOn(self):
+        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+            If you want the true electrical state of the pin use self.IsHigh() """
+        result = self.IsHigh()
+        if self.Invert: result = not result
+        return result # Return True/False.
+
+    def IsOff(self):
+        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+            If you want the true electrical state of the pin use self.IsLow() """
+        result = self.IsLow()
+        if self.Invert: result = not result
+        return result # Return True/False.
+
+    def IsOn(self):
+        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+            If you want the true electrical state of the pin use self.IsHigh() """
+        result = self.IsHigh() # Get the current electrical state of the pin.
+        if self.Invert: result = not result # Consider the Invert flag.
+        return result # Return True/False for logical state of the pin.
+
+    def IsOff(self):
+        """ Return ON/OFF state of the input, respecting the 'invert' flag.
+            If you want the true electrical state of the pin use self.IsLow() """
+        result = self.IsLow() # Get the current electrical state of the pin.
+        if self.Invert: result = not result # Consider the Invert flag.
+        return result # Return True/False for the logical state of the pin.
+
+    def IsHigh(self):
+        """ Return TRUE if the pin is HIGH. 
+            The true electrical state of the pin. 
+            Does not respect self.Invert flag. 
+            To respect self.Invert, use IsOn()/IsOff() """
+        if self.Line.get_value() != 0: result = True # The true electrical state of the pin.            
+        #if GPIO.input(self.Pin) != 0: result = True # The true electrical state of the pin.
+        else: result = False
+        return result
+
+    def IsLow(self):
+        """ Return TRUE if the pin is LOW.
+            The true electrical state of the pin. 
+            Does not respect self.Invert flag.
+            To respect self.Invert, use IsOn()/IsOff() """
+        if self.Line.get_value() != 0: result = False # The true electrical state of the pin.            
+        #if GPIO.input(self.Pin) != 0: result = False # The true electrical state of the pin.
+        else: result = True
+        return result
 
     def Enable(self):
         self.Enabled = True
@@ -437,7 +485,7 @@ class outputpin_gpiod():
 
     def Status(self):
         """ Return a string describing the current status of the pin. """
-        temp = "GPIOD: BCM:" + str(self.Pin) + ", OUT:" + \
+        temp = "GPIOD: BCM:" + str(self.Pin) + ", OUTPUT:" + \
                " Ena:" + str(self.Enabled).rjust(5) + \
                " Inv:" + str(self.Invert).rjust(5) + \
                " IsOn:" + str(self.IsOn()).rjust(5) + \

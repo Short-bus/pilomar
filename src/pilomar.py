@@ -99,12 +99,25 @@
 # - MINOR = New features but backwards compatible. Usually allows RPI or MICROCONTROLLER to be updated independently.
 # - MICRO = Development/bugfix releases.
 VERSION = '1.1.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
-print("Version:",VERSION)
+
+import sys # For version verification.
+
+# ------------------------------------------------------------------------------------------------------
+
+def SourceCode() -> str: 
+    """ Return the filename of the source code being executed. """
+    return sys.argv[0]
+
+# ------------------------------------------------------------------------------------------------------
+
+ProgramTitle = SourceCode().split('/')[-1].split('.')[0].lower() # Used in display titles and also filenaming to separate different generations of the program.
+print(ProgramTitle,VERSION)
+
+#print("Version:",VERSION)
 ACCEPTABLECONTROLLERVERSIONS = ['1.0'] # Microcontroller versions that this will work with. Ignore patch level.
 
 # Import required libraries
 from typing import Tuple # For type hinting.
-import sys # For version verification.
 import serial # UART communication with a microcontroller.
 import time # sleep functionality for pauses in execution. 
 import locale # Internationalisation support.
@@ -164,15 +177,15 @@ else:
 
 # ------------------------------------------------------------------------------------------------------
 
-def SourceCode() -> str: 
-    """ Return the filename of the source code being executed. """
-    return sys.argv[0]
-
-# ------------------------------------------------------------------------------------------------------
-
-ProgramTitle = SourceCode().split('/')[-1].split('.')[0].lower() # Used in display titles and also filenaming to separate different generations of the program.
-print(textcolor.clearforward()) # Clear the screen from the start point forward. 
-print(ProgramTitle,VERSION)
+#def SourceCode() -> str: 
+#    """ Return the filename of the source code being executed. """
+#    return sys.argv[0]
+#
+## ------------------------------------------------------------------------------------------------------
+#
+#ProgramTitle = SourceCode().split('/')[-1].split('.')[0].lower() # Used in display titles and also filenaming to separate different generations of the program.
+#print(textcolor.clearforward()) # Clear the screen from the start point forward. 
+#print(ProgramTitle,VERSION)
 WarningFlags = {} # Dictionary of 'toggles' so that warnings do not repeat too often. 
 
 def FirstWarningFlag(flagname):
@@ -262,6 +275,7 @@ def NowUTC(real=False) -> datetime: # Many references.
         dt = dt + timedelta(seconds=ClockOffset)
     return dt
 
+print("Hostname:",os.uname().nodename)
 print("Locale:",locale.getlocale())
 SoftwareStartDatetime = NowUTC()
 
@@ -800,7 +814,7 @@ print('Done.')
 # Log details about the environment.
 MainLog.Log("Skyfield version:", SkyfieldVersion, terminal=False)
 if SkyfieldVersion[0] > 1 or SkyfieldVersion[1] > 39:
-    MainLog.Log("Pilomar is developed with Skyfield version 1.39: This version",str(SkyfieldVersion[0]) + "." + str(SkyfieldVersion[1]),"may not be compatible.",level='warning',terminal=False)
+    MainLog.Log("Pilomar is developed with Skyfield version 1.39: This version",str(SkyfieldVersion[0]) + "." + str(SkyfieldVersion[1]),terminal=False)
 
 textcolor.GetTermType()
 MainLog.Log("Terminal type:", textcolor.TermType, textcolor.Mode,terminal=False)
@@ -945,7 +959,7 @@ class parameters(attributemaster): # Common
         self.TimeDelta = self.GetParmVal('TimeDelta',0.003) # Acceleration rate for the motor STEP signal. 
 
         self.MotorStatusDelay = self.GetParmVal('MotorStatusDelay',10) # Microcontroller should send motor status messages every 'xxx' seconds. (Don't overload UART comms!)
-        self.SlewMotor = self.GetParmVal('SlewMotor',False) # Do we allow microstepping to be replaced by FULL STEPS when moving large distances?
+        self.SlewEnabled = self.GetParmVal('SlewEnabled',False) # Do we allow microstepping to be replaced by FULL STEPS when moving large distances?
         self.OptimiseMoves = self.GetParmVal('OptimiseMoves',False) # Can the motorcontroller optimise large moves? (ie switch direction if it's faster)
         self.MctlCommsTimeout = self.GetParmVal('MctlCommsTimeout',120) # How many seconds of inactivity before resetting microcontroller communication?
         self.UseUSBStorage = self.GetParmVal('UseUSBStorage',True) # If USB storage is mounted then images are stored there instead of the SD card.
@@ -1290,7 +1304,7 @@ class parameters(attributemaster): # Common
                 if key in self._Defaults: # A default value is known. 
                     if self._Defaults[key] != value: # The default is different to the current value.
                         defaultflag = textcolor.red(' (*) Has changed from default.')
-                print (textcolor.yellow(key.rjust(30)) + " : dictionary " + defaultflag + "(for detail open in editor)")
+                print (textcolor.yellow(key.rjust(30)) + " : " + textcolor.yellow("dictionary " + defaultflag + "(for detail open in editor)"))
             else:
                 if key in self._Defaults: # A default value is known.
                     if self._Defaults[key] != value: # The default is different to the current value.
@@ -1349,9 +1363,9 @@ if abs(Parameters._HomeLatVal) >= 90.0: # Things break down at the poles.
                 "Please use the 0" + DegreeSymbol + " longitude line as due North/South."]
     textcolor.TextBox(linelist,fg=textcolor.YELLOW,bg=textcolor.BLACK)
 
-if Parameters.SlewMotor: # If allowed to mix full and microsteps, warn the user.
+if Parameters.SlewEnabled: # If allowed to mix full and microsteps, warn the user.
     lines = [
-       "SlewMotor PARAMETER IS ENABLED",
+       "SlewEnabled PARAMETER IS ENABLED",
        "The motors can switch between microstepping and full steps",
        "so that the telescope can get into position more quickly.",
        "This is an experimental feature."
@@ -2906,20 +2920,37 @@ def InitiateMctl():
                                    logger=MainLog) # Create communication with microcontroller over uart0 serial port.
         mctl.ReportBoard() # Log the board type now that the log file is defined.
         mctl.Initiate() # Initiate communication.
+        
+    except PermissionError as e: 
+        MainLog.Log('InitiateMctl: Failed: PermissionError.',level='error')
+        print ("")
+        linelist = [
+                 "           THE MICROCONTROLLER FAILED TO INITIALISE.",
+                 "                    PERMISSION ERROR.",
+                 "This may be because the permissions are incorrectly set in"
+                 "raspi-config. ",
+                 "1) Check SERIAL PORT is ENABLED"
+                 "2) Check SERIAL CONSOLE is DISABLED"]
+        textcolor.TextBox(linelist,fg=textcolor.WHITE,bg=textcolor.RED)
+        print ("")
+        MainLog.RaiseException(e,comment='InitiateMctl:PermissionError') # Trap all the exception information in the main log file.
     except Exception as e:
         MainLog.Log('InitiateMctl: Failed: Is another instance already running?',level='error')
         print ("")
-        linelist = ["           THE MICROCONTROLLER FAILED TO INITIALISE.",
+        linelist = [
+                 "           THE MICROCONTROLLER FAILED TO INITIALISE.",
+                 "                    EXCEPTION.",
                  "This may be because another copy of pilomar is already running.",
                  "or because the Serial Port is misconfigured in raspi-config.",
                  "1) Check for duplicate processes and terminate them if needed.",
-                 "2) Check serial port is disabled for login and enabled for IO."]
+                 "2) Check SERIAL PORT is ENABLED"
+                 "3) Check SERIAL CONSOLE is DISABLED"]
         textcolor.TextBox(linelist,fg=textcolor.WHITE,bg=textcolor.RED)
         print ("")
         print (textcolor.yellow("pilomar processes currently running:-"))
         osCmd('ps -ef | grep pilomar',output='terminal')
         print (textcolor.yellow("This copy of the pilomar is pid",os.getpid()))
-        MainLog.RaiseException(e,comment='InitiateMctl') # Trap all the exception information in the main log file.
+        MainLog.RaiseException(e,comment='InitiateMctl:Exception') # Trap all the exception information in the main log file.
     return mctl
     
 # ------------------------------------------------------------------------------------------------------
@@ -3089,6 +3120,7 @@ class motorcontrol(attributemaster):
         print("- ModeSignals:",self.ModeSignals)
         print("  Mode pin settings for driver during observations")
         print(textcolor.white("Large motor movements (GOTO and HOME):"))
+        print("- Enabled:",Parameters.SlewEnabled)
         print("- SlewMicrosteps:",self.SlewMicrosteps)
         print("- SlewSignals:",self.SlewSignals)
         print("  Mode pin settings for driver during large GOTO moves")
@@ -3448,7 +3480,7 @@ class motorcontrol(attributemaster):
                 18 = Slew Steps (the number of 'microsteps' taken when making large moves).
                 19 = Motor rest angle (when homed).
                 20 = Microstepping mode signals (used when making observation).
-                21 = SlewMotor flag (Can motor make FULL STEP moves during large position changes). <- Experimental feature.
+                21 = SlewEnabled flag (Can motor make FULL STEP moves during large position changes). <- Experimental feature.
                 22 = Slew stepping mode signals (used when making large position changes). <- Experimental feature.
                     """
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') begin',terminal=False)
@@ -3472,7 +3504,7 @@ class motorcontrol(attributemaster):
         line += str(self.SlewStepMultiplier) + ' ' # Field 18 SlewStepMultiplier (The number of microsteps taken when making large Slew moves).
         line += str(self.RestAngle) + ' ' # Field 19 RestAngle
         line += self.ModeSignals + ' ' # Field 20 Steppermotor mode signals for microstepping.
-        line += BoolToString(Parameters.SlewMotor) + ' ' # Field 21 SlewMotor flat. (Can motor make FULL STEP moves during large position changes)
+        line += BoolToString(Parameters.SlewEnabled) + ' ' # Field 21 SlewEnabled flat. (Can motor make FULL STEP moves during large position changes)
         line += self.SlewSignals + ' ' # Field 22 Steppermotor mode signals for full steps (Fast slew).
         Mctl.Write(line)
         self.Log('motorcontrol.SendConfig (' + self.MotorName + ') end',terminal=False)
@@ -5404,6 +5436,10 @@ class target(attributemaster):
     def NextRiseSetSatellite(self):
         """ Return next horizon event and time for satellites. """
         self.Log("target.NextRiseSetSatellite(",self.Name,")",terminal=False)
+        if not hasattr(self.Handle,'find_events'): # This object doesn't support satellite pass calculations.
+            self.Log("Cannot calculate next Rise Set times for this type of target(",self.Name,self.ObjectType,")",terminal=True)
+            self.Log("target.NextRiseSetSatellite: find_events method not in this target type.",terminal=True)
+            return
         risetime = settime = None
         t_from = self.CurrentTime() # Start now.
         t_to = TsDelta(t_from,dd=1) # Stop in 24hours time.
@@ -5432,6 +5468,7 @@ class target(attributemaster):
         t_to = TsDelta(t_from,dd=1) # Stop in 24hours time.
         self.Log("target.SatellitePasses: t_from",str(t_from),"t_to",str(t_to),terminal=False)
         if not hasattr(self.Handle,'find_events'): # This object doesn't support satellite pass calculations.
+            self.Log("Cannot calculate next pass times for this type of target(",self.Name,self.ObjectType,")",terminal=True)
             self.Log("target.SatellitePasses: find_events method not in this target type.",terminal=True)
             return
         times, events = self.Handle.find_events(self.HomeSiteTopos, t_from, t_to, 0.0) # What events occur above horizon in next 24 hours?
@@ -9922,6 +9959,14 @@ def ScanForMeteors(): # For menu
     
 # ------------------------------------------------------------------------------------------------------
 
+def MenuSatellitePasses():
+    """ Run the SatellitePasses method to list satellite passes in the next few days. """
+    if not hasattr(Session.Target.Handle,'find_events'):
+        print(textcolor.red('The current target (',Session.Target.Name,') does not support satellite pass calculations.'))
+        return
+    else:
+        Session.Target.SatellitePasses(window=144)
+
 # ------------------------------------------------------------------------------------------------------
 
 def ZipCommsLog():
@@ -10330,7 +10375,7 @@ def ChooseImageTypes():
         'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
         'dng':{'label':'DNG only', 'value':'dng', 'SaveJpg':False, 'SaveDng':True, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
         'jpgdng':{'label':'JPG & DNG', 'value':'jpgdng', 'SaveJpg':True, 'SaveDng':True, 'SaveFits':False, 'oslist':['buster'], 'handlers':['raspistill']},
-        'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera','pilomarfits']},
+        'jpg':{'label':'JPG only', 'value':'jpg', 'SaveJpg':True, 'SaveDng':False, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera']},
         'dng':{'label':'DNG only', 'value':'dng', 'SaveJpg':False, 'SaveDng':True, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera']},
         'jpgdng':{'label':'JPG & DNG', 'value':'jpgdng', 'SaveJpg':True, 'SaveDng':True, 'SaveFits':False, 'oslist':['bookworm'], 'handlers':['libcamera']},
         'fits':{'label':'FITS only', 'value':'fits', 'SaveJpg':False, 'SaveDng':False, 'SaveFits':True, 'oslist':['bookworm'], 'handlers':['pilomarfits']},
@@ -10419,9 +10464,9 @@ def ConfigMicrostepping(slewmicrosteps,observemicrosteps):
         
     # Set parameters.
     if slewmicrosteps != observemicrosteps:
-        Parameters.SlewMicrosteps = True # Allow SLEW moves to be faster than OBSERVE moves.
+        Parameters.SlewEnabled = True # Allow SLEW moves to be faster than OBSERVE moves.
     else:
-        Parameters.SlewMicrosteps = False # SLEW and OBSERVE moves use the same microstepping values.
+        Parameters.SlewEnabled = False # SLEW and OBSERVE moves use the same microstepping values.
     Parameters.AzimuthMicrostepRatio = observemicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
     Parameters.AzimuthSlewMicrostepRatio = slewmicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
     Parameters.AltitudeMicrostepRatio = observemicrosteps # 1 = Full steps, 2 = 1/2 steps, 4 = 1/4 steps, etc.
@@ -10563,6 +10608,8 @@ MiscMenuOptions = {
 MiscMenu = proceduremenu(MiscMenuOptions,'Miscellaneous tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
 DevMenuOptions = {
+    
+    'SatellitePasses':        {'label':'Satellite passes',           'call':MenuSatellitePasses},
     'LatestTrackingFilter':   {'label':'Set Latest Tracking filter', 'call':SelectLatestFilter},
     'TestLatestFilter':       {'label':'Test Latest Tracking filter','call':TestLatestFilter},
     'RecheckDisc':            {'label':'Check / remount storage',    'call':RecheckDisc},
