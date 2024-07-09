@@ -955,8 +955,7 @@ class steppermotor():
         self.LimitPosition = None # If given, this is the limit of movement. The telescope will reverse around this rather than cross it.
         self.RequestedPosition = None
         # Set up control pins for the motor.
-        # If we're using the same pins to drive multiple motors you may get some warnings from GPIO.
-        # If the program has been restarted in the same session, you may get some warnings from GPIO.
+        # If the program has been restarted in the same session, you may get some warnings from GPIO. Safe to ignore.
         self.StepBCM = None # Set pin to OUTPUT. This sends the MOVE pulse to the controller.
         self.DirectionBCM = None # Set pin to OUTPUT. This sets the MOVE direction to the controller.
         self.Mode0BCM = None # Set pin to OUTPUT. This controls FULL vs MICRO stepping for the controller.
@@ -964,11 +963,9 @@ class steppermotor():
         self.Mode2BCM = None # Set pin to OUTPUT. This controls FULL vs MICRO stepping for the controller.
         self.EnableBCM = None # Set pin to OUTPUT. This enables/disabled the motor.
         self.FaultBCM = None # Set pin to INPUT. Will EARTH when triggered.
-        # The following items just need allocating, the self.Reset() call will set the values.
         self.OnTarget = False # Indicates that the motor is on target. This will control Observable status.
         self.LatestTuneSteps = 0 # Record details of the last tune command received. So we can see it was handled.
         self.LatestTuneTime = None
-        # Latest Start/Stop times for config and status methods.
         self.OptimiseMoves = False # When set to TRUE the motor is allowed to take a short-cut if a requested move is > 50% of the circumference.
 
     def CheckOnTarget(self):
@@ -1290,7 +1287,7 @@ class steppermotor():
                 11 = TimeDelta.
                 12 = Delay between automatic status messages.
                 13 = FaultSensitive (stop if fault signal from driver).
-                14 = OptimiseMoves (allows unlimited full rotation).
+                14 = OptimiseMoves (allows unlimited full rotation). (NOTE: Prevents -ve angles being used!)
                 15 = LimitAngle (motor will not cross this angle) - under development.
                 16 = Gear ratio.
                 17 = Motor steps per revolution (1 revolution of motor).
@@ -1335,11 +1332,7 @@ class steppermotor():
                 self.RestAngle = float(lineitems[19])
             # Load mode signals to select full or microstepping ratio.
             temp = lineitems[20] + 'nnn'
-            #self.ModeSignals = [StringToBool(temp[0]),StringToBool(temp[1]),StringToBool(temp[2])]
             modesignals = [StringToBool(temp[0]),StringToBool(temp[1]),StringToBool(temp[2])]
-            #self.MicrosteppingMode0 = self.ModeSignals[0] # True or False
-            #self.MicrosteppingMode1 = self.ModeSignals[1]
-            #self.MicrosteppingMode2 = self.ModeSignals[2]
             self.MicrosteppingMode0 = modesignals[0] # True or False
             self.MicrosteppingMode1 = modesignals[1]
             self.MicrosteppingMode2 = modesignals[2]
@@ -1383,7 +1376,8 @@ class steppermotor():
             time.sleep(self.WaitTime)
             self.StepBCM.SetValue(False) # value(0)
             time.sleep(self.WaitTime)
-        self.CurrentPosition = (self.CurrentPosition + (self.StepDir * stepsize)) % self.AxisStepsPerRev
+        self.CurrentPosition = self.CurrentPosition + (self.StepDir * stepsize)
+        if self.OptimiseMoves: self.CurrentPosition = self.CurrentPosition % self.AxisStepsPerRev # Can wrap around.
         # Accelerate the motor.
         if self.WaitTime > self.FastTime: # We can still accelerate
             self.WaitTime = max(self.WaitTime - self.DeltaTime, self.FastTime)
