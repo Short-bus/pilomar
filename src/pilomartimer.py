@@ -139,6 +139,7 @@ class timer(): # 14 references.
     def Wait(self) -> bool:
         """ Wait for timer to expire. 
             The thread cannot do anything else while waiting for this. """
+        # NOTE: If you're expecting the clock to change out of DST, this may last longer than you think!
         while self.Due() == False:
             t = self.Remaining()
             if t > 0:

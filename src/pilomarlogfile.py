@@ -25,9 +25,17 @@ class logfile(): # 2 references.
         This writes to a disc file and flushes the write buffers as quickly as it can.
         It can also copy ERROR messages to any nominated error window object (which must support a 'Print()' method. )        """
 
-    __version__ = '0.1.0'
+    __version__ = '0.1.1'
 
-    def __init__(self,filename : str, clockoffset=None):
+    def __init__(self,filename : str, clockoffset=None, flush=False, append=True):
+        """ filename is the destination log file. 
+            clockoffset (seconds) is used by NowUTC() method to create offset timestamps. 
+            flush : False. Log file writes are flushed to disc efficiently and more slowly by the OS. 
+                           But there's a risk that you lose the last few messages in a catastrophic failure.
+                    True. Log file writes are immediately flushed to disc. Hits the SD card hard!
+                          But there's less risk of losing the last few messages if something bad happens.
+            append: True.  Existing log file is appended to.
+                    False. Fresh log file is started. """
         self.FileName = filename
         self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
         self.PrevLogTime = self.NowUTC()
@@ -37,6 +45,15 @@ class logfile(): # 2 references.
         # - If you change these lists, some messages may be ignored from file and displays.
         self.DetailFilter = ['u','f','d'] # Specify the detail levels that are recorded (user choices, flow, detail).
         self.LevelFilter = ['i','w','e'] # Specify which message types are recorded (info, warning, error).
+        self.FastFlush = False # If TRUE all writes to the log file are immediately flushed. Hits the SD card hard!
+        if os.path.exists(filename):
+            if append == True:
+                self.Log("logfile: Appending to existing",filename,terminal=False)
+            else:
+                os.remove(filename) # Remove previous filename.
+                self.Log("logfile: Overwriting previous",filename,terminal=False)
+        else:
+            self.Log("logfile: Starting new",filename,terminal=False)
 
     #def NowUTC(self) -> datetime: # Many references.
     #    """ Get system clock as UTC (timezone aware) 
@@ -104,8 +121,9 @@ class logfile(): # 2 references.
         if level[0] in self.LevelFilter and detail[0] in self.DetailFilter: # The filters pass the criteria for writing to disc.
             with open(self.FileName,'a') as f:
                 f.write(saveline + '\n')
-                f.flush() # Immediately flush to disc.
-                os.fsync(f) # Flush in the OS too!
+                if self.FastFlush: # Update the disc immediately.
+                    f.flush() # Immediately flush to disc.
+                    os.fsync(f) # Flush in the OS too!
         # Handle the display and user response.
         if level[0] == 'e': # Error
             if terminal: # We're allowed to display on the terminal.

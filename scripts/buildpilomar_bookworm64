@@ -1,24 +1,29 @@
 #!/bin/bash
 # ####################################################################
 # script: buildpilomar_bookworm64
-# Save as UNIX file.
 # 11.Feb.2024 / Rasbian bookworm 64bit only
+# 28.Feb.2024 / Log file location is more dynamically calculated.
 # ####################################################################
 
-export pilomarhome='/home/pi/pilomar'
+# Note where we start.
+export pilomarscriptdir=$PWD
+# Go up a level out of the /scripts folder.
+cd ..
+# Store this location as the project root.
+export pilomarhome=$PWD
 echo home directory is: $pilomarhome
-export pilomarlog='/home/pi/pilomar/log/buildpilomar_bookworm64.log'
+export pilomarlog=$PWD'/log/buildpilomar_bookworm64.log'
 echo build logfile is: $pilomarlog
 
 # list current packages and versions.
 echo Initial packages installed>>$pilomarlog
-echo - dpkg list:----------------------------------------------
+echo - dpkg list:>>$pilomarlog
 dpkg-query -l>>$pilomarlog
-echo - pip3 list:----------------------------------------------
+echo - pip3 list:>>$pilomarlog
 pip3 list>>$pilomarlog
-echo - apt list:-----------------------------------------------
+echo - apt list:>>$pilomarlog
 apt list --installed>>$pilomarlog
-echo ----------------------------------------------------------
+echo - Done>>$pilomarlog
 
 # Log start of the script (AFTER checking that the target directory exists)
 sudo chmod 777 $pilomarhome/log
@@ -26,7 +31,7 @@ echo $(date) buildpilomar script start >>$pilomarlog
 
 echo
 echo -e "==========================================================="
-echo -e "\E[36;40mGeneral update...\E[0m"
+echo -e "\E[36;40m$(date) General update...\E[0m"
 echo $(date) General update >>$pilomarlog
 # Update the application package directory.
 sudo apt-get update -y
@@ -35,27 +40,33 @@ sudo apt-get upgrade -y
 
 echo
 echo -e "==========================================================="
-echo -e "\E[36;40mSupport for skyfield...\E[0m"
+echo -e "\E[36;40m$(date) Support for skyfield...\E[0m"
 echo $(date) skyfield - YES >>$pilomarlog
 sudo apt install python3-skyfield
 
 echo
 echo -e "==========================================================="
-echo -e "\E[36;40mSupport for opencv...\E[0m"
+echo -e "\E[36;40m$(date) Support for opencv...\E[0m"
 echo $(date) opencv - YES >>$pilomarlog
 sudo apt install python3-opencv
 
 echo
 echo -e "==========================================================="
-echo -e "\E[36;40mSupport for astroalign...\E[0m"
+echo -e "\E[36;40m$(date) Support for astroalign...\E[0m"
 echo $(date) astroalign - YES >>$pilomarlog
 sudo apt install python3-astroalign
 
 echo
 echo -e "==========================================================="
-echo -e "\E[36;40mSupport for pandas...\E[0m"
+echo -e "\E[36;40m$(date) Support for pandas...\E[0m"
 echo $(date) pandas - YES >>$pilomarlog
 sudo apt install python3-pandas
+
+echo
+echo -e "==========================================================="
+echo -e "\E[36;40m$(date) Support for astropy...\E[0m"
+echo $(date) astropy - YES >>$pilomarlog
+sudo apt install python3-astropy
 
 
 echo
@@ -82,4 +93,5 @@ echo -e "***********************************************************************
 echo -e "\E[32;40m------------------------------\E[0m"
 echo -e "\E[32;40mBuild complete. Please reboot.\E[0m"
 echo -e "\E[32;40m------------------------------\E[0m"
+echo $(date) 
 exit

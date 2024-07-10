@@ -1,3 +1,10 @@
+#!/bin/bash
+# ####################################################################
+# script: zip-pilomar
+#    Create a backup .zip file of the pilomar software.
+# Save as UNIX file.
+# ####################################################################
+
 cd /home/pi
 rm pilomar.zip 
 zip pilomar.zip pilomar
@@ -10,6 +17,8 @@ zip pilomar.zip pilomar/data/messierobjects.json
 zip pilomar.zip pilomar/data/meteors.json
 zip pilomar.zip pilomar/scripts
 zip pilomar.zip pilomar/scripts/buildpilomar
+zip pilomar.zip pilomar/scripts/buildpilomar_bookworm64
+zip pilomar.zip pilomar/scripts/buildpilomar_buster32
 zip pilomar.zip pilomar/scripts/zip-pilomar
 zip pilomar.zip pilomar/fonts
 zip pilomar.zip pilomar/fonts/Asap
@@ -25,12 +34,15 @@ zip pilomar.zip pilomar/fonts/Asap/Asap-BoldItalic.ttf
 zip pilomar.zip pilomar/circuitpython
 zip pilomar.zip pilomar/circuitpython/code.py
 zip pilomar.zip pilomar/src
-zip pilomar.zip pilomar/src/pilomar
 zip pilomar.zip pilomar/src/pilomar.py
-zip pilomar.zip pilomar/src/pilomarcelestrak.py
-zip pilomar.zip pilomar/src/pilomardisc.py
-zip pilomar.zip pilomar/src/pilomarimage.py
 zip pilomar.zip pilomar/src/pilomarlogfile.py
-zip pilomar.zip pilomar/src/pilomaroscommand.py
+zip pilomar.zip pilomar/src/pilomarcamera.py
 zip pilomar.zip pilomar/src/pilomartimer.py
+zip pilomar.zip pilomar/src/pilomardisc.py
+zip pilomar.zip pilomar/src/pilomaroscommand.py
+zip pilomar.zip pilomar/src/pilomarcelestrak.py
+zip pilomar.zip pilomar/src/pilomarimage.py
+zip pilomar.zip pilomar/src/pilomargpio.py
+zip pilomar.zip pilomar/src/pilomarfits.py
 zip pilomar.zip pilomar/src/textcolor.py
+zip pilomar.zip pilomar/src/pilomar

@@ -87,12 +87,23 @@ class celestrak():
         self.LoadCache(self.CelestrakCacheFileName) # Try to load from disc if recent enough.
         if self.TLEDict == {}: # Empty, get a fresh copy.
             if self.Log != None: self.Log("celestrak.Refresh: Download fresh from internet.",terminal=False)
-            self.DownloadData()
+            if self.DownloadData():
+                if self.Log != None: self.Log("celestrak.Refresh: Successful.",terminal=False)
+            else:
+                if self.Log != None: self.Log("celestrak.Refresh: Failed to download from internet, using cache anyway.",terminal=False)
+                else: print("celestrak.Refresh: Failed to download from internet. Using cache anyway.")
+                self.LoadCache(self.CelestrakCacheFileName,force=True) # Load the cache regardless of age.
         else:
-            if self.Log != None: self.Log("celestrak.Refresh: Used cached data instead of downloading from internet.",terminal=False)
+            if self.Log != None: 
+                self.Log("celestrak.Refresh: Used cached data instead of downloading from internet.",terminal=False)
         self.SatelliteList = [] # Make new list of satellite names.
         for key,value in self.TLEDict.items():
             self.SatelliteList.append(key)
+        if len(self.SatelliteList) < 1: # The list is empty, something went wrong.
+            if self.Log != None:
+                self.Log("celestrak.Refresh: Failed to identify any satellies.",level='error')
+            else:
+                print("celestrak.Refresh: Failed to identify any satellies.")
         if self.Log != None:     
             self.Log("celestrak.Refresh: Satellites:", self.SatelliteList, terminal=False)
             self.Log("celestrak.Refresh: done",terminal=False)
@@ -125,14 +136,16 @@ class celestrak():
             result = None
         return result
 
-    def LoadCache(self,filename):
-        """ Load a single cache if available and recent enough. """
+    def LoadCache(self,filename,force=False):
+        """ Load a single cache if available and recent enough.
+            force=False: A blank dictionary is returned if the cache is too old.
+            force=True: Dictionary is returned from cache regardless of age. """
         if os.path.exists(filename):
             fa = self.FileAge(filename)
             self.Log("celestrak.LoadCache:",filename,"is",self.HRSeconds(fa),"old",terminal=False)
-            if fa < (5 * 24 * 60 * 60): # Only use the cache if less than 5 days old.
+            if force or fa < (5 * 24 * 60 * 60): # Only use the cache if less than 5 days old.
                 with open(filename,'r') as f:
-                    self.Log("celestrak.LoadCache: Loading Cache: " + filename,terminal=False)
+                    self.Log("celestrak.LoadCache: Loading Cache:",filename,"force",force,terminal=False)
                     self.TLEDict = json.load(f)
         else:
             if self.Log != None: self.Log("celestrak.LoadCache:",filename,"cache does not exist.",terminal=False)

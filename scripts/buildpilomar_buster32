@@ -1,11 +1,16 @@
 #!/bin/bash
 # ####################################################################
-# script: buildpilomar
-# Save as UNIX file.
+# script: buildpilomar_buster32
 # 18.Aug.2022 / Rasbian Buster 32bit only
+# 30.Jun.2024 / Script now adapts to different RPi user names.
+#               (Thanks @unhuzpt)
 # ####################################################################
 
-export pilomarhome='/home/pi/pilomar'
+#Get current user
+username=$(whoami)
+#use current user
+export pilomarhome='/home/${username}/pilomar'
+#export pilomarhome='/home/pi/pilomar'
 echo home directory is: $pilomarhome
 
 # list current packages and versions.
