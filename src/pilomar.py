@@ -2199,7 +2199,7 @@ FolderHandler = folderhandler(projectroot=ProjectRoot,logger=MainLog) # Create F
 # Arducam50mm
 #    Lens Length = 50.0 # Official lens focal length.
 #    Lens horizontal field of view 7.0 degrees.
-#    Lens vertical field of view 2.0 degrees.
+#    Lens vertical field of view 5.2 degrees.
 # Sensor image width 4056 pixels
 # Sensor image height 3040 pixels
 LensInUse = astrolens(length=Parameters.LensLength, 
@@ -10265,10 +10265,14 @@ def AboutCamera():
 
     print(textcolor.white(" Lens"))
     print("  Base focal length:",LensInUse.BaseLength,"mm (before converters)")
-    print("  Focal length:",LensInUse.Length,"mm (including converters)")
+    print("  Focal length:",LensInUse.Length,"mm (including converters) ",
+          textcolor.blue("(Param:",Parameters.LensLength,"mm)"))
     print("  35mm equivalent focal length:",LensInUse.EquivLength,"mm")
-    print("  Horizontal Field of View:",LensInUse.FovHorizontal,DegreeSymbol)
-    print("  Vertical Field of View:",LensInUse.FovVertical,DegreeSymbol)
+    print("  Horizontal Field of View:",LensInUse.FovHorizontal,DegreeSymbol,
+          textcolor.blue("(Param:",Parameters.LensHorizontalFov,DegreeSymbol,")"))
+    print("  Vertical Field of View:",LensInUse.FovVertical,DegreeSymbol,
+              textcolor.blue("(Param:",Parameters.LensVerticalFov,DegreeSymbol,")"))
+
     print("  Field of View:",LensInUse.Fov,DegreeSymbol)
     print("  Aperture:","f",LensInUse.Aperture)
     print("    Information only.")
@@ -10559,6 +10563,33 @@ MotorMenuOptions = {
 }
 MotorMenu = proceduremenu(MotorMenuOptions,'Motor tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
+def Lens16mm(): 
+    """ Set 16mm lens parameters. """    
+    MainLog.Log("Lens16mm: 16mm lens selected.",terminal=True)
+    Parameters.LensLength = 16.0
+    Parameters.LensHorizontalFov = 21.8
+    Parameters.LensVerticalFov = 16.4
+    # Flag restart required. The camera objects need to be renewed.
+    Parameters.RequireRestart = True # Flag that the parameters are nolonger safe until the program is restarted.
+    RestartRequired() # Warn the user that the software now needs to be restarted.
+    
+def Lens50mm(): 
+    """ Set 50mm lens parameters. """    
+    MainLog.Log("Lens50mm: 50mm lens selected.",terminal=True)
+    Parameters.LensLength = 50.0
+    Parameters.LensHorizontalFov = 7.0
+    Parameters.LensVerticalFov = 5.2
+    # Flag restart required. The camera objects need to be renewed.
+    Parameters.RequireRestart = True # Flag that the parameters are nolonger safe until the program is restarted.
+    RestartRequired() # Warn the user that the software now needs to be restarted.
+
+LensOptions = {
+    '16mm': {'label':'16mm', 'call':Lens16mm},
+    '50mm': {'label':'50mm', 'call':Lens50mm}
+    }
+    
+LensMenu = proceduremenu(LensOptions,'Lens options',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
+    
 CameraMenuOptions = {
     'AboutCamera':               {'label':'About camera',               'call':AboutCamera},
     'ChooseImageTypes':          {'label':'Choose image types',         'call':ChooseImageTypes},
@@ -10568,6 +10599,7 @@ CameraMenuOptions = {
     'SensorCleanupOff':          {'label':'Sensor cleanup off',         'call':DisableCleanup},
     'SensorCleanupOn':           {'label':'Sensor cleanup on',          'call':EnableCleanup},
     'AutoDetectCamera':          {'label':'Auto detect camera',         'call':AutoDetectCamera},
+    'ChooseLens':                {'label':'Choose lens',                'call':LensMenu},
     'CalibrateFov':              {'label':'Calibrate FoV',              'call':CalibrateFovMenu},
     'ProcessImageFiles':         {'label':'Process image files',        'call':ProcessImageFiles},
     'BuildKeogram':              {'label':'Build keogram',              'call':BuildKeogram},
