@@ -48,6 +48,7 @@
 #        sudo apt install python3-astropy
 # -------------------------------------------------------------------------------------------------------------------
 
+VERSION = "0.1.0"
 
 import os
 os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Report errors only.
@@ -187,9 +188,12 @@ picam2.start()
 time.sleep(2) # Wait for control propogation.
 # Extract bayer data from the sensor.
 CaptureStartTime = NowUTC() # When did capture begin?
-rawarray12 = picam2.capture_array('raw')
+CameraRequest = picam2.capture_request()
+rawarray12 = CameraRequest.make_array('raw')
+RequestMetadata = CameraRequest.get_metadata()
 CaptureEndTime = NowUTC() # When did capture complete?
 data32 = rawarray12.view(np.uint16).astype(np.float32) # Unpack from 12bit to 16bit. Result is left shifted 4 bits.
+CameraRequest.release() # Release the camera buffers, otherwise we may run out of memory.
 data32 = data32 / (2 ** 4) # Scale back down to 12 bit.
 
 # Create FITS image file.
@@ -214,14 +218,12 @@ JpgStartTime = NowUTC() # When did jpg save start?
 cv2.imwrite(jpgfilename,colour,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
 JpgEndTime = NowUTC() # When did jpg save end?
 
-# Finally write metadata is needed.
+# Finally write metadata if needed.
 MetaStartTime = NowUTC() # When did metadata save start?
 if '--metadata' in ArgumentDict: # Extract and save metadata.
-    MetaControls = ControlsToApply.copy()
-    MetaControls['ExposureTime'] = 5000 # Short exposure time for MetaData
-    picam2.set_controls(MetaControls)
-    time.sleep(2) # Wait for control propogation.
-    metadata = picam2.capture_metadata() # This will double overall execution time.
+    metadata = RequestMetadata
+    metadata['program'] = sys.argv[0] # Program name.
+    metadata['pilomarfits_version'] = VERSION
     metadata['pilomar_set_controls'] = ControlsToApply
     metadata['pilomar_runtime_args'] = ArgumentDict
     metadata['pilomar_control_dict'] = ControlDict
@@ -229,16 +231,13 @@ if '--metadata' in ArgumentDict: # Extract and save metadata.
     metadata['fitsfilename'] = fitsfilename
     metadata['jsonfilename'] = jsonfilename
     metadata['StartupTime'] = StartupTime # When did program start?
-    metadata['CaptureStartTime'] = CaptureStartTime # When did capture begin?
-    metadata['CaptureEndTime'] = CaptureEndTime # When did capture complete?
-    metadata['RawSaveStartTime'] = RawSaveStartTime # When did FITS file generatio
-    metadata['RawSaveEndTime'] = RawSaveEndTime # When did FITS file generation 
-    metadata['BayerStartTime'] = BayerStartTime # When did debayer start?
-    metadata['BayerEndTime'] = BayerEndTime # When did debayer end?
-    metadata['JpgStartTime'] = JpgStartTime # When did jpg save start?
-    metadata['JpgEndTime'] = JpgEndTime # When did jpg save end?
-    metadata['MetaStartTime'] = MetaStartTime # When did metadata generation start?
-    metadata['MetaEndTime'] = NowUTC() # When did metadata generation end?
+    metadata['CaptureDuration'] = (CaptureEndTime - CaptureStartTime).total_seconds() # How long did capture take?
+    metadata['RawSaveDuration'] = (RawSaveEndTime - RawSaveStartTime).total_seconds() # How long did FITS file generation take?
+    metadata['BayerDuration'] = (BayerEndTime - BayerStartTime).total_seconds() # How long did debayer take?
+    metadata['JpgDuration'] = (JpgEndTime - JpgStartTime).total_seconds() # How long did jpg save take?
+    temp = NowUTC()
+    metadata['ProcessDuration'] = (temp - StartupTime).total_seconds() # How long did the entire process take up to here?
+    metadata['CompletionTime'] = temp # When did generation end?
     with open(jsonfilename,'w') as f: # Dump as json to disc.
         json.dump(metadata,f,indent=4,default=str) # Save the updated dictionary back to disc.
 
