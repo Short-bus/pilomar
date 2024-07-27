@@ -1,0 +1,14 @@
+astroalign
+astropy
+gpiod
+numpy
+pandas
+picamera2
+pidng
+Pillow
+pyserial
+pytz
+Requests
+sep
+skyfield
+opencv-python

@@ -9,7 +9,7 @@
 #Get current user
 username=$(whoami)
 #use current user
-export pilomarhome='/home/${username}/pilomar'
+export pilomarhome=/home/${username}/pilomar
 #export pilomarhome='/home/pi/pilomar'
 echo home directory is: $pilomarhome
 
@@ -42,7 +42,7 @@ echo ----------------------------------------------------------
 # $pilomarhome/scripts/isdirectory $pilomarhome/temp
 
 # Log start of the script (AFTER checking that the target directory exists)
-sudo chmod 777 $pilomarhome/log
+sudo chmod a+rw $pilomarhome/log
 echo $(date) buildpilomar script start >>$pilomarhome/log/buildpilomar
 
 echo

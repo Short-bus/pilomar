@@ -158,7 +158,7 @@ from textcolor import proceduremenu, optionmenu # Basic menu handlers.
 from textcolor import listchooser # Allow user to filter through a list of names.
 import numpy as np # Fast array handling
 import pandas # Dataframe handling.
-import sep # This is used by astroalign, it is only imported here to flush out any problems with the package. (It has suffered from the classic 'numpy.ndarray size changed' in the past.)
+# import sep # This is used by astroalign, it is only imported here to flush out any problems with the package. (It has suffered from the classic 'numpy.ndarray size changed' in the past.)
 import threading # Run the image capture in a separate thread so that motor movement can continue. *Q* Drift calculation and targetting could also move to separate thread.
 from queue import Queue # Use queue mechanism to communicate between ObservationRun and Camera threads because they run in parallel.
 import pilomargpio # GPIO wrappers to support different GPIO libraries.
@@ -173,7 +173,7 @@ elif pilomargpio.GPIO_DRIVER == 'GPIOD': # Bookworm GPIOD handlers needed for IO
     outputpin = pilomargpio.outputpin_gpiod
     GPIOCleanup = pilomargpio.cleanup_gpiod
 else:
-    raise Exception("Could not identify a suitable GPIO driver for this installation.")
+    raise ImportError ("Could not identify a suitable GPIO driver for this installation.")
 
 # ------------------------------------------------------------------------------------------------------
 
@@ -192,9 +192,9 @@ def FirstWarningFlag(flagname):
     """ Given a flag name, return True if this is the first time it's been triggered.
         This is used to prevent warning messages repeating when a condition is triggered.
         Using this mechanism we know that the warning is already issued, so don't repeat it. """
-    result = WarningFlags.get(flagname,False)
-    if not result: WarningFlags[flagname] = True # 1st occurrence, so flag it as such. 
-    return result
+    res = WarningFlags.get(flagname,False)
+    if not res: WarningFlags[flagname] = True # 1st occurrence, so flag it as such. 
+    return res
     
 def ResetWarningFlag(flagname):
     """ Given a flag name, reset it to False.
@@ -10741,4 +10741,3 @@ Parameters.SaveAttributes(Parameters.ParamFileName) # Write current operating pa
 print (textcolor.yellow("Done."))
 print (textcolor.fgbgcolor(textcolor.BLACK,textcolor.GREEN," PILOMAR COMPLETE. OK TO SHUTDOWN "))
 MainLog.Log("MAIN: PROGRAM COMPLETE",terminal=False)
-

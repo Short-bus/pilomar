@@ -21,15 +21,19 @@ try:
     import RPi.GPIO as GPIO # Handling IO signals. If available.
     GPIO.setmode(GPIO.BCM)
     GPIO_DRIVER = "GPIO"
-except: 
+except:
     pass
 
 try:
     import gpiod # Handling IO signals. If available.
-    GPIOchip = gpiod.Chip('gpiochip4')        
+    GPIOchip = gpiod.Chip('/dev/gpiochip0')        
     GPIO_DRIVER = "GPIOD"
+    print("Using GPIOD")
 except:
+    print("No GPIO driver available.")
     pass
+
+from typing import List
 
 def cleanup_gpio():
     """ Perform cleanup at end of session. """
@@ -282,7 +286,6 @@ class inputpin_gpiod():
             it behaves as a GPIO input, but doesn't actually link to a GPIO port and always returns the PULL UP/DOWN value. """
         self.Pin = pinbcm # The BCM number of the pin.
         self.Name = name # A reference name of the pin.
-        self.Line = GPIOchip.get_line(pinbcm) # Grab the IO line for this input.
         self.Pull = pull # Is this a PULL_UP or PULL_DOWN input.
         self.Invert = invert # IsOn/IsOff methods invert their value. IsHigh/IsLow remain unchanged.
         if self.Pin != None: self.Enabled = enabled
@@ -291,15 +294,20 @@ class inputpin_gpiod():
         if pull == 'up': self.State = True # Initial state HIGH.
         else: self.State = False # Initial state LOW.
         # If it's a real pin, set it up through GPIO.
+        
         if self.Pin != None: 
-            if pull == 'up': 
-                self.Line.request(consumer=self.Name, 
-                                   type=gpiod.LINE_REQ_DIR_IN, 
-                                   flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP) # Will EARTH when triggered.
+            if pull == 'up':
+                config={
+                    pinbcm: gpiod.LineSettings(direction=gpiod.line.Direction.INPUT,
+                                                  bias=gpiod.line.Bias.PULL_UP)
+                }
+                self.Line = GPIOchip.request_lines(config) # Will EARTH when triggered.
             else: 
-                self.Line.request(consumer=self.Name, 
-                                   type=gpiod.LINE_REQ_DIR_IN, 
-                                   flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_DOWN) # Will go HIGH when triggered.
+                config={
+                    pinbcm: gpiod.LineSettings(direction=gpiod.line.Direction.INPUT,
+                                                  bias=gpiod.line.Bias.PULL_DOWN)
+                }
+                self.Line = GPIOchip.request_lines(config) # Will go HIGH when triggered.
         # Append to the global list of all input pins.
         inputpin_gpiod.InputPins.append(self) # Add to list of input pins.
         
@@ -310,7 +318,7 @@ class inputpin_gpiod():
             DISABLED pins always return False (electrical LOW).
             If you want the logical state of the pin after this use IsOn() and IsOff() methods.
             If you want the physical state of the pin after this use IsHigh() and IsLow() methods. """
-        if self.Enabled and self.Line.get_value() != 0: self.State = True # High
+        if self.Enabled and self.Line.get_value(self.Pin) != 0: self.State = True # High
         else: self.State = False # Low
         
     def IsHigh(self):
@@ -392,7 +400,7 @@ class outputpin_gpiod():
         """ Release all defined pins. """
         for pin in outputpin_gpiod.OutputPins:
             try:
-                pin.release()
+                pin.Line.release()
             except Exception as e:
                 MainLog.Log("outputpin_gpiod.ReleaseAll(): Failed to release pin:",e,level='error')
     
@@ -408,8 +416,10 @@ class outputpin_gpiod():
         self.Name = name
         self.State = state
         self.Invert = invert
-        self.Line = GPIOchip.get_line(self.Pin) # Allocate the line.
-        self.Line.request(consumer=name, type=gpiod.LINE_REQ_DIR_OUT) # Define a consumer for the line.
+        config = {pinbcm: gpiod.LineSettings(
+            direction=gpiod.line.Direction.OUTPUT)
+                  }
+        self.Line = GPIOchip.request_lines(config) # Will EARTH when triggered.
         outputpin_gpiod.OutputPins.append(self) # Add this output to the list of defined pins.
         self.Refresh()
     
@@ -423,9 +433,9 @@ class outputpin_gpiod():
         
     def Refresh(self):
         if self.Enabled and self.State:
-            self.Line.set_value(1) # High
+            self.Line.set_value(self.Pin, gpiod.line.Value.ACTIVE) # High
         else:
-            self.Line.set_value(0) # Low
+            self.Line.set_value(self.Pin, gpiod.line.Value.INACTIVE) # Low
             
     def IsOn(self):
         """ Return ON/OFF state of the input, respecting the 'invert' flag.
@@ -460,7 +470,7 @@ class outputpin_gpiod():
             The true electrical state of the pin. 
             Does not respect self.Invert flag. 
             To respect self.Invert, use IsOn()/IsOff() """
-        if self.Line.get_value() != 0: result = True # The true electrical state of the pin.            
+        if self.Line.get_value(self.Pin) != 0: result = True # The true electrical state of the pin.            
         #if GPIO.input(self.Pin) != 0: result = True # The true electrical state of the pin.
         else: result = False
         return result
@@ -470,7 +480,7 @@ class outputpin_gpiod():
             The true electrical state of the pin. 
             Does not respect self.Invert flag.
             To respect self.Invert, use IsOn()/IsOff() """
-        if self.Line.get_value() != 0: result = False # The true electrical state of the pin.            
+        if self.Line.get_value(self.Pin) != 0: result = False # The true electrical state of the pin.            
         #if GPIO.input(self.Pin) != 0: result = False # The true electrical state of the pin.
         else: result = True
         return result

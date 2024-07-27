@@ -27,7 +27,7 @@ class logfile(): # 2 references.
 
     __version__ = '0.1.1'
 
-    def __init__(self,filename : str, clockoffset=None, flush=False, append=True):
+    def __init__(self, filename: str, clockoffset=None, flush=False, append=True):
         """ filename is the destination log file. 
             clockoffset (seconds) is used by NowUTC() method to create offset timestamps. 
             flush : False. Log file writes are flushed to disc efficiently and more slowly by the OS. 
