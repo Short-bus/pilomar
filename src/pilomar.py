@@ -2908,7 +2908,7 @@ def InitiateMctl():
     MainLog.Log('Establishing serial UART communication with microcontroller...',terminal=False)
     mctl = None
     try:
-        if RPiNum in ['3','4']:
+        if RPiNum in ['3','4','Compute']:
             mctl = microcontroller(port='/dev/serial0',
                                    resetpin=Parameters.MctlResetPin,
                                    boardtype=Parameters.BoardType,
