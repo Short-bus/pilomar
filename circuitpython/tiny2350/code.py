@@ -83,7 +83,7 @@ if 'pimoroni_tiny' in board.board_id: # We have a Pimoroni Tiny family microcont
     FEATURES.append('TINY')
 elif 'raspberry_pi_pico' in board.board_id: # We have a Raspberry Pi Pico family microcontroller.
     FEATURES.append('PICO')
-FEATURES.append('VMOT') # This turns the free ADC0 pin on the Tiny into a measure of the motor power voltage.
+# FEATURES.append('VMOT') # This turns the free ADC0 pin on the Tiny into a measure of the motor power voltage.
 
 print("FEATURES:",FEATURES)
 
