@@ -767,6 +767,7 @@ def RPiModel():
     for line in lines:
         if len(line) > 0: rpimodel = line
     rpimodel = rpimodel.replace('Raspberry Pi ','RPi ')
+    rpimodel = rpimodel.replace('Compute Module ','CM')
     rpimodel = rpimodel.replace('Model ','')
     rpimodel = rpimodel.replace('Rev ','')
     # Remove non printing characters.
@@ -784,7 +785,7 @@ OS_id, OS_name, OS_type, OS_bits, OS_processor = OSVersion()
 OS_systemkey = RPiNum + "/" + OS_name + "/" + str(OS_bits)
 MainLog.Log("RPi: Model:",RPIMODEL,"Num:",RPiNum,"OStype:",OS_type,"OSid:",OS_id,"OSname:",OS_name,"OSbits:",OS_bits,"OSproc:",OS_processor,"SysKey:",OS_systemkey,terminal=True)
 RASPISTILL_SYSTEMS = ['wheezy','jessie','stretch','buster'] # These all came with raspistill for camera support.
-SUPPORTED_SYSTEMS = ['3/buster/32','4/buster/32','4/bookworm/64','5/bookworm/64'] # The software is designed to run under these hardware/os combinations.
+SUPPORTED_SYSTEMS = ['3/buster/32','4/buster/32','4/bookworm/64','CM4/bookworm/64','5/bookworm/64'] # The software is designed to run under these hardware/os combinations.
 if OS_name in RASPISTILL_SYSTEMS: CameraDriver = 'raspistill'
 else: CameraDriver = 'libcamera' # 'bullseye' and 'bookworm' come with libcamera installed.
 MainLog.Log(OS_name,"O/S found, assuming camera driver is",CameraDriver,terminal=False)
@@ -2908,7 +2909,7 @@ def InitiateMctl():
     MainLog.Log('Establishing serial UART communication with microcontroller...',terminal=False)
     mctl = None
     try:
-        if RPiNum in ['3','4']:
+        if RPiNum in ['3','4','CM4']:
             mctl = microcontroller(port='/dev/serial0',
                                    resetpin=Parameters.MctlResetPin,
                                    boardtype=Parameters.BoardType,
