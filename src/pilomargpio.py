@@ -21,15 +21,20 @@ try:
     import RPi.GPIO as GPIO # Handling IO signals. If available.
     GPIO.setmode(GPIO.BCM)
     GPIO_DRIVER = "GPIO"
-except: 
+except: # No support for RPi.GPIO detected.
     pass
 
 try:
     import gpiod # Handling IO signals. If available.
-    GPIOchip = gpiod.Chip('gpiochip4')        
     GPIO_DRIVER = "GPIOD"
-except:
+except: # No support for GPIOD detected.
     pass
+
+if GPIO_DRIVER == 'GPIOD': # Select the GPIO handling chip.
+    try:
+        GPIOchip = gpiod.Chip('gpiochip4') # In very early RPi5 Bookworm builds the GPIO chip is 'gpiochip4'.
+    except:
+        GPIOchip = gpiod.Chip('gpiochip0') # In later RPi5 Bookworm builds the GPIO chip is 'gpiochip0'.
 
 def cleanup_gpio():
     """ Perform cleanup at end of session. """
