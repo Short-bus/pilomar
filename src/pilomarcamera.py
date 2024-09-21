@@ -31,6 +31,33 @@ import numpy as np # Fast array handling
 
 # ------------------------------------------------------------------------------------------------------
 
+def AskYesNo(text,default=True,fg=None,bg=None):
+    """ Ask any question that needs a simple Y/N answer.
+        Returns logical value ('yes' returns True, 'no' returns False)
+        Returns default value if user just presses ENTER. 
+        Ignores 2nd and subsequent characters.
+        Rejects all other input. """
+    while True: # Loop until a satisfactory answer is given.
+        if fg is None: # Use default color.
+            temp = input(textcolor.cyan(text.strip() + " ")) # Ensure 1 character space between text and response cursor.
+        else:
+            temp = input(textcolor.fgbgcolor(fg,bg,text.strip() + " "))
+        if len(temp) == 0:
+            result = default
+            break
+        elif temp.lower()[0] in ["n"]: # NO recognised.
+            result = False
+            break
+        elif temp.lower()[0] in ["y"]: # YES recognised.
+            result = True
+            break
+        print(textcolor.red("? " + str(temp) + " ?"))
+        if default: print (textcolor.red("Please answer yes, no or [ENTER]=(YES)"))
+        else: print (textcolor.red("Please answer yes, no or [ENTER]=(NO)"))
+    return result
+
+# ------------------------------------------------------------------------------------------------------
+
 class astrolens():
     """ Object representing the LENS being used by the telescope. 
         Contains some attributes which are used to convert between FIELD OF VIEW and PHOTO DIMENSIONS for example. """
