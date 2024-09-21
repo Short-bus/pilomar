@@ -8096,7 +8096,7 @@ def AutoPreview():
     CameraInUse.SetImageType('auto')
     # raspistill -o {&output} -ex off -t 10 -n -q 100 -md {&mode} -w {&width} -h {&height} -ag 16.0 -ss {&shutter}
     # libcamera-still --output {&output} --timeout 10 --nopreview --quality 100 --width {&width} --height {&height} --denoise off --analoggain 16.0 --shutter {&shutter}
-    CameraCommand = Parameters.CameraAutoCommand
+    CameraCommand = Parameters._CameraAutoCommand
     # CaptureSet will automatically set mode,width and height parameters if they are in the command line.
     MainLog.Log("AutoPreview: Capturing image...",terminal=True)
     result = CameraInUse.CaptureSet(file_root=FileRoot,batch_size=1,camera_command=CameraCommand,terminal=False)
