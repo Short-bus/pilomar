@@ -33,7 +33,7 @@ import numpy as np # Fast array handling
 
 def AskYesNo(text,default=True,fg=None,bg=None):
     """ Ask any question that needs a simple Y/N answer.
-        Returns logical value ('yes' or 'true' returns True, 'no' or 'false' returns False)
+        Returns logical value ('yes' returns True, 'no' returns False)
         Returns default value if user just presses ENTER. 
         Ignores 2nd and subsequent characters.
         Rejects all other input. """
@@ -45,10 +45,10 @@ def AskYesNo(text,default=True,fg=None,bg=None):
         if len(temp) == 0:
             result = default
             break
-        elif temp.lower()[0] in ["n"]: # FALSE and NO recognised.
+        elif temp.lower()[0] in ["n"]: # NO recognised.
             result = False
             break
-        elif temp.lower()[0] in ["y"]: # TRUE and YES recognised.
+        elif temp.lower()[0] in ["y"]: # YES recognised.
             result = True
             break
         print(textcolor.red("? " + str(temp) + " ?"))
