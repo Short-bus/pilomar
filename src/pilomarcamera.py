@@ -21,19 +21,26 @@ import os # OS Command execution.
 import math # Math and trig functions. 
 import random # random number generator.
 import cv2 # openCV for image file handling.  
+import json 
 from datetime import datetime, timedelta, timezone
 from pilomartimer import timer,progresstimer # Pilomar's timer classes.
 from pilomaroscommand import oscommand # Pilomar's OS command executor.
 from pilomarimage import pilomarimage,pilomarkeogram # Pilomar's IMAGE BUFFER handler (combines numpy, OpenCV and pilomar specific routines)
 from textcolor import textcolor # Basic colour and cursor control codes for terminal displays.
+from textcolor import keyboardscanner # Simple non-blocking keyboard scanner.
 #from pidng.core import RPICAM2DNG # DNG data extraction from RPi camera RAW images. From https://github.com/schoolpost/pidng Needs to be 3.4.6 version. Later versions are not compatible.
 import numpy as np # Fast array handling
+try:
+    # If picamera2 doesn't exist, don't worry, but the camera_util() class will not be available.
+    from picamera2 import Picamera2, Preview
+except:
+    pass
 
 # ------------------------------------------------------------------------------------------------------
 
 def AskYesNo(text,default=True,fg=None,bg=None):
     """ Ask any question that needs a simple Y/N answer.
-        Returns logical value ('yes' returns True, 'no' returns False)
+        Returns logical value ('yes' or 'true' returns True, 'no' or 'false' returns False)
         Returns default value if user just presses ENTER. 
         Ignores 2nd and subsequent characters.
         Rejects all other input. """
@@ -45,10 +52,10 @@ def AskYesNo(text,default=True,fg=None,bg=None):
         if len(temp) == 0:
             result = default
             break
-        elif temp.lower()[0] in ["n"]: # NO recognised.
+        elif temp.lower()[0] in ["n"]: # FALSE and NO recognised.
             result = False
             break
-        elif temp.lower()[0] in ["y"]: # YES recognised.
+        elif temp.lower()[0] in ["y"]: # TRUE and YES recognised.
             result = True
             break
         print(textcolor.red("? " + str(temp) + " ?"))
@@ -64,7 +71,7 @@ class astrolens():
         
     LensList = [] # List of declared lenses. 
     
-    def __init__(self,length,horizontal_fov,vertical_fov,aperture=2.8,logger=None,parameters=None):
+    def __init__(self,length,horizontal_fov,vertical_fov,aperture=2.8,multiplier=5.6,logger=None,parameters=None):
         self.SetLogger(logger) # CamLog # Handle to the class that handles logging and error tracing.
         self.oscommand = oscommand(logger=logger.Log) # Create OS command executor.
         self.osCmd = self.oscommand.Execute
@@ -73,12 +80,14 @@ class astrolens():
         self.Parameters = parameters # Must define parameter file before using instance.
         self.BaseLength = length # The length of the lense WITHOUT any multiplier effect.
         self.Length = length # 'focal length' of the lens.
-        self.EquivLength = self.Length * 5.6 # From https://www.seeedstudio.com/blog/2020/06/18/a-complete-guide-to-help-you-choose-lenses-for-your-raspberry-pi-high-quality-camera-m/ 35mm equivalent focal length (?) (AKA the Crop Factor for the sensor?
+        self.EquivMultiplier = multiplier
+        # EquivLength multiplier depends upon the sensor, 5.6 is for the IMX477 
+        self.EquivLength = self.Length * self.EquivMultiplier # From https://www.seeedstudio.com/blog/2020/06/18/a-complete-guide-to-help-you-choose-lenses-for-your-raspberry-pi-high-quality-camera-m/ 35mm equivalent focal length (?) (AKA the Crop Factor for the sensor?
         self.FovHorizontal = horizontal_fov
         self.FovVertical = vertical_fov
         self.Fov = min(self.FovHorizontal, self.FovVertical) # When calculating the FOV for a survey, use the smaller value.
         self.Aperture = aperture # FStop of the lens. *Q* Multiplier will impact this too. Hmm...
-        self.ID = str(self.Length) + "|" + str(self.FovHorizontal) + "|" + str(self.FovVertical) # Unique ID of lens features.
+        #self.ID = str(self.Length) + "|" + str(self.FovHorizontal) + "|" + str(self.FovVertical) # Unique ID of lens features.
         self.Log("AstroLens: Length:",str(self.Length),"mm (equiv.",str(self.EquivLength),"mm) FoV:",
                  str(self.FovHorizontal),"deg","*",str(self.FovVertical),"deg",terminal=False)
         astrolens.LensList.append(self) # Add this instance to the global list of all defined lenses.
@@ -253,7 +262,7 @@ class astrosensor():
             self.PixelHeight=3040
             self.MaxExposureSeconds=200 # 200 seconds is the longest exposure time that raspistill can deliver.
             self.MinExposureSeconds=1e-6 # 1 microsecond is the fastest exposure time that raspistill can deliver.
-        self.ID = str(self.PixelWidth) + "|" + str(self.PixelHeight) # Unique ID of lens features.
+        #self.ID = str(self.PixelWidth) + "|" + str(self.PixelHeight) # Unique ID of lens features.
         self.Mode = 3 
         self.Channel = channel # If RPi has multiple camera channels, indicate the channel here.
         self.OnChipCleanup = self.DenoiseStatus() # Records whether we've got the on-chip cleanup enabled or not. Raspistill feature. Libcamera does it through the command line.
@@ -354,6 +363,8 @@ class astrosensor():
             self.Log("Raspberry Pi High Quality Camera, on chip image cleanup DISABLED.",terminal=False)
             if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " On Chip Cleanup - OFF")
         else: # libcamera has a command line option to disable cleanup.
+            self.Log("AstroSensor.DisableCleanup disable cleanup via the CameraCommands parameters for libcamera.",terminal=False)
+            self.Log("AstroSensor.DisableCleanup cleanup is always disabled for pilomarfits.",terminal=False)
             self.Log("astrosensor.DisableCleanup: Please check the '--denoise off ' option in the command templates in the parameter file.",terminal=False)
         return True
 
@@ -394,7 +405,7 @@ class astrocamera():
 
     @staticmethod
     def SetGlobalFolderHandler(folderhandler):
-        """ Update FolderHAndler in all declared cameras. """
+        """ Update FolderHandler in all declared cameras. """
         for camera in astrocamera.CameraList:
             camera.FolderHandler = folderhandler
 
@@ -425,6 +436,7 @@ class astrocamera():
         self.CameraWindow = None # Can declare a camera window (textcolor library) to copy camera events to.
         self.StorageMonitor = None # Can declare a storage monitor class here.
         self.Parameters = parameters # Must define the parameter file before using the instance.
+        self.Session = None # Can define the session instance. Must be set externally when SESSION and CAMERA instances are both known.
         self.FolderHandler = None # Local copy of the FolderList telling where to store files.
         # - 
         self.FileTypes = ['jpg','dng'] # List of file types to make available.
@@ -445,11 +457,12 @@ class astrocamera():
         self.LastImageDateTime = None # When was the latest image taken? # *Q* How widely is this attribute used?
         self.Lastjpg = None # The filename of the last jpg taken (if saved)
         self.Previewjpg = None # The filename of the last preview image generated. 
+        self.Overlayjpg = None # The filename of the last overlay image generated. 
         self.Image = pilomarimage(name='camera',logger=self.Logger) # pilomarimage instance for handling OpenCV image buffer.
         self.CaptureStart = None # Timestamp when image capture started. Used to detect camera hanging.
         self.CaptureEnd = None # Timestamp when image capture completed. Used to detect camera hanging.
         self.BatchCount = 0 # How many photos taken in the current observation batch? 
-        self.ID = self.Sensor.ID + "|" + self.Lens.ID # Unique ID of lens and sensor characteristics.
+        #self.ID = self.Sensor.ID + "|" + self.Lens.ID # Unique ID of lens and sensor characteristics.
         self.SetImageType('light') # The type of image being captured. Links to self.FolderHandler. Tells HOW to process the image and WHERE to store it.
         self.CameraTasks = [] # No tasks to perform yet.
         self.CurrentTask = None # The current task being performed by the camera.
@@ -462,6 +475,9 @@ class astrocamera():
         self.CameraOptions = '' # The camera options passed to raspistill. These depend upon the image type being captured.
         self.RxCount = 0 # Number of messages received by camera thread.
         self.TxCount = 0 # Number of messages sent by camera thread.
+        self.BatchData = {} # Dictionary of captured images and metadata.
+        #self.PTL_Tolerance = 10 # Max pixel delta when trying to identify a star from PhotometryTargetLocations list.
+        #self.PTL_Clear() # Record Star label and location in target image (for potential photometry experiments)
         if self.Parameters.CameraDriver == 'raspistill':
             from pidng.core import RPICAM2DNG # DNG data extraction from RPi camera RAW images. From https://github.com/schoolpost/pidng Needs to be 3.4.6 version. Later versions are not compatible.
             self.PiDNG = RPICAM2DNG() # RPICAM2DNG() needed for Buster O/S raspistill operation.
@@ -469,6 +485,27 @@ class astrocamera():
             self.PiDNG = None # RPICAM2DNG() not needed for libcamera operation.
         astrocamera.CameraList.append(self) # Add this instance to the global list of all defined cameras.
 
+    #def PTL_AddStar(self,label,x,y):
+    #    """ Add a star to the PhotometryTargetLocations list. """
+    #    self.PhotometryTargetLocations[label] = (x,y)
+    #
+    #def PTL_Clear(self):
+    #    """ Reset the list of PhotometryTargetLocations. """
+    #    self.PhotometryTargetLocations = {}
+    #
+    #def PTL_IdentifyStar(self,x,y):
+    #    """ Given an image x,y position in the PhotometryTargetLocations list, return the star ID if it's known.
+    #        Returns the closest match for any stars within 10 pixels of the requested location. """
+    #    result = None
+    #    closest = None
+    #    for key,value in self.PhotometryTargetLocations.items(): # Go through the list of stars known in the target list. Try to find a match.
+    #        delta = math.sqrt((x - value[0]) ** 2 + (y - value[1]) ** 2)
+    #        if delta < self.PTL_Tolerance: # Consider this as a potential match, because it's within the pixel tolerance.
+    #            if closest == None or closest > delta: # Closest match so far, use that.
+    #                result = key # Get the ID to return to the calling procedure.
+    #                closest = delta
+    #    return result
+        
     def NowUTC(self):
         """ Return system UTC timestamp as a datetime object. """
         return datetime.now(timezone.utc)
@@ -551,7 +588,7 @@ class astrocamera():
         #self.Log("astrocamera.SetLogger: Linked to this log file.",terminal=False)
 
     def _NullLogger(self,*args, **kwargs):
-        """ Null logger. Absorbs parameters and .log call but does nothing. 
+        """ Null logger. Absorbs parameters and .Log call but does nothing. 
             Use this when there is no logger defined. """
         return
         
@@ -564,23 +601,23 @@ class astrocamera():
         else: self.PixelFovHeight = 0
         self.Log("astrocamera.PixelFoV (w/h)", self.PixelFovWidth, self.PixelFovHeight,terminal=False)
 
-    def SetObservationParameters(self,session):
+    def SetObservationParameters(self):
         """ Choose which parameter settings to apply to the observation about to begin.
             These are based upon the general parameter settings, but are overridden 
             for some types of targets, such as meteors. 
             
-                self.CameraTasks        : What tasks should the camerahandler deal with?
-                self.CameraSaveDng      : Do we produce DNG raw sensor data?
-                self.CameraSaveJpg      : Do we create simple JPG images? (Raw data removed)
-                self.CameraSaveFits     : Do we create FITS files? (Still under development)
-                self.FastImageCapture   : Do we perform fast image capture (delay image processing until later).
-                self.LiveStacking       : Do we perform live stacking?
+                self.CameraTasks          : What tasks should the camerahandler deal with?
+                self.CameraSaveDng        : Do we produce DNG raw sensor data?
+                self.CameraSaveJpg        : Do we create simple JPG images? (Raw data removed)
+                self.CameraSaveFits       : Do we create FITS files? (Still under development)
+                self.FastImageCapture     : Do we perform fast image capture (delay image processing until later).
+                self.LiveStacking         : Do we perform live stacking?
             
             """
         # Decide which tasks the camerahandler will deal with.
         self.CameraTasks = ['image','pause']
-        self.Target = session.Target # Keep local pointer to the Target object.
-        self.ObjectType = session.Target.ObjectType # What type of object are we looking at?
+        self.Target = self.Session.Target # Keep local pointer to the Target object.
+        self.ObjectType = self.Session.Target.ObjectType # What type of object are we looking at?
         if self.ObjectType in ['aurora','meteor']: # Don't generate preview images for meteors or aurora.
             if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No preview's generated for " + self.ObjectType + " recordings.")
             self.Log("astrocamera.SetObservationParameters No preview's generated for", self.ObjectType, "recordings.",terminal=False)
@@ -773,12 +810,19 @@ class astrocamera():
         self.LastImageDateTime = None # When was the latest image taken?
         self.Lastjpg = None # The filename of the last jpg taken (if saved)
         self.Previewjpg = None # The filename of the last preview image generated. 
+        self.Overlayjpg = None # The filename of the last overlay image generated. 
         self.Image.Clear() # openCV image buffer. Loaded explicitly when needed.
         self.CaptureStart = None # Timestamp when image capture started. Used to detect camera hanging.
         self.CaptureEnd = None # Timestamp when image capture completed. Used to detect camera hanging.
         self.BatchCount = 0 # How many photos taken in the current observation batch?
+        self.BatchData = {} # Dictionary of captured images and metadata.
         if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " astrocamera.Reset")
-        
+
+    def SaveBatchData(self,filename):
+        """ Dump the BatchData dictionary as a json file to disc. """
+        with open(filename,'w') as f:
+            json.dump(self.BatchData, f, indent=4, default=str)
+    
     def CaptureStartAge(self):
         """ Return a timedelta object showing how long ago the last image capture began. 
             Returns None if no image captured yet. """
@@ -984,7 +1028,7 @@ class astrocamera():
         fakeimage.New(height,width,imagetype='bgr',datatype=np.uint8)
         if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: fakeimage.New() failed.",level='error',terminal=True)
         #fakeimage.ImageBuffer,starcount,starlist = CreateTargetImage(color=True,MinMagnitude=self.Parameters.TargetMinMagnitude,astrotime=astrotime) # Use CreateTargetImage to make fake photo.
-        fakeimage.ImageBuffer,starcount,starlist = self.ImageSimulator(color=True,MinMagnitude=self.Parameters.TargetMinMagnitude,astrotime=astrotime) # Use CreateTargetImage to make fake photo.
+        fakeimage.ImageBuffer,starcount,starlist = self.ImageSimulator(color=True,MinMagnitude=self.Parameters.TargetMinMagnitude,MarkAllStars=self.Parameters.MarkAllStars,astrotime=astrotime) # Use CreateTargetImage to make fake photo.
         if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: ImageSimulator() failed.",level='error',terminal=True)
         if self.Parameters.FakeNoise: # Simulate fake image noise.
             fakeimage.FakeNoise()
@@ -998,7 +1042,7 @@ class astrocamera():
         if self.ObjectType in ['aurora'] and self.Parameters.FakeAurora: # Simulate aurora
             fakeimage.ImageBuffer = self.FakeAurora(fakeimage.ImageBuffer)
             if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: FakeAurora() failed.",level='error',terminal=True)
-        if self.Parameters.FakeMeteor and random.randint(0,100) < self.Parameters.FakeMeteorPercent: # 2% of images get fake meteor streaks in them.
+        if self.Parameters.FakeMeteorPercent > 0 and random.randint(0,100) < self.Parameters.FakeMeteorPercent: # xxx% of images get fake meteor streaks in them.
             fakeimage.FakeMeteor()
             if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: FakeMeteor() failed.",level='error',terminal=True)
         try:
@@ -1035,13 +1079,45 @@ class astrocamera():
         optlist = camera_options.split(' ')
         delay = 1.0
         for i,opt in enumerate(optlist): # *Q* Doesn't recognise libcamera format parameters yet!
-            if opt == '-ss': # Found exposure time.
+            if opt in ['-ss','--shutter']: # Found exposure time.
                 delay = float(optlist[i + 1]) * 2 # Find the microsecond exposure time and double it to mimic camera.
                 delay = delay / 1_000_000 # Convert from microseconds to seconds.
                 self.Log("astrocamera.FakeDelay : ",round(delay,1),"s ...",terminal=False)
                 break
         delaytimer = timer(period=delay) # Create timer.
         return delaytimer
+
+    def AppendBatchData(self,image_filename):
+        """ Create new entry in BatchData for the current image.
+            image_filename : String with the name of the image file on disc. """
+        new_rec = {}
+        new_rec['start'] = self.CaptureStart
+        new_rec['end'] = self.CaptureEnd
+        new_rec['length'] = self.Lens.Length
+        new_rec['fov_horizontal'] = self.Lens.FovHorizontal
+        new_rec['fov_vertical'] = self.Lens.FovVertical
+        new_rec['exposure'] = self.ExposureSeconds
+        new_rec['pixels_per_horizontal_degree'] = self.PixelsPerFovDegreeWidth # Set by ModeChange() below. How many pixels represent 1 degree image width.
+        new_rec['pixels_per_vertical_degree'] = self.PixelsPerFovDegreeHeight # Set by ModeChange() below. How many pixels represent 1 degree image height.
+        new_rec['degrees_per_horizontal_pixel'] = self.PixelFovWidth # Set by ModeChange() below. # Approximate field of view of an individual pixel.
+        new_rec['degrees_per_vertical_pixel'] = self.PixelFovHeight # Set by ModeChange() below.
+        if hasattr(self.Session,'Target'):
+            if hasattr(self.Session.Target,'AzAltDegrees'): # Session has a pointer to the current Target. Get data from there.
+                az, alt = self.Session.Target.AzAltDegrees() # Current position in the sky.
+                new_rec['az'] = az
+                new_rec['alt'] = alt
+            if hasattr(self.Session.Target,'RaDecHours'): # Current position in the sky.
+                ra, dec = self.Session.Target.RaDecHours() # 
+                new_rec['ra'] = ra
+                new_rec['dec'] = dec
+            # Append details of the target.
+            new_rec['target_name'] = self.Session.Target.Name # Name of object.
+            new_rec['target_group'] = self.Session.Target.SearchGroup # Which search category was used?
+            new_rec['target_term'] = self.Session.Target.SearchTerm # Which search term identifies this object?
+            new_rec['target_type'] = self.Session.Target.ObjectType # What type of object is it?
+        new_rec['path'] = image_filename
+        if hasattr(self.FolderHandler,'NameOnly'): image_filename = self.FolderHandler.NameOnly(image_filename) # Can remove directory structure.
+        self.BatchData[image_filename] = new_rec # Append metadata of this frame to the list of images captured.
 
     def CaptureSet(self,file_root,batch_size,camera_command,tempfile=False,terminal=True,cleanup=True,astrotime=None):
         """ Take batch of photos. Uses CaptureSetFull or CaptureSetFast depending upon configuration. """
@@ -1050,6 +1126,12 @@ class astrocamera():
         camera_command = camera_command.replace('{&channel}',str(self.Sensor.Channel)) # Camera channel if multi-camera RPi.
         camera_command = camera_command.replace('{&width}',str(self.Sensor.PixelWidth)) # Image width.
         camera_command = camera_command.replace('{&height}',str(self.Sensor.PixelHeight)) # Image height.
+        camera_command = camera_command.replace('{&fitstech}',str(self.Session.TechFitsTagsFile)) # Point to FITS technical tags file.
+        camera_command = camera_command.replace('{&exiftech}',str(self.Session.TechExifTagsFile)) # Point to FITS technical tags file.
+        camera_command = camera_command.replace('{&fitsweather}',str(self.Session.WeatherFitsTagsFile)) # Point to FITS weather tags file.
+        camera_command = camera_command.replace('{&exifweather}',str(self.Session.WeatherExifTagsFile)) # Point to FITS weather tags file.
+        camera_command = camera_command.replace('{&logfile}',self.Logger.FileName) # Log file to write to.
+        camera_command = camera_command.replace('{&imagetype}',self._ImageType) # Type of image being created.
         if self.FastImageCapture: # Just capture the images as fast as possible, don't waste time processing anything else.
             result = self.CaptureSetFast(file_root,batch_size,camera_command,tempfile=tempfile,terminal=terminal,cleanup=cleanup,astrotime=astrotime)
         else: # Complete image capture and processing at the same time.
@@ -1077,11 +1159,14 @@ class astrocamera():
             else: outputfile = file_root + self.UtcTimeStamp() + "_" + frame + '.jpg' # This is the 'intermediate' jpg generated by the camera.
             self.Log("astrocamera.CaptureSetFull(): Capturing",outputfile,"...",terminal=False)
             cmd = camera_command.replace('{&output}',outputfile) # *Q* TODO: Perform safety check for remaining & symbols.
+            if "{&" in cmd: # Some remaining tags remain which have not been replaced.
+                self.Log("astrocamera.CaptureSetFull(): CameraCommand contains unconverted options.",terminal=True)
             if self.Mctl != None: # Microcontroller handle is defined.
                 remoterestarts = self.Mctl.RemoteRestarts # If this changes during exposure, the microcontroller has reset and we should reject the image.
             else:
                 remoterestarts = 0
             rejectimage = False # Set to 'true' if there's a reason to reject the image.
+            imty = self.GetImageType() # What type of image are we faking?
             self.CaptureStart = self.NowUTC()
             if self.Parameters.CameraEnabled: # Camera is enabled. Take real photo.
                 self.osCmd(cmd,output='none')
@@ -1093,7 +1178,6 @@ class astrocamera():
             else: # Camera is not in use. Generate fake photo.
                 self.Log("astrocamera.CaptureSetFull(): About to call FakePhoto.",terminal=False)
                 tr = False # Fake image generation failed unless we are told otherwise.
-                imty = self.GetImageType() # What type of image are we faking?
                 DelayTimer = self.SetFakeDelay(camera_command) # Create a timer to mimic the expected real camera delay.
                 if imty == 'dark': tr= self.FakeDark(outputfile=outputfile) # Fake a dark frame.
                 else: tr = self.FakePhoto(outputfile=outputfile,astrotime=astrotime) # Fake a light frame.
@@ -1104,6 +1188,7 @@ class astrocamera():
                 self.Log("astrocamera.CaptureSetFull(): Returned from FakePhoto.",terminal=False)
             self.CaptureEnd = self.NowUTC()
             self.Log("astrocamera.CaptureSetFull(): Capture complete. (",(self.CaptureEnd - self.CaptureStart).total_seconds(), "s).",terminal=False)
+            if imty in ['light']: self.AppendBatchData(image_filename=outputfile) # Record metadata about 'light' images for post-processing.
             if self.Mctl != None: # Microcontroller handle is known.
                 if remoterestarts != self.Mctl.RemoteRestarts: # Microcontroller reset during exposure.
                     self.Log('astrocamera.CaptureSetFull(): Microcontroller restarted during exposure. Reject',outputfile,level='warning',terminal=False)
@@ -1115,7 +1200,7 @@ class astrocamera():
             if rejectimage: # There was reason to reject the image for some cause.
                 self.Log("astrocamera.CaptureSetFull(): Image should be rejected.",terminal=False)
             self.Lastjpg = outputfile # The camera can remember this file as the 'last jpg taken'
-            self.Log("astrocamera.CaptureSetFull(): Load image from " + outputfile,terminal=False)
+            self.Log("astrocamera.CaptureSetFull(): Load Image buffer from",outputfile,terminal=False)
             self.Image.LoadFile(outputfile) # OpenCV format.
             if self.Image.ImageMissing(): # imread failed. The capture did not succeed for some reason?
                 self.Log("astrocamera.CaptureSetFull(): imread of",outputfile,"failed.",level='error',terminal=False)
@@ -1148,6 +1233,7 @@ class astrocamera():
                     self.Log("astrocamera.CaptureSetFull(): FITS file should have been generated too.",terminal=False)
                     if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " " + fitsname.split('/')[-1]) # Just the dng filename.
             if tempfile: # Delete the temporary file.
+                self.Log("astrocamera.CaptureSetFull(): Remove temporary outputfile",outputfile,terminal=False)
                 cmd = 'rm ' + outputfile
                 self.osCmd(cmd,output='log')
             # Estimate ETA. If we're looping through a batch of photos.
@@ -1195,6 +1281,8 @@ class astrocamera():
             else: outputfile = file_root + self.UtcTimeStamp() + "_" + frame + '.jpg' # This is the 'intermediate' jpg generated by the camera.
             self.Log("astrocamera.CaptureSetFast(): Capturing",outputfile,"...",terminal=False)
             cmd = camera_command.replace('{&output}',outputfile) # *Q* TODO: Perform safety check for remaining & symbols.
+            if "{&" in CameraCommand: # Some remaining tags remain which have not been replaced.
+                self.Log("astrocamera.CaptureSetFull(): CameraCommand contains unconverted options.",terminal=True)
             if self.Mctl != None: # Microcontroller handle is defined.
                 remoterestarts = self.Mctl.RemoteRestarts # If this changes during exposure, the microcontroller has reset and we should reject the image.
             else:
@@ -1298,12 +1386,13 @@ class astrocamera():
             for i,file in enumerate(allfiles): # Go through all the .jpg files found.
                 prgt.UpdateCount(i + 1) # How far have we got so far? prgt will then produce ETA and % complete for us.                
                 self.Log("astrocamera.BuildKeogram(): Processing",file,terminal=False)
-                print(textcolor.cursorup() + 
-                      self.NowHMS(),
-                      textcolor.white(str(round(prgt.GetPercent(),1))),"%",
-                      (i + 1),"of",filecount,
-                      "ETA",str(prgt.GetETA()).split('.')[0],
-                      "UTC",textcolor.clearlineforward())
+                #print(textcolor.cursorup() + 
+                #      self.NowHMS(),
+                #      textcolor.white(str(round(prgt.GetPercent(),1))),"%",
+                #      (i + 1),"of",filecount,
+                #      "ETA",str(prgt.GetETA()).split('.')[0],
+                #      "UTC",textcolor.clearlineforward())
+                print(prgt.MakeProgressBar(color=True,text='',length=20,show_start=True,show_eta=True))
                 dt = self.DatetimeFromFilename(file) # Get the UTC timestamp of the image from the filename.
                 if dt != None:
                     if start == None or start > dt: start = dt
@@ -1311,7 +1400,7 @@ class astrocamera():
                 imagehandler.LoadFile(file)
                 Keo.Extract(imagehandler)
             # Markup image.
-            Keo.BuildImageBuffer() # Load the resulting raw keogram into a pilomarimage instance. (For markup)
+            Keo.BuildImageBuffer() # Load the resulting raw keogram into a pilomarimage instance. (For markup) Refer to it as "Keo.Keogram.{pilomarimage methods/attributes}"
             width = Keo.Keogram.GetWidth()
             height = Keo.Keogram.GetHeight()
             # Add altitude scale
@@ -1461,10 +1550,10 @@ class astrocamera():
                 self.CameraOptions += OLE
         self.Log("astrocamera.DelCameraOption: New list:",self.CameraOptions,terminal=False)
             
-    def ContainsMeteors(self,image): # In pilomarimage
-        """ Return TRUE if meteors or aircraft trails are detected in an image. """
-        if len(self.LineDetection(image)) > 0: return True
-        else: return False
+    #def ContainsMeteors(self,image): # In pilomarimage
+    #    """ Return TRUE if meteors or aircraft trails are detected in an image. """
+    #    if len(self.LineDetection(image)) > 0: return True
+    #    else: return False
         
     def TakePhoto(self,batch_size,terminal=True):
         """ Make an observation. This is a LIGHT image of the actual object under observation. """
@@ -1493,21 +1582,25 @@ class astrocamera():
         self.SetImageType('light') # Tell the camera we are taking light photos.
         FileRoot=self.FolderHandler.PrepFile('light','light_')
         CameraOptions = ''
-        CameraOptions += '-ex off ' # Exposure control off.
-        CameraOptions += '-t 10 ' # Timeout ms - This is an attempt to take the photo as fast as possible, but pre-photo calculations double the requested time :(
-        CameraOptions += '-n ' # Nopreview
-        CameraOptions += '-md ' + str(self.Sensor.Mode) + ' ' # Mode 3 allows exposures over 10.2 seconds apparently.
-        CameraOptions += '-w ' + str(self.Sensor.PixelWidth) + ' ' # Specify the pixel size of the image to match the maximum that the mode supports.
-        CameraOptions += '-h ' + str(self.Sensor.PixelHeight) + ' ' # Specify the pixel size of the image to match the maximum that the mode supports.
-        CameraOptions += '-ss ' + str(ExposureMicroseconds) + ' ' # Use the global SHUTTER time to match the DARK and LIGHT frames.
-        if self.CameraSaveDng and not '-r ' in CameraOptions: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
-            # *Q* Expand for FITS files too.
-            CameraOptions += '-r ' # Raw is appended to JPEG file. Needs extracting later.
-        CameraOptions += '-ag 16.0 ' # Set analog gain to 16.0. Apparently this is better for Astro photographs as it increases signal-to-noise ratio significantly.
+        if self.Parameters.CameraDriver == 'raspistill': # Prompt for raspistill format options.
+            CameraOptions += '-ex off ' # Exposure control off.
+            CameraOptions += '-t 10 ' # Timeout ms - This is an attempt to take the photo as fast as possible, but pre-photo calculations double the requested time :(
+            CameraOptions += '-n ' # Nopreview
+            CameraOptions += '-md ' + str(self.Sensor.Mode) + ' ' # Mode 3 allows exposures over 10.2 seconds apparently.
+            CameraOptions += '-w ' + str(self.Sensor.PixelWidth) + ' ' # Specify the pixel size of the image to match the maximum that the mode supports.
+            CameraOptions += '-h ' + str(self.Sensor.PixelHeight) + ' ' # Specify the pixel size of the image to match the maximum that the mode supports.
+            CameraOptions += '-ss ' + str(ExposureMicroseconds) + ' ' # Use the global SHUTTER time to match the DARK and LIGHT frames.
+            if self.CameraSaveDng and not '-r ' in CameraOptions: # If we intend to produce DNG raw data at some point, we need to capture the bayer matrix.
+                # *Q* Expand for FITS files too.
+                CameraOptions += '-r ' # Raw is appended to JPEG file. Needs extracting later.
+            CameraOptions += '-ag 16.0 ' # Set analog gain to 16.0. Apparently this is better for Astro photographs as it increases signal-to-noise ratio significantly.
+        else:
+            self.Log("astrocamera.PromptPhotoSettings: Only supports raspistll at the moment.",terminal=True,level='warning') # *Q* Add support for other drivers.
+            return False
         # Offer the default settings to the user, but let them enter something else.
         print ("PromptPhotoSettings: [ENTER] to accept default settings or create your own.")
-        print ("raspistill " + CameraOptions)
-        newopt = input(textcolor.cyan("raspistill "))
+        print (self.Parameters.CameraDriver + " " + CameraOptions)
+        newopt = input(textcolor.cyan(self.Parameters.CameraDriver + " "))
         if len(newopt) > 0: # User chose to overwrite the default settings.
             CameraOptions = newopt
             self.Log("astrocamera.PromptPhotoSettings:",CameraOptions,terminal=True)
@@ -1593,11 +1686,11 @@ class astrocamera():
         ExposureMicroseconds = int(self.ExposureSeconds * 1000000)
         self.SetImageType('dark') # Tell the camera we are taking dark photos.
         FileRoot = self.FolderHandler.PrepFile('dark','dark_')
-        self.Log("Generating DARK image set.")
+        self.Log("Generating DARK image set of",batch_size,"images.")
         self.Log("These match the LIGHT exposure time of",self.ExposureSeconds,"seconds.")
         self.Log("These are used to remove electrical noise from the images.")
         self.Log("Lens cap must be ON.")
-        self.Log("Images will be stored in", FileRoot)
+        self.Log(batch_size,"Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Dark image set...')
         CameraCommand = self.Parameters._CameraDarkCommand
@@ -1623,11 +1716,11 @@ class astrocamera():
         ExposureMicroseconds = int(0.001 * 1000000) # 1/1000th of a second.
         self.SetImageType('darkflat') # Tell the camera we are taking darkflat photos.
         FileRoot = self.FolderHandler.PrepFile('darkflat','darkflat_')
-        self.Log("Generating DARK FLAT image set.")
+        self.Log("Generating DARK FLAT image set of",batch_size,"images.")
         self.Log("These help remove electrical and manufacturing noise from the images.")
         self.Log("These match the FLAT exposure time of",ExposureMicroseconds / 1000000.0, "seconds.")
         self.Log("Lens cap must be ON.")
-        self.Log("Images will be stored in", FileRoot)
+        self.Log(batch_size,"Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Dark-Flat image set...')
         CameraCommand = self.Parameters._CameraDarkFlatCommand
@@ -1643,14 +1736,14 @@ class astrocamera():
         print (textcolor.yellow("FlatSet"))
         self.SetImageType('flat') # Tell the camera we are taking flat photos.
         FileRoot = self.FolderHandler.PrepFile('flat','flat_')
-        self.Log("Generating FLAT image set.")
+        self.Log("Generating FLAT image set of",batch_size,"images.")
         self.Log("These are flat white unfocused images.")
         self.Log("These will be a short exposure time (Auto exposure)")
         self.Log("Flat images are used to compensate for vignetting and dealing with dust and dead pixels.")
         self.Log("The lens cap must be OFF. You need a evenly lit neutral white target.")
         self.Log("People often stretch a white t-shirt over the lens and point at a bright area of sky.")
         self.Log("You can re-use the flat image set across multiple campaigns.")
-        self.Log("Images will be stored in", FileRoot)
+        self.Log(batch_size,"Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Flat image set...')
         CameraCommand = self.Parameters._CameraFlatCommand
@@ -1666,11 +1759,12 @@ class astrocamera():
         ExposureMicroseconds = int(0.001 * 1000000) # 1/1000th of a second.
         self.SetImageType('bias') # Tell the camera we are taking bias photos.
         FileRoot = self.FolderHandler.PrepFile('bias','bias_')
-        self.Log("Generating OFFSET/BIAS image set.")
+        self.Log("Generating OFFSET/BIAS image set of",batch_size,"images.")
         self.Log("These will be the shortest possible exposure time (FASTEST)",ExposureMicroseconds / 1000000.0,"seconds")
         self.Log("The temperature and ISO settings must be the same as the LIGHT images.")
         self.Log("These are used to remove manufacturing defects from the images that the sensor captures.")
         self.Log("Lens cap must be ON.")
+        self.Log(batch_size,"Images will be stored in", FileRoot)
         input(textcolor.cyan("[RETURN] to begin: ")) # Python3 
         print ('Capturing Bias image set...')
         CameraCommand = self.Parameters._CameraBiasCommand
@@ -1706,8 +1800,159 @@ class astrocamera():
             CameraCommand = CameraCommand.replace('{&width}',str(self.Sensor.PixelWidth))
             CameraCommand = CameraCommand.replace('{&height}',str(self.Sensor.PixelHeight))
             CameraCommand = CameraCommand.replace('{&output}',filename)
+            CameraCommand = CameraCommand.replace('{&logfile}',self.Logger.FileName) # Point to a log file.
+            if self.CameraSaveDng or self.CameraSaveFits: # If we intend to produce DNG/FITS raw data at some point, we need to capture the bayer matrix.
+                CameraCommand += ' ' + self.Parameters._CameraRawSwitch + ' ' # Append RAW data to the image.
+            self.Log("astrocamera.AutoPhoto():",CameraCommand,terminal=True)
             # *Q* TODO: Perform safety check for remaining & symbols.
+            if "{&" in CameraCommand: # Some remaining tags remain which have not been replaced.
+                self.Log("astrocamera.AutoPhoto(): CameraCommand contains unconverted options.",terminal=True)
             self.osCmd(CameraCommand)
             print ("-", filename)
         return True
 
+class camera_util():
+    """ Utilities for camera handling. """
+    def __init__(self,name=None,channel=None):
+        #from libcamera import Transform
+        self.Name = name
+        self.Channel = channel
+        self.Camera = None
+        self.PreviewX = 100
+        self.PreviewY = 200
+        self.PreviewHeight = 600
+        self.PreviewWidth = 800
+        self.Overlay = None # np array of overlay image in RGBA format.
+        self.Rebuild = True # Preview window needs rebuilding.
+        
+    def CreateCamera(self):
+        if self.Camera == None: self.Camera = Picamera2()
+    
+    #def LivePreview_xxx(self,filename=None):
+    #    """ Create live preview image. 
+    #        This is a live image from the camera, with an optional overlay added.
+    #        libcamera/picamera2 utility only. """
+    #    Keyboard = keyboardscanner()
+    #    self.CreateCamera()
+    #    self.Camera.configure(self.Camera.create_preview_configuration())
+    #    self.Camera.start(show_preview=True)
+    #    if filename != None: # Overlay specified.
+    #        overlay = cv2.imread(filename,cv2.IMREAD_UNCHANGED)
+    #        self.Camera.set_overlay(overlay)
+    #    #self.Camera.start_preview(Preview.QTGL, x=100, y=200, width=800, height=600)
+    #    #self.Camera.start()
+    #    print("Press 'x' to quit")
+    #    while True:
+    #        time.sleep(1)
+    #        keypress = Keyboard.Check().lower() # Non-blocking scan for keyboard input. 
+    #        if keypress == 'x': break
+    #        elif keypress != '': print("You pressed:",keypress)
+    #    self.Camera.stop()
+    #    self.Camera.stop_preview()
+
+    def MoveLeft(self):
+        """ Move preview window left. """
+        self.PreviewX -= 100
+        self.Rebuild = True
+
+    def MoveRight(self):
+        """ Move preview window right. """
+        self.PreviewX += 100
+        self.Rebuild = True
+
+    def MoveUp(self):
+        """ Move preview window up. """
+        self.PreviewY += 100
+        self.Rebuild = True
+
+    def MoveDown(self):
+        """ Move preview window down. """
+        self.PreviewY -= 100
+        self.Rebuild = True
+
+    def MoveUpLeft(self):
+        """ Move preview window towards corner. """
+        self.MoveUp()
+        self.MoveLeft()
+        
+    def MoveUpRight(self):
+        """ Move preview window towards corner. """
+        self.MoveUp()
+        self.MoveRight()
+
+    def MoveDownLeft(self):
+        """ Move preview window towards corner. """
+        self.MoveDown()
+        self.MoveLeft()
+
+    def MoveDownRight(self):
+        """ Move preview window towards corner. """
+        self.MoveDown()
+        self.MoveRight()
+
+    def GrowPreview(self):
+        """ Make preview window larger. """
+        self.PreviewWidth = int(self.PreviewWidth * 1.1)
+        self.PreviewHeight = int(self.PreviewHeight * 1.1)
+        self.Rebuild = True
+
+    def ShrinkPreview(self):
+        """ Make preview window smaller. """
+        self.PreviewWidth = int(self.PreviewWidth / 1.1)
+        self.PreviewHeight = int(self.PreviewHeight / 1.1)
+        self.Rebuild = True
+
+    def LoadOverlay(self,filename=None):
+        if filename != None: # Overlay specified.
+            self.Overlay = cv2.imread(filename, cv2.IMREAD_UNCHANGED) # Retain transparency when reading file.
+            self.Overlay = cv2.cvtColor(self.Overlay, cv2.COLOR_BGRA2RGBA) # Convert from BGRA to RGBA for picamera2 overlays.
+        else:
+            self.ClearOverlay()
+    
+    def ClearOverlay(self):
+        self.Overlay = None
+
+    def LivePreview(self,filename=None):
+        """ Create live preview image. 
+            This is a live image from the camera, with an optional overlay added.
+            libcamera/picamera2 utility only. """
+        KeyboardActions = {
+            '+':self.GrowPreview,
+            '-':self.ShrinkPreview,
+            '6':self.MoveRight,
+            '4':self.MoveLeft,
+            '8':self.MoveUp,
+            '9':self.MoveUpRight,
+            '7':self.MoveUpLeft,
+            '2':self.MoveDown,
+            '1':self.MoveDownLeft,
+            '3':self.MoveDownRight
+        }
+        Keyboard = keyboardscanner()
+        self.CreateCamera()
+        self.LoadOverlay(filename)
+        self.Camera.configure(self.Camera.create_preview_configuration())
+        self.Camera.shutter_speed = 1 * 1000
+        self.Camera.start()
+        print("Press +,- for scale")
+        print("Press num pad to move")
+        print("Press 'x' to quit")
+        while True:
+            if self.Rebuild:
+                try:
+                    self.Camera.stop_preview()
+                except:
+                    pass 
+                self.Camera.start_preview(Preview.QTGL,x=self.PreviewX,y=self.PreviewY,width=self.PreviewWidth,height=self.PreviewHeight)
+                self.Camera.set_overlay(self.Overlay)
+                self.Camera.title_fields = ["ExposureTime","AnalogueGain","Lux"]
+                self.Rebuild = False
+            time.sleep(1)
+            keypress = Keyboard.Check().lower() # Non-blocking scan for keyboard input. 
+            if keypress == 'x': break
+            elif keypress in KeyboardActions: 
+                print("Actioning:",keypress)
+                KeyboardActions[keypress]()
+        self.Camera.stop()
+        self.Camera.stop_preview()
+        

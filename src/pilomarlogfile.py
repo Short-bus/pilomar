@@ -36,6 +36,16 @@ class logfile(): # 2 references.
                           But there's less risk of losing the last few messages if something bad happens.
             append: True.  Existing log file is appended to.
                     False. Fresh log file is started. """
+        
+        # Set default behaviour of .Log() method call.
+        self.default_terminal = True # Display to the user.
+        self.default_errorprompt = False # Ask user to acknowledge.
+        self.default_level = 'info' # Establish log level.
+        self.default_detail = 'detail' # Establish the level of detail this entry represents.
+        self.default_separator = ' ' # Separate concatenated items with a space.
+        self.default_copytowindow = False # No textcolor.colordisplay instance specified.
+        self.default_showtime = True # Always show timestamp in log messages copied to the display.
+                    
         self.FileName = filename
         self.ClockOffset = clockoffset # Can establish a clock offset when replicating/simulating specific situations.
         self.PrevLogTime = self.NowUTC()
@@ -78,26 +88,47 @@ class logfile(): # 2 references.
             dt = dt + timedelta(seconds=self.ClockOffset)
         return dt
 
+    def ShowConfig(self):
+        """ How is this instance configured? """
+        self.Log("logfile.ShowConfig(): default_terminal",self.default_terminal)
+        self.Log("logfile.ShowConfig(): default_errorprompt",self.default_errorprompt)
+        self.Log("logfile.ShowConfig(): default_level",self.default_level)
+        self.Log("logfile.ShowConfig(): default_detail",self.default_detail)
+        self.Log("logfile.ShowConfig(): default_separator",self.default_separator)
+        self.Log("logfile.ShowConfig(): default_copytowindow",self.default_copytowindow)
+        self.Log("logfile.ShowConfig(): default_showtime",self.default_showtime)
+        self.Log("logfile.ShowConfig(): filename",filename)
+        self.Log("logfile.ShowConfig(): clockOffset",self.ClockOffset)
+        self.Log("logfile.ShowConfig(): ErrorWindow",self.ErrorWindow)
+        if hasattr(self.ErrorWindow,"DisplayName"): # The window has a name attribute.
+            self.Log("logfile.ShowConfig(): ErrorWindow",self.ErrorWindow.DisplayName)
+
     def Log(self,*args, **kwargs) -> bool:
         """ Record a log message. 
             All unnamed arguments are converted to str type and appended to the line logged.
-            Some named arguments are supported. 
-            terminal=True ... displays the message to the terminal too.
-            level='info'/'warning'/'error' specifies level of information.
-                  (warning and error are repeated to the terminal automatically) 
-            detail='user'/'flow'/'detail' specifies the depth of logging that is recorded.
-                  (user means user choices)
-                  (flow means high level flow of the program, main logic events)
-                  (detail means detailed flow of the program, decisions, calculations etc)
-            errorprompt=The user is required to acknowledge the error message.
-            sep=Separator string inserted between each argument appended to the log message. Default is ' '. """
+            Parameters ----------------------------------------------------------------------
+            terminal   = True ... displays the message to the terminal too.
+            level      = 'info'/'warning'/'error' specifies level of information.
+                         (warning and error are repeated to the terminal automatically) 
+            detail     = 'user'/'flow'/'detail' specifies the depth of logging that is recorded.
+                         (user means user choices)
+                         (flow means high level flow of the program, main logic events)
+                         (detail means detailed flow of the program, decisions, calculations etc)
+            errorprompt= The user is required to acknowledge the error message.
+            sep        = Separator string inserted between each argument appended to the log message. Default is ' '. 
+            window     = Handle to a textcolor.colordisplay instance. Message is copied there too. 
+            showtime   = True ... the on-screen message includes a timestamp.
+                         False ... the on-screen message excludes the automatic timestamp. (Log file ALWAYS includes timestamp and elapsed time.)
+            Outputs -------------------------------------------------------------------------
+            Always returns TRUE. """
         # Establish defaults for other arguments.
-        terminal = True # Display to the user.
-        errorprompt = False # Ask user to acknowledge.
-        level = 'info' # Establish log level.
-        detail = 'detail' # Establish the level of detail this entry represents.
-        separator = ' '
-        copytowindow = False
+        terminal = self.default_terminal # Display to the user.
+        errorprompt = self.default_errorprompt # Ask user to acknowledge.
+        level = self.default_level # Establish log level.
+        detail = self.default_detail # Establish the level of detail this entry represents.
+        separator = self.default_separator # What separator to use between concatenated text?
+        copytowindow = self.default_copytowindow # Do we show the timestamp when copying messages to the terminal display?
+        showtime = self.default_showtime # Do we show the timestamp when copying messages to the terminal display?
         for key,value in kwargs.items():
             if key == 'level': level = value.lower() # info, warning or error?
             elif key == 'detail': detail = value.lower() # user, flow, detail message types recorded.
@@ -105,6 +136,7 @@ class logfile(): # 2 references.
             elif key == 'errorprompt': errorprompt = value
             elif key == 'window': copytowindow = value # Copy the message to the error window if possible.
             elif key == 'sep': separator = value # Separator string can be overridden.
+            elif key == 'showtime': showtime = value # Can suppress the timestamp in the terminal display.
         # Now generate the log message by appending all the unnamed arguments into a single string.
         line = ''
         for x in args: # Convert and append extra arguments.
@@ -116,7 +148,8 @@ class logfile(): # 2 references.
         Elapsed = (dtNow - self.PrevLogTime).total_seconds() # The log message includes the elapsed time since the previous message.
         ES = "{:.6f}".format(Elapsed) # 6dp and make sure it is not in scientific notation.
         saveline = str(dtNow) + "\t" + ES + "\t" + line # Add current system timestamp and elapsed time to message. 
-        printline = str(dtNow).split(".")[0] + " " + line # Add current system timestamp to message. 
+        if showtime: printline = str(dtNow).split(".")[0] + " " + line # Add current system timestamp to message. 
+        else: printline = line # Do not add timestamp to the message.
         # Check if any LEVEL OR DETAIL filters are specified in the received parameters.
         if level[0] in self.LevelFilter and detail[0] in self.DetailFilter: # The filters pass the criteria for writing to disc.
             with open(self.FileName,'a') as f:
