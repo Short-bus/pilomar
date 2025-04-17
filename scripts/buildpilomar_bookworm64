@@ -3,6 +3,7 @@
 # script: buildpilomar_bookworm64
 # 11.Feb.2024 / Rasbian bookworm 64bit only
 # 28.Feb.2024 / Log file location is more dynamically calculated.
+# 19.Nov.2024 / Add 'executable' flag to src/scripts and circuitpython files.
 # ####################################################################
 
 # Note where we start.
@@ -14,6 +15,13 @@ export pilomarhome=$PWD
 echo home directory is: $pilomarhome
 export pilomarlog=$PWD'/log/buildpilomar_bookworm64.log'
 echo build logfile is: $pilomarlog
+
+# Ensure critical files can be executed.
+echo Making source codes and scripts executable>>$pilomarlog
+chmod +x $pilomarhome/src/*
+chmod +x $pilomarhome/scripts/*
+chmod +x $pilomarhome/circuitpython/tiny2040/*
+chmod +x $pilomarhome/circuitpython/tiny2350/*
 
 # list current packages and versions.
 echo Initial packages installed>>$pilomarlog

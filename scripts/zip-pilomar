@@ -32,7 +32,8 @@ zip pilomar.zip pilomar/fonts/Asap/Asap-SemiBold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-Bold.ttf
 zip pilomar.zip pilomar/fonts/Asap/Asap-BoldItalic.ttf
 zip pilomar.zip pilomar/circuitpython
-zip pilomar.zip pilomar/circuitpython/code.py
+zip pilomar.zip pilomar/circuitpython/tiny2040/code.py
+zip pilomar.zip pilomar/circuitpython/tiny2350/code.py
 zip pilomar.zip pilomar/src
 zip pilomar.zip pilomar/src/pilomar.py
 zip pilomar.zip pilomar/src/pilomarlogfile.py
