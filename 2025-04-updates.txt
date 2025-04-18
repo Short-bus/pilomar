@@ -1,0 +1,171 @@
+2025-04 release notes.
+
+* The NGC catalog now includes 'IC' and 'PGC' items.
+  The original NGC list did not include dimmer objects.
+  The IC and PGC lists extend to lower magnitudes.
+  You will need to rename or purge your existing data/ngc.json cache file if it exists.
+  
+* Standardised NGC catalog references to just using the Pandas dataframe.
+  NGC Dictionary loaded from the json data file is now ONLY needed 
+  to build the initial dataframe. This removes a large dictionary 
+  from memory.
+  
+* RPi 5B and CM4 support more firm now.
+
+* Added cache copies of constellationship.fab and de421.bsp datafiles to the data directory.
+  constellationship.fab is nolonger available directly from stellarium's github page, it looks 
+  like stellarium has evolved onto a different solution. Pilomar uses the constellation features 
+  of Skyfield which still expect the constellationship.fab file. As a temporary solution I've 
+  included a cached copy of the old constellationship.fab file in this repository.
+  The planetary ephemera file is also now included in the repository because sometimes the 
+  online source does not succeed.
+  
+* When running on RPi3B there can now be some tuning actions to improve performance.
+  32bit O/S on 3B hardware is at the lower limit of supporting the pilomar software.
+
+* Pimoroni Tiny2350 is supported.
+  This is the successor to the Tiny2040 microcontroller.
+  This has better capacity and performance.
+  It is plug-in compatible with the Tiny2040, but the new code
+  takes some advantages of the newer processor.
+  
+* Memory and CPU monitoring added.
+  The observation dashboard now includes some measures of 
+  memory and CPU performance to help with tuning/development.
+
+* Improved support for alternative locales. 
+  The original version needed en_US type languages and UTF-8 character sets.
+  This version is now more tolerant of European languages and 7bit character sets.
+
+* Initial support for non UTC local timezones.
+  The program still operates internally with UTC dates and times.
+  However you can now select your local timezone within the program.
+  All dates/times show which timezone is being used when displaying.
+  Internal messages and log messages will always show UTC timestamps.
+  Statistics, Dashboard and status displays can now show local timezone.
+  You can switch between UTC and LOCAL timezone with the 'u' key during an observation
+  or by editing the parameter file.
+
+* Further configuration options moved from hardcoding into parameter file.
+
+* Default RPi UART port can now be overridden if needed.
+  The program chooses the most likely portname based upon the RPi model.
+  If you need an alternative UART port you can now set it in the parameter file
+  with the UARTOverride parameter.
+
+* Performance improvements when generating tracking target images.
+  Star locations are now cached and rotated based upon the system clock.
+  This saves creating many hundreds of temporary skyfield targets each time 
+  the preview image or tracking maps are generated.  
+  
+* Tracking can now be performed against a larger star map.
+  Previously the generated star map was the same size as the camera image.
+  Now the star map can be larger so that larger drift errors can be handled.
+  This means the tracking calculation can now compare the live image with a wider 
+  area of the sky to improve the chances of finding a match.
+  The calculation can also average the drift result across multiple comparisons.
+
+* Tracking configuration moved to own submenu.
+
+* You can now set your Home Location from within the program.
+  You nolonger have to edit the parameter file separately.
+  This means that values can be error-checked. 
+  You can store multiple Home Locations in the parameter file. 
+  You can select between them if you want to observe from several 
+  locations.
+
+* Target selection includes a 'Suggest target' option.
+  This runs through the available catalogs to list larger/brighter 
+  objects which should be visible. The list of suggested targets
+  is valid for 2 hours, then will be automatically recalculated.
+  NOTE: On a 32bit O/S this can be quite slow to complete.
+  
+* Some unused RPi GPIO pins used for PCB version identification.
+  Preparation for future PCB revision.
+  The PCB can use these pins to identify its capabilities.  
+  
+* Fixed issue with 360 and 0 degree azimuth confusion with GOTO commands.  
+
+* Motor menu allows you to switch between common motor speed settings.
+  Slow, Medium, Fast and Turbo. 
+  (Turbo experimental is for RP2350 based systems - some development still needed.)
+    
+* Various comments and error messages improved.  
+  Eg: SlewEnabled and OptimiseMoves parameter warnings are smaller now.
+  
+* Tuning overlay can be generated.
+  This generates a simplified version of the 'preview' image for the current target.
+  It is saved as .PNG format with a transparent background. 
+  This can be used in image editors to add a transparent layer on top of 
+  processed images to mark the approximate location of key objects.
+  
+* Microstepping submenu offers current settings and explains their effect.  
+
+* Initial version of observation scheduling.
+  You can now construct, save, load schedules for 
+  observations. This allows you to list a set of targets 
+  which Pi-lomar will then run through in sequence.
+  See "Observation schedule menu".
+  Observation rules are simplistic at the moment. You control the sequence, exposure time and number of photos.
+
+* Further cleaning of unused methods.
+
+* Removed some unnecessary log messages.
+
+* Multiple changes within libraries to support above features.
+  Refactoring the code to separate out more classes into separate files.
+
+CAMERA --------------------------
+* Further developments of pilomarfits.py to improve image capture
+  in FITS format. 
+  Including initial support for EXIF and FITS tags.
+  The camera can add observation data tags to image files.
+  ImagePrivacy parameter controls if identifying information is
+  written to EXIF & FITS tags by pilomarfits.py routine.
+  JPG images are 'normalised' which increases the chance of getting 
+  an image even if the exposure is significantly out.
+  Currently EXIF tags are ONLY available if you are using pilomarfits.py.
+  
+* livepreview option added for 64bit operating systems.
+  This is a tool to help with focusing the camera lens.
+  You can now select live preview from the menu.
+  It opens the camera in preview mode to give interactive 
+  feedback as you tune the focus.
+  
+* You can now select the focal length of the lens from the menu.
+  (6,16,25,35 & 50mm lenses available)
+  Requires restart to propogate parameters after changing.
+  
+* /light/BatchData_...json file generated at end of each observation.
+  Lists light images captured and some control information.
+  Useful to post-process images.
+  
+MICROCONTROLLER -----------------
+* the /circuitpython folder is now divided into subfolders for each of
+  the supported microcontrollers.
+  - Currently 
+      /circuitpython/tiny2040
+	  /circuitpython/tiny2350
+  - Each has its own dedicated copy of code.py for the specific microcontroller.
+  
+* The extra capacity of the Tiny2350 makes some new features
+  possible (ONLY IF RUNNING A TINY2350!)
+  - There is now more clear feedback of Tune commands being completed.
+  - Microcontroller sends a CPU status message periodically.
+  - Improved recognition of the code.py version.
+  - More commands in the Monitor Communication tool to help
+    test and study microcontroller pin status. 
+	For development and troubleshooting.
+  Use circuitpython/tiny2350/code.py source code.
+  The Tiny2350 source code will NOT work on a Tiny2040 (not enough ram).
+  
+  
+ISSUES ADDRESSED ---------------
+#36 The Python code does not respect the RPi's locale setting by default.
+#39 After building the Hipparcos star catalog, pilomar terminates at target prompt.
+#61 Scheduled observations
+#79 pilomarfits.py does not apply analoggain
+#94 UnicodeEncodeError: 'latin-1' codec cannot encode characters in position 19-89:
+#95 Microcontroller seemst to hang and get reset if GOTO az 360degrees is goven.
+#96 pilomar_sessions.json list is malformed if history limit reached.
+#98 Stellarium constellationship.fab file nolonger available for download.
