@@ -1,5 +1,4 @@
-# code.py - circuitpython version - Pimoroni Tiny2350 test version.
-#           Currently using pico 2 circuitpython build as Tiny2350 isn't available yet.
+# code.py - Circuitpython 9.2 build for Pimoroni Tiny2350.
 
 # Sample messages...
 #  From microcontroller to RPi
@@ -11,10 +10,9 @@
 #   configure motor 20210409090949 azimuth 180.0
 #   sendstatus 20210409090949 False
 
-# NOTE: Under CircuitPython 8 & Raspian Bookworm: Thonny seems to struggle sometimes.
-# You can get memory and other errors thrown at you when you try to load a new version of this program
-# onto the microcontroller. 
-# - It is more common for the microcontroller to switch to 'read-only' mode in that configuration.
+# NOTE: If you get memory and other errors thrown at you when you try to load a new version of this program
+# onto the microcontroller :-
+# - The microcontroller can switch to 'read-only' mode sometimes.
 #   Search online for 'reset file system in circuitpython'
 # 
 #      From REPL in Thonny
@@ -27,12 +25,13 @@
 # If you want to run the microcontroller with the USB cable permanently attached 
 # there is a risk that the microcontroller will auto-reload randomly whenever the 
 # RPi O/S accesses the CIRCUITPY drive. If this is the case you can disable 
-# autoreloading by uncommenting the 2 lines below.
-#    (If these two lines are active you will have to manually restart the 
+# autoreloading by uncommenting the lines below.
+#    (If these lines are active you will have to manually restart the 
 #     microcontroller each time you update the source code. 
 #     Pressing the RESET button is the most effective method.)
-#import supervisor
-#supervisor.runtime.autoreload = False
+import supervisor
+supervisor.runtime.autoreload = False
+print("AUTORELOAD is disabled.")
 
 # Version numbering scheme:
 #       MAJOR.MINOR.MICRO
@@ -40,11 +39,12 @@
 #       MINOR = Feature changes, but same overall program. May require functionality change on RPi side too.
 #       MICRO = Bugfix, no feature changes. Will not require changes on RPi side.
 VERSION = '1.1.0' # Software version reported to the RPi.
-ACCEPTABLERPIVERSIONS = ['1.0'] # Which RPi versions are acceptable? (Ignore patch level)
+ACCEPTABLERPIVERSIONS = ['1.0','1.1','1.2'] # Which RPi versions are acceptable? (Ignore patch level)
 
 print ('hello')
 print ('This is code.py for CircuitPython.')
-print ('This supports: Pimoroni Tiny2040, Pimoroni Tiny2350.')
+print ('This supports: Pimoroni Tiny2350.')
+print ('This version currently does not fit onto the Tiny2040.')
 
 # Check we are running CircuitPython.
 CircuitPython = False # Indicates CircuitPython rather than MicroPython.
@@ -77,13 +77,16 @@ import gc # Garbage Collector
 FEATURES = []
 if board.board_id in ['raspberry_pi_pico2','pimoroni_tiny2350']:
     FEATURES.append('RP2350') # Can use capacity and features of RP2350 chip.
+    MAX_RECEIVED_LINES = 20 # We can buffer up to 20 received lines before discarding.
+    MAX_SEND_LINES = 30 # We can buffer up to 30 lines waiting for be sent before discarding.
 else:
     FEATURES.append('RP2040') # Restrict to capacity and features of RP2040 chip.
+    MAX_RECEIVED_LINES = 10 # We can buffer up to 10 received lines before discarding.
+    MAX_SEND_LINES = 20 # We can buffer up to 20 lines waiting to be sent before discarding.
 if 'pimoroni_tiny' in board.board_id: # We have a Pimoroni Tiny family microcontroller.
     FEATURES.append('TINY')
 elif 'raspberry_pi_pico' in board.board_id: # We have a Raspberry Pi Pico family microcontroller.
     FEATURES.append('PICO')
-# FEATURES.append('VMOT') # This turns the free ADC0 pin on the Tiny into a measure of the motor power voltage.
 
 print("FEATURES:",FEATURES)
 
@@ -153,18 +156,35 @@ class GPIOpin():
                 result = True
             self.PrevValue = self.Pin.value
         return result            
+        
+    def PinStatus(self):
+        """ Return text string with pin status. For reporting back to RPi.
+
+        eg:    "GP28 altstep n"
+
+        """
+        text = str(self.PinNumber).split('.')[-1] + " " + str(self.Name) + " " 
+        if self.GetValue(): text += "y" # ON
+        else: text += "n" # OFF
+        return text
 
 class led():
-    def __init__(self,pin,state=False):
+
+    LedList = [] # List of defined LEDs.
+    
+    def __init__(self,pin,name,state=False):
         """ Tiny RGB LED on/off state is inverted!
             ie to turn LED ON, pin must go LOW.
                to turn LED OFF, pin must go HIGH. """
         self.Led = digitalio.DigitalInOut(pin)
+        self.LedNumber = pin
+        self.Name = name
         self.Led.direction = digitalio.Direction.OUTPUT
         self.Led.value = None # Off
         self.Enabled = True # Set to FALSE to turn off the LED completely.
         if state: self.On()
         else: self.Off()
+        led.LedList.append(self) # Add this pin to the list of defined pins. 
 
     def Enable(self):
         """ Enable the LED and turn it on if required. """
@@ -187,6 +207,21 @@ class led():
             NOTE: Tiny RGB LED uses opposite pin state to control LED. """
         self.Led.value = True
 
+    def GetValue(self):
+        """ Return True/False if pin is on or off. """
+        return self.Led.value
+        
+    def PinStatus(self):
+        """ Return text string with pin status. For reporting back to RPi.
+
+        eg:    "GP28 altstep n"
+
+        """
+        text = str(self.LedNumber).split('.')[-1] + " " + str(self.Name) + " " 
+        if self.GetValue(): text += "y" # ON
+        else: text += "n" # OFF
+        return text
+
 class statusled():
     """ Pimoroni Tiny RGB LED version of RGB LED handling.
         The RGB LED is a collection of three led() objects. """
@@ -196,9 +231,9 @@ class statusled():
         #self.LedG = led(board.GP19) # LED_G) # Create LED for GREEN channel.
         #self.LedB = led(board.GP20) # LED_B) # Create LED for BLUE channel.
         # Pimoroni Tiny...
-        self.LedR = led(board.LED_R) # Create LED for RED channel.
-        self.LedG = led(board.LED_G) # Create LED for GREEN channel.
-        self.LedB = led(board.LED_B) # Create LED for BLUE channel.
+        self.LedR = led(board.LED_R,name='red') # Create LED for RED channel.
+        self.LedG = led(board.LED_G,name='green') # Create LED for GREEN channel.
+        self.LedB = led(board.LED_B,name='blue') # Create LED for BLUE channel.
         self.TaskList = {'idle': (False,False,False), # Off
                          'coms': (False,False,True), # Blue - Flashes when handling UART
                          'move': (False,True,False), # green - Flashes when motor is moving.
@@ -581,7 +616,7 @@ class uarthost():
                         if len(self.ReceivingLine) > 0 and self.ReceivingLine[-1] == '\n':
                             line = self.ReceivingLine.strip() # Clear special characters.
                             if len(line) > 0: # Something to process.
-                                if len(self.ReceivedLines) < 10: # Only buffer 10 lines, discard the rest. No space!
+                                if len(self.ReceivedLines) < MAX_RECEIVED_LINES: # Only buffer 10 lines, discard the rest. No space!
                                     self.ReceivedLines.append(line) # Add to list of lines to handle.
                                     line = self.RemoveChecksum(line)
                                     report = 'rec: ' + line
@@ -661,7 +696,7 @@ class uarthost():
         # message, the message will be raised gain soon.
         line = line.strip() # Clean the line.
         if len(line) > 0:
-            while len(self.WriteQueue) >= 20: # Only buffer 20 lines. Save memory.
+            while len(self.WriteQueue) >= MAX_SEND_LINES: # Only buffer 20 lines. Save memory.
                 self.WriteQueue.pop(1) # Drop the 2nd entry, the first may already be partially transmitted.
                 self.WriteDrops += 1
             self.WriteQueue.append(self.AddChecksum(line))
@@ -1186,9 +1221,24 @@ class steppermotor():
             LogFile.Log('TargetFromTrajectoryPosition',self.MotorName,'not ready. tv,mc,ta=', self.Trajectory.Valid, self.MotorConfigured,targetposition)
         return result
 
-    def TunePosition(self,delta):
+    def TunePosition(self,line):
         """ Tune the motor position. This shifts the motor, but retains the 'position' calculation unchanged.
-            Use this to address positioning errors or drift adjustments. """
+            Use this to address positioning errors or drift adjustments.
+            Receives line with format 
+
+            tune 20210410154530 azimuth -234 1
+              0        1           2      3  4
+
+                0 : always 'tune'
+                1 : timestamp
+                2 : motorname
+                3 : steps to move
+                4 : tune command reference (for acknowledgements) """
+
+        lineitems = line.split(' ')
+        delta = int(lineitems[3]) # How many steps are we moving?
+        if len(lineitems) > 4: idx = int(lineitems[4]) # Each tune command has a unique ID we should return in the acknowledgement.
+        else: idx = 0
         if self.MotorConfigured:
             self.EnableMotor()
             tunestarttime = Clock.Now()
@@ -1202,11 +1252,33 @@ class steppermotor():
             LogFile.Log("TunePosition(" + self.MotorName + ") set to " + str(self.CurrentPosition))
             self.LatestTuneSteps = delta # Record details of the last tune command received. So we can see it was handled.
             self.LatestTuneTime = Clock.Now()
-            RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ' ' + IntToTimeString(tunestarttime))
+            RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ' ' + IntToTimeString(tunestarttime) + ' ' + str(idx))
             self.SendMotorStatus(immediate=True,codes='tup') # Tell RPi latest condition of the motor.
         else:
-            RPi.Write('tune rejected ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
+            RPi.Write('tune rejected ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ' ' + str(idx) + ': Motor not configured')
             LogFile.Log("error : TunePosition(" + self.MotorName + ") Rejected, motor is not yet configured.")
+
+    #def TunePosition_xxx(self,delta):
+    #    """ Tune the motor position. This shifts the motor, but retains the 'position' calculation unchanged.
+    #        Use this to address positioning errors or drift adjustments. """
+    #    if self.MotorConfigured:
+    #        self.EnableMotor()
+    #        tunestarttime = Clock.Now()
+    #        old = self.CurrentPosition # Store the current position of the motor. We'll restore this when finished.
+    #        new = self.CurrentPosition + delta # Calculate the new target position (fullsteps).
+    #        self.SetTargetByPosition(new,Limit=False) # Set the target in the object. Primes it for the move, No error check on limits.
+    #        LogFile.Log("TunePosition(" + self.MotorName + ") Current:" + str(self.CurrentPosition) + ", NewTarget: " + str(self.TargetPosition))
+    #        self.MoveMotor() # Perform the move.
+    #        self.CurrentPosition = old
+    #        self.TargetPosition = old
+    #        LogFile.Log("TunePosition(" + self.MotorName + ") set to " + str(self.CurrentPosition))
+    #        self.LatestTuneSteps = delta # Record details of the last tune command received. So we can see it was handled.
+    #        self.LatestTuneTime = Clock.Now()
+    #        RPi.Write('tune complete ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ' ' + IntToTimeString(tunestarttime))
+    #        self.SendMotorStatus(immediate=True,codes='tup') # Tell RPi latest condition of the motor.
+    #    else:
+    #        RPi.Write('tune rejected ' + self.MotorName + ' ' + IntToTimeString(self.LatestTuneTime) + ' ' + str(delta) + ': Motor not configured')
+    #        LogFile.Log("error : TunePosition(" + self.MotorName + ") Rejected, motor is not yet configured.")
 
     def SetPins(self,stepBCM,directionBCM,mode0BCM,mode1BCM,mode2BCM,enableBCM,faultBCM):
         """ Allocate pin numbers for the various GPIO pins required. """
@@ -1763,6 +1835,29 @@ class picosession():
         line += str(codes) + ' ' # Add optional extra codes.
         RPi.Write(line) # Send over UART to RPi.
 
+    def SendPinStatus(self,namelist=[]): # Send a status message back to the RPi showing all the configured pins and their condition.
+        """ Receives a pin query like this ...
+        
+            pin query YYYYMMDDHHMMSS azstep                  <- Will reply with azstep pin.
+            pin query YYYYMMDDHHMMSS mode0 mode1 mode2       <- Will reply with 3 mode pins.
+            pin query YYYYMMDDHHMMSS                         <- Will reply with ALL pins.
+        
+            Generates a PIN status line like this... 
+        
+            pin status YYYYMMDDHHMMSS GP29 azstep n
+               or
+            pin status YYYYMMDDHHMMSS GP3 mode0 n GP4 mode1 n GP5 mode2 n
+               or
+            pin status YYYYMMDDHHMMSS GP29 azstep n GP28 altstep n GP27 dir n GP3 mode0 n GP4 mode1 n GP5 mode2 n GP2 enable n GP6 azfault n GP7 altfault n 
+                                      LED_R red n LED_G green n LED_B blue n """
+        line = "pin status "
+        line += IntToTimeString(Clock.Now()) + ' ' # Current local timestamp.
+        for pin in GPIOpin.PinList: # Go through all defined pins.
+            if namelist == [] or pin.Name in namelist: line += pin.PinStatus() + ' ' # Append the ID, Name and State of the pin
+        for pin in led.LedList: # Go through all defined pins.
+            if namelist == [] or pin.Name in namelist: line += pin.PinStatus() + ' ' # Append the ID, Name and State of the pin
+        RPi.Write(line) # Send over UART to RPi.
+
     def AutoMoveMotors(self): # Trigger movement of the motors.
         """ Call this to check the current position of each motor against their trajectory.
             If the motor needs to move, this will perform the motion. """
@@ -1893,9 +1988,11 @@ def ProcessInput(line):
         RPi.Write('# Raised artificial exception for testing.')
     elif lineitems[0] == 'tune':
         for i in Motors:
-            if i.MotorName == lineitems[2]: i.TunePosition(int(lineitems[3]))
+            if i.MotorName == lineitems[2]: i.TunePosition(line)
     elif line.startswith('rpi version'):
-        CheckVersionCompatibility(lineitems[3])        
+        CheckVersionCompatibility(lineitems[3])
+    elif line.startswith('pin query'):
+        Session.SendPinStatus(lineitems[3:]) # Send list of names (could be an empty list).
     elif line.startswith('clear trajectory'):
         RPi.Write('cleared trajectory')
         for i in Motors:

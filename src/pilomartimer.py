@@ -14,6 +14,7 @@
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from datetime import datetime, timedelta, timezone
+from textcolor import textcolor
 import threading # To use the Event.wait() method as a non-blocking wait function.
 
 class progresstimer():
@@ -31,16 +32,25 @@ class progresstimer():
         else:
             self.Current = start # Current value.
         self.Target = target # Value representing 100%
-        self.StartTime = datetime.now(timezone.utc)
+        self.StartTime = self.NowUTC()
+        
+    def NowUTC(self):
+        """ Return current timestamp in UTC. """
+        return datetime.now(timezone.utc)
+        
+    def Increment(self,step=1):
+        """ Increment current count. """
+        self.Current += step 
     
     def UpdateCount(self,count):
+        """ Update current count to new value. """
         self.Current = count
         
     def GetTotalSeconds(self):
         """ How many seconds will the entire run take? """
         temp = self.Current - self.Start
         if temp != 0: # Progress has begun.
-            totalseconds = (datetime.now(timezone.utc) - self.StartTime).total_seconds() * 100 / self.GetPercent()
+            totalseconds = (self.NowUTC() - self.StartTime).total_seconds() * 100 / self.GetPercent()
         else:
             totalseconds = 0
         return totalseconds
@@ -53,10 +63,121 @@ class progresstimer():
         else:
             ETA = self.StartTime
         return ETA
+
+    def RemainingSeconds(self):
+        """ How many seconds left? """
+        ts = int(round((self.GetETA() - self.NowUTC()).total_seconds),0)
+        return ts
+
+    def SecondsToHMS(self,value):
+        """ Receive number of seconds. 
+            Return as hh:mm:ss format string. """
+        if value < 0: si = "-"
+        else: si = ""
+        value = int(round(abs(value),0)) # Round to nearest integer.
+        ss = value % 60 # Number of seconds.
+        value = value // 60 # Minutes left?
+        mm = value % 60 # Number of minutes.
+        value = value // 60 # Hours left?
+        hh = value % 24 # Number of hours.
+        value = value // 24 # Days left?
+        if value > 0: dy = str(value) + "d "
+        else: dy = ""
+        return si + dy + str(hh).rjust(2,"0") + ":" + str(mm).rjust(2,"0") + ":" + str(ss).rjust(2,"0")
         
     def GetPercent(self):
         """ How many % complete is the process? """
         return 100 * (self.Current - self.Start) / (self.Target - self.Start)
+        
+    def UnitsPerSecond(self):
+        """ Calculate the 'speed' of progress. """
+        elapsed = (self.NowUTC() - self.StartTime).total_seconds()
+        if elapsed != 0: return float(self.Current) / elapsed
+        else: return 0.0
+        
+    def SecondsPerUnit(self):
+        """ Calculate the time to progress 1 unit. """
+        elapsed = (self.NowUTC() - self.StartTime).total_seconds()
+        if self.Current != 0: return elapsed / float(self.Current)
+        else: return 0.0
+
+    def RelativeDatetime(self,value):
+        """ Return just time if it's the same DATE as now. 
+            Else return the date too. """
+        result = str(value).split('.')[0] # yyyy-mm-dd hh:mm:ss
+        cnow = str(self.NowUTC()).split('.')[0] # yyyy-mm-dd hh:mm:ss
+        if result.split(' ')[0] == cnow.split(' ')[0]: # Same date so don't show it.
+            result = result.split(' ')[1] # Just the HH:MM:SS part.
+        return result
+        
+    def MakeProgressBar(self,color=True,text='',length=20,show_start=True,show_eta=True,todo_fg=textcolor.WHITE,todo_bg=textcolor.GREY15,done_fg=textcolor.WHITE,done_bg=textcolor.GREEN):
+        """ Create a status line with or without textcolor terminal color codes embedded.
+            color : True, line includes some color codes.
+                    False, line is plain text.
+            text  : Optional additional text to add to the end of the line after the automatic items.
+            length : Character length of the progress bar.
+            show_start : Start time is shown.
+            show_eta : ETA time is shown.
+            done_fg : textcolor to use for foreground.
+            done_bg : textcolor to use for background.
+            todo_fg : textcolor to use for foreground.
+            todo_bg : textcolor to use for background. 
+            Returns ----------------------------------------------------------
+            String ready for print() statement. Includes control codes to update existing display. """
+        # Construct barcode string.
+        pc = self.GetPercent()
+        pc_str_v = str(self.Current) + "/" + str(self.Target)
+        pc_str_p = str(round(pc,1)) + "%"
+        pc_str = '' # Construct text describing progress.
+        if len(pc_str_v) + len(pc_str) < length: pc_str = (pc_str + " " + pc_str_v).strip() # Add "a of b" info if there's space.
+        if len(pc_str_p) + len(pc_str) < length: pc_str = (pc_str + " " + pc_str_p).strip() # Add "%" measure if there's space.
+        pc_str = (pc_str + length * ' ')[:length]
+        # Split between filled and empty portion.
+        fp = int(round(length * pc / 100,0))
+        left = pc_str[:fp]
+        right = pc_str[fp:]
+        if color:
+            result = textcolor.cursorup() + str(self.NowUTC()).split('.')[0] + " "
+            if show_start: result += "Started:" + self.RelativeDatetime(self.StartTime).split('.')[0] + " "
+            result += textcolor.fgbgcolor(done_fg,done_bg,left) + textcolor.fgbgcolor(todo_fg,todo_bg,right) + " " # todo
+            if show_eta: result += "ETA:" + self.RelativeDatetime(self.GetETA()).split('.')[0] + " UTC "
+            if text != '': result += text
+            result += textcolor.clearlineforward()
+        else:
+            result = self.MakeStatusLine(color=False,text=text) # Use regular status line if no colors allowed.
+        return result
+
+    def MakeStatusLine(self,color=False,text=''):
+        """ Create a status line with or without textcolor terminal color codes embedded.
+            color : True, line includes some color codes.
+                    False, line is plain text.
+            text  : Optional additional text to add to the end of the line after the automatic items. """
+        if color:
+            result = textcolor.cursorup() + str(self.NowUTC()).split('.')[0] + " "
+            result += textcolor.white(str(round(self.GetPercent(),1))) + "%. Done "
+            result += str(self.Current) + " of " + str(self.Target) + ". ETA "
+            result += str(self.GetETA()).split('.')[0] + " UTC " + text
+            result += textcolor.clearlineforward()
+        else:
+            result = str(self.NowUTC()).split('.')[0] + " "
+            result += str(round(self.GetPercent(),1)) + "%. Done "
+            result += str(self.Current) + " of " + str(self.Target) + ". ETA "
+            result += str(self.GetETA()).split('.')[0] + " UTC " + text
+        return result
+
+    def IncrementAndDisplay(self,color=True,text='',bar=False):
+        """ Increment the target and display a status line.
+            color : True, line includes some color codes.
+                    False, line is plain text.
+            text  : Optional additional text to add to the end of the line after the automatic items.        """
+        self.Increment()
+        if bar: print(self.MakeProgressBar(color=color,text=text)) 
+        else: print(self.MakeStatusLine(color=color,text=text)) 
+        
+    def IncrementAndGetStatus(self):
+        """ Increment the target and return a status line. """
+        self.Increment()
+        return self.MakeStatusLine()
 
 class timer(): # 14 references.
     """ Clock driven timer class. 

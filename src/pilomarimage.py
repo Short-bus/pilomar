@@ -25,6 +25,11 @@ import random # random number generator.
 import os
 from PIL import Image as PIL_Image
 from PIL import ExifTags as PIL_ExifTags
+try: # Try to load piexif library. 
+    import piexif # Seems to be included as standard in Bookworm O/S pilomar build.
+except: # Load failed, assume it's not available.
+    piexif = None # Create empty holder for the class instead.
+import json 
 
 class data_set():
     """ Data set list of data points. """
@@ -757,8 +762,13 @@ class pilomarimage():
 
     @staticmethod
     def BGR(colorname):
-        """ Return color tuple for any given name. """
-        return pilomarimage.BGRColor.get(colorname,(0,0,0))
+        """ Return color tuple for any given name.
+            Raise error if name is not recognised. """
+        result = pilomarimage.BGRColor.get(colorname,None)
+        if result == None:
+            print("ERROR: pilomarimage.BGR('" + str(colorname) + "') Color name is not recognised.")
+            result = (0,0,0)
+        return result
         
     BGRAColor = {
         "Black":(0,0,0,255),
@@ -779,8 +789,13 @@ class pilomarimage():
 
     @staticmethod
     def BGRA(colorname):
-        """ Return color tuple for any given name. """
-        return pilomarimage.BGRAColor.get(colorname,(0,0,0,255))
+        """ Return color tuple for any given name.
+            Raise error if name is not recognised. """
+        result = pilomarimage.BGRAColor.get(colorname,None)
+        if result == None:
+            print("ERROR: pilomarimage.BGRA('" + str(colorname) + "') Color name is not recognised.")
+            result = (0,0,0,255)
+        return result
 
     GRAYSCALEColor = {
         "White":255,
@@ -791,7 +806,11 @@ class pilomarimage():
     @staticmethod
     def GRAYSCALE(colorname):
         """ Return grayscale tuple for any given name. """
-        return pilomarimage.GRAYSCALEColor.get(colorname,0)
+        result = pilomarimage.GRAYSCALEColor.get(colorname,None)
+        if result == None:
+            print("ERROR: pilomarimage.GRAYSCALE('" + str(colorname) + "') Color name is not recognised.")
+            result = 0
+        return result
     
     # Define default filter scripts.
     # - You can overwrite this with your own set of scripts by assigning pilomarimage.FILTERSCRIPTS = {.....}
@@ -891,6 +910,11 @@ class pilomarimage():
             } # /UrbanFilter
     } # /FILTERSCRIPTS
     
+    # Define crosshair styles.
+    CROSSHAIR_DOT = 1 # Central dot.
+    CROSSHAIR_RING = 2 # Surrounding ring/circle.
+    CROSSHAIR_SPOKES = 4 # Vertical/Horizontal lines.
+    
     def __init__(self,name=None,logger=None):
         """ Create new image item. 
             name = any arbitrary name for the image.
@@ -914,7 +938,7 @@ class pilomarimage():
             Only apply this to coordinates which are being passed directly to opencv function calls.
             If you apply it to higher level method calls in this class you may end up applying it twice which will cancel the effect out. """
         if self.InvertHeight: # Co-ordinates provided are from BOTTOM UP, convert to TOP DOWN for OpenCV.
-            if height == None: height = self.GetHeight()
+            if height == None: height = self.GetHeight() - 1
             y = height - y # Pixel locations count UP instead of DOWN. 
         return int(y)
 
@@ -929,11 +953,11 @@ class pilomarimage():
             If you apply it to higher level method calls in this class you may end up applying it twice which will cancel the effect out.            """
         if yloc == 1: # y location is at position 1 in the tuple, convert that.
             x = location[0]
-            y = self.OrientHeight(location[1])
+            y = self.OrientHeight(location[1]) # Does height increase from the TOP or BOTTOM of the image?
             r = (x,y)
         else: # y location is at position 0 in the tuple, convert that.
             x = location[1]
-            y = self.OrientHeight(location[0])
+            y = self.OrientHeight(location[0]) # Does height increase from the TOP or BOTTOM of the image?
             r = (y,x)
         return r
         
@@ -1217,7 +1241,7 @@ class pilomarimage():
         self.ImageMask = None # Array identifying which cells are occupied and which to ignore.
         self.ImageAccumulator = None # Array of cumulative image values. (For live stacking)
         self.ImageCounter = None # Array of how many values are accumulated into each pixel of self.ImageAccumulator. (For live stacking)
-        self.ActionList = [] # List of actions performed on the image.
+        self.ActionList = [['__version__',str(pilomarimage.__version__)]] # List of actions performed on the image.
         self.CreatedTimestamp = self.NowUTC()
         self.ModifiedTimestamp = None
         self.StarList = [] # Was None
@@ -1244,6 +1268,18 @@ class pilomarimage():
         self.TextList = [] # When text is printed, this holds the co-ordinates of each block of text added [[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],[fromx,fromy,tox,toy],...]
         self.AvoidTextCollisions = False # When TRUE, new text is only created if it doesn't overlap existing text.
         self.ExifData = {} # Empty dictionary of any associated EXIF tags loaded from an image.
+        # Scale/Extent of alt/az diagrams.
+        self.AltMin = -90 # Bottom of image represents -90 degrees altitude.
+        self.AltMax = 90 # Top of image represents 90 degrees altitude.
+        self.AzMin = 0 # Minimum azimuth in image is 0 degrees.
+        self.AzMax = 360 # Maximum azimuth in image is 360 degrees.
+        self.AzOffset = 180 # '0' degree azimuth point is shifted 180 degrees, ie into the center of the image.
+        # Save the parameters used for the last call to CountStars.
+        self.CountStars_last_minval = None # Record the parameters used.
+        self.CountStars_last_maxval = None # Record the parameters used.
+        self.CountStars_last_maxstars = None # Record the parameters used.
+        self.CountStars_last_threshold = None # Record the parameters used.
+        
         
     def TextCollision(self,fromx,fromy,tox,toy):
         """ Return TRUE if proposed text area collides with an existing one. """
@@ -1318,6 +1354,16 @@ class pilomarimage():
         self.ActionList.append(['clear'])
         self.CreatedTimestamp = self.NowUTC()
         self.ModifiedTimestamp = self.NowUTC()
+ 
+    def OpenCVtoPIL(self,opencv_buffer):
+        """ Convert an OpenCV buffer into a PIL buffer. """
+        pil_buffer = Image.fromarray(opencv_buffer)
+        return pil_buffer
+
+    def PILtoOpenCV(self,pil_buffer):
+        """ Convert a PIL (Pillow) image buffer into an OpenCV buffer. """
+        opencv_buffer = np.asarray(pil_buffer)
+        return opencv_buffer
         
     def LoadBuffer(self,imagebuffer):
         """ Import an existing OpenCV/Numpy image buffer. """
@@ -1355,23 +1401,216 @@ class pilomarimage():
         self.ActionList.append(['resolveaccumulator'])
         self.ModifiedTimestamp = self.NowUTC()
         return True
+        
+    def exif_float(self,value):
+        """ Convert a floating point number into an 'exif' tag compatible tuple.
+            EXIF tags store floating point values as a tuple of NUMERATOR,DENOMINATOR integers.
+            1.0 returns (1,1)
+            0.5 returns (1,2)
+            50.5 returns (101,2) """
+        result = value.as_integer_ratio()
+        return result
+        
+    #def exif_datetime_old(self,value):
+    #    """ Convert a datetime value into an exif compatible time string. 
+    #        exif tags expect datetime to be formatted as YYYY:MM:DD HH:MM:SS """
+    #    if type(value) = str: # Convert from a string to datetime.
+    #        if "T" in value: value = datetime.fromisoformat(value) # ISO format dates.
+    #        elif "+" in value or "-" in value: value = datetime.strptime(value,"%Y-%m-%d %H:%M:%S%z")
+    #        else: value = datetime.strptime(value,"%Y-%m-%d %H:%M:%S")
+    #    else: result = value.strftime("%Y:%m:%d %H:%M:%S")
+    #    return result
+
+    def exif_datetime(self,value):
+        """ Convert a datetime value into an exif compatible time string. 
+            Value can be datetime or a str(datetime) object.
+            result is for EXIF. Exif tags expect datetime to be formatted as YYYY:MM:DD HH:MM:SS
+                                                                             0123456789012345678 """
+        value = str(value) # Make sure all values are string format YYYYxMMxDDxHHxMMxSS
+        result = value[0:4] + ":" + value[5:7] + ":" + value[8:10] + " " + value[11:13] + ":" + value[14:16] + ":" + value[17:19]
+        return result
+        
+    def exif_string(self,value):
+        """ Convert any value to an exif compatible string. """
+        return str(value)
+
+    def exif_int(self,value):
+        """ Convert any value to an exif compatible integer. """
+        try:
+            value = int(round(float(str(value)),0))
+        except:
+            value = 0 # Any failures translate to 0 value.
+        return value
+
+    def AddExifTags(self,filename,tagdicts):
+        """ Add EXIF tags to a jpeg file.
+            See: https://pypi.org/project/piexif/ 
+
+            Parameters ----------------------------------------------------
+            filename: The jpeg file to update.
+            tagdicts: A list of dictionaries or filenames containing EXIF tag data.
+                      Can be a single dictionary or filename also.
+                      If an entry is a dictionary it is parsed directly.
+                      If an entry is NOT a dictionary it will be loaded from .json as a dictionary, then parsed.
+                      If an entry is None, it is skipped.
+                      If an entry cannot be parsed, it is skipped with a warning.
+                      
+            Example -------------------------------------------------------
+            >>> pim = pilomarimage() # Create new pilomarimage handler.
+            >>> pin.AddExifTags('myimage.jpg',{"Copyright": "owner"}) # Simplest form. Applies the dictionary of exif tags to the image file.
+            
+            Example -------------------------------------------------------
+            >>> pim = pilomarimage() # Create new pilomarimage handler.
+            >>> pin.AddExifTags('myimage.jpg','mytags.json') # Applies the contents of mytags.json to the image file.
+            
+            Example -------------------------------------------------------
+            >>> pim = pilomarimage() # Create new pilomarimage handler.
+            >>> pin.AddExifTags('myimage.jpg',['mytags_1.json','mytags_2.json','mytags_3.json']) # Applies the contents of 3 json files to the image file.
+            
+            
+            Known EXIF tags :-                      (only a subset is generated here)
+            >>> dir(piexif.ExifIFD)
+            ['Acceleration', 'ApertureValue', 'BodySerialNumber', 'BrightnessValue', 'CFAPattern', 'CameraElevationAngle', 'CameraOwnerName', 'ColorSpace', 'ComponentsConfiguration', 'CompressedBitsPerPixel', 'Contrast', 'CustomRendered', 'DateTimeDigitized', 'DateTimeOriginal', 'DeviceSettingDescription', 'DigitalZoomRatio', 'ExifVersion', 'ExposureBiasValue', 'ExposureIndex', 'ExposureMode', 'ExposureProgram', 'ExposureTime', 'FNumber', 'FileSource', 'Flash', 'FlashEnergy', 'FlashpixVersion', 'FocalLength', 'FocalLengthIn35mmFilm', 'FocalPlaneResolutionUnit', 'FocalPlaneXResolution', 'FocalPlaneYResolution', 'GainControl', 'Gamma', 'Humidity', 'ISOSpeed', 'ISOSpeedLatitudeyyy', 'ISOSpeedLatitudezzz', 'ISOSpeedRatings', 'ImageUniqueID', 'InteroperabilityTag', 'LensMake', 'LensModel', 'LensSerialNumber', 'LensSpecification', 'LightSource', 'MakerNote', 'MaxApertureValue', 'MeteringMode', 'OECF', 'OffsetTime', 'OffsetTimeDigitized', 'OffsetTimeOriginal', 'PixelXDimension', 'PixelYDimension', 'Pressure', 'RecommendedExposureIndex', 'RelatedSoundFile', 'Saturation', 'SceneCaptureType', 'SceneType', 'SensingMethod', 'SensitivityType', 'Sharpness', 'ShutterSpeedValue', 'SpatialFrequencyResponse', 'SpectralSensitivity', 'StandardOutputSensitivity', 'SubSecTime', 'SubSecTimeDigitized', 'SubSecTimeOriginal', 'SubjectArea', 'SubjectDistance', 'SubjectDistanceRange', 'SubjectLocation', 'Temperature', 'UserComment', 'WaterDepth', 'WhiteBalance']
+            
+            >>> dir(piexif.GPSIFD)
+            ['GPSAltitude', 'GPSAltitudeRef', 'GPSAreaInformation', 'GPSDOP', 'GPSDateStamp', 'GPSDestBearing', 'GPSDestBearingRef', 'GPSDestDistance', 'GPSDestDistanceRef', 'GPSDestLatitude', 'GPSDestLatitudeRef', 'GPSDestLongitude', 'GPSDestLongitudeRef', 'GPSDifferential', 'GPSHPositioningError', 'GPSImgDirection', 'GPSImgDirectionRef', 'GPSLatitude', 'GPSLatitudeRef', 'GPSLongitude', 'GPSLongitudeRef', 'GPSMapDatum', 'GPSMeasureMode', 'GPSProcessingMethod', 'GPSSatellites', 'GPSSpeed', 'GPSSpeedRef', 'GPSStatus', 'GPSTimeStamp', 'GPSTrack', 'GPSTrackRef', 'GPSVersionID']
+            
+            >>> dir(piexif.ImageIFD)
+            ['ActiveArea', 'AnalogBalance', 'AntiAliasStrength', 'Artist', 'AsShotICCProfile', 'AsShotNeutral', 'AsShotPreProfileMatrix', 'AsShotProfileName', 'AsShotWhiteXY', 'BaselineExposure', 'BaselineNoise', 'BaselineSharpness', 'BatteryLevel', 'BayerGreenSplit', 'BestQualityScale', 'BitsPerSample', 'BlackLevel', 'BlackLevelDeltaH', 'BlackLevelDeltaV', 'BlackLevelRepeatDim', 'CFALayout', 'CFAPattern', 'CFAPlaneColor', 'CFARepeatPatternDim', 'CalibrationIlluminant1', 'CalibrationIlluminant2', 'CameraCalibration1', 'CameraCalibration2', 'CameraCalibrationSignature', 'CameraSerialNumber', 'CellLength', 'CellWidth', 'ChromaBlurRadius', 'ClipPath', 'ColorMap', 'ColorMatrix1', 'ColorMatrix2', 'ColorimetricReference', 'Compression', 'Copyright', 'CurrentICCProfile', 'CurrentPreProfileMatrix', 'DNGBackwardVersion', 'DNGPrivateData', 'DNGVersion', 'DateTime', 'DefaultCropOrigin', 'DefaultCropSize', 'DefaultScale', 'DocumentName', 'DotRange', 'ExifTag', 'ExposureIndex', 'ExposureTime', 'ExtraSamples', 'FillOrder', 'FlashEnergy', 'FocalPlaneResolutionUnit', 'FocalPlaneXResolution', 'FocalPlaneYResolution', 'ForwardMatrix1', 'ForwardMatrix2', 'GPSTag', 'GrayResponseCurve', 'GrayResponseUnit', 'HalftoneHints', 'HostComputer', 'ImageDescription', 'ImageHistory', 'ImageID', 'ImageLength', 'ImageNumber', 'ImageResources', 'ImageWidth', 'Indexed', 'InkNames', 'InkSet', 'InterColorProfile', 'Interlace', 'JPEGACTables', 'JPEGDCTables', 'JPEGInterchangeFormat', 'JPEGInterchangeFormatLength', 'JPEGLosslessPredictors', 'JPEGPointTransforms', 'JPEGProc', 'JPEGQTables', 'JPEGRestartInterval', 'JPEGTables', 'LensInfo', 'LinearResponseLimit', 'LinearizationTable', 'LocalizedCameraModel', 'Make', 'MakerNoteSafety', 'MaskedAreas', 'Model', 'NewSubfileType', 'Noise', 'NoiseProfile', 'NoiseReductionApplied', 'NumberOfInks', 'OPIProxy', 'OpcodeList1', 'OpcodeList2', 'OpcodeList3', 'Orientation', 'OriginalRawFileData', 'OriginalRawFileDigest', 'OriginalRawFileName', 'PhotometricInterpretation', 'PlanarConfiguration', 'Predictor', 'PreviewApplicationName', 'PreviewApplicationVersion', 'PreviewColorSpace', 'PreviewDateTime', 'PreviewSettingsDigest', 'PreviewSettingsName', 'PrimaryChromaticities', 'PrintImageMatching', 'ProcessingSoftware', 'ProfileCalibrationSignature', 'ProfileCopyright', 'ProfileEmbedPolicy', 'ProfileHueSatMapData1', 'ProfileHueSatMapData2', 'ProfileHueSatMapDims', 'ProfileLookTableData', 'ProfileLookTableDims', 'ProfileName', 'ProfileToneCurve', 'Rating', 'RatingPercent', 'RawDataUniqueID', 'RawImageDigest', 'ReductionMatrix1', 'ReductionMatrix2', 'ReferenceBlackWhite', 'ResolutionUnit', 'RowInterleaveFactor', 'RowsPerStrip', 'SMaxSampleValue', 'SMinSampleValue', 'SampleFormat', 'SamplesPerPixel', 'SecurityClassification', 'SelfTimerMode', 'SensingMethod', 'ShadowScale', 'Software', 'SpatialFrequencyResponse', 'StripByteCounts', 'StripOffsets', 'SubIFDs', 'SubTileBlockSize', 'SubfileType', 'T4Options', 'T6Options', 'TIFFEPStandardID', 'TargetPrinter', 'Threshholding', 'TileByteCounts', 'TileLength', 'TileOffsets', 'TileWidth', 'TimeZoneOffset', 'TransferFunction', 'TransferRange', 'UniqueCameraModel', 'WhiteLevel', 'WhitePoint', 'XClipPathUnits', 'XMLPacket', 'XPAuthor', 'XPComment', 'XPKeywords', 'XPSubject', 'XPTitle', 'XResolution', 'YCbCrCoefficients', 'YCbCrPositioning', 'YCbCrSubSampling', 'YClipPathUnits', 'YResolution']
+            
+            """
+        if piexif == None: # Check piexif library is available.
+            print("pilomarimage.AddExifTags: piexif library is not available. Try installing it.")
+            return False
+        if type(tagdicts) != list: tagdicts = [tagdicts] # If a single dictionary received turn it into a list.
+        safedicts = [] # Build new list of validated dictionaries.
+        # Convert filenames into dictionaries.
+        for i,c in enumerate(tagdicts):
+            #print("pilomarimage.AddExifTags: Considering",i,c)
+            if c == None: continue # Ignore None values.
+            if type(c) != dict: # It's not already a dictionary, so load and convert it.
+                #print("pilomarimage.AddExifTags: Loading",c)
+                try:
+                    with open(c,'r') as f:
+                        c = json.load(f)
+                except Exception as e:
+                    print("pilomarimage.AddExifTags: Parsing",c,"as a dictionary failed. Skipping.")
+                    print("error:",e)
+                    continue # Move on to the entry.
+            safedicts.append(c)
+            #print("pilomarimage.AddExifTags: Gathered",c)
+        # If no dictionaries available, simply return.
+        if len(safedicts) < 1: 
+            #print("pilomarimage.AddExifTags: No dictionaries available.")
+            return 
+        
+        im = PIL_Image.open(filename) # Open the image in PIL.
+        if 'exif' in im.info: # Create empty dictionary for exif data if it's not already in the information area.
+            exif_dict = piexif.load(im.info["exif"]) # Get EXIF data.
+        else:
+            exif_dict = {}
+        for a in ["0th","Exif","GPS","1st"]: # Make sure all the sections of exif data are available.
+            if not a in exif_dict:
+                exif_dict[a] = {}
+        w, h = im.size # Get image dimensions.
+        # Beware setting these tag values. piexif does not protect you from using the wrong datatype, but it will fail upon saving.
+        # If you are setting tags which expect FLOAT values you must convert your float using the self.exif_float() method.
+        # Integers must be integers.
+        # GPS co-ordinates expect DMS tuples with float format, but they must resolve to integer values!?! ((90,1),(30,1),(45,1))
+        # Dates must be in yyyy:mm:dd hh:mm:ss format.
+        # piexif /_exif.py contains dictionaries which define the datatypes for each element. There's no automatic validation in piexif.
+        # If any of the datatypes are incorrect, the exception will only occur during piexif.dump(), you have to work out which tag value caused the problem.
+        exif_dict["0th"][piexif.ImageIFD.XResolution] = self.exif_float(w) # Set WIDTH resolution exif tag.
+        exif_dict["0th"][piexif.ImageIFD.YResolution] = self.exif_float(h) # Set HEIGHT resolution exif tag.
+        exif_dict["0th"][piexif.ImageIFD.ImageWidth] = self.exif_int(w) # Set WIDTH pixels exif tag.
+        exif_dict["0th"][piexif.ImageIFD.ImageLength] = self.exif_int(h) # Set WIDTH pixels exif tag.
+        for tagdict in safedicts: # Process each dictionary in turn.
+            for key,value in tagdict.items(): # Read through all the tags and update into the exif header.
+                if key == 'Copyright': exif_dict["0th"][piexif.ImageIFD.Copyright] = self.exif_string(value) # 'owner') # Who owns the photograph?
+                elif key == 'DateTime': exif_dict["0th"][piexif.ImageIFD.DateTime] = self.exif_datetime(value) # self.NowUTC())
+                elif key == 'DocumentName': exif_dict["0th"][piexif.ImageIFD.DocumentName] = self.exif_string(value) # "light_yyyymmddhhmmss_01")
+                elif key == 'ExposureTime': exif_dict["0th"][piexif.ImageIFD.ExposureTime] = self.exif_float(value) # 0.5) # seconds. (Store as numerator/denominator, so 0.5 = (5,10)
+                elif key == 'HostComputer': exif_dict["0th"][piexif.ImageIFD.HostComputer] = self.exif_string(value) # 'pilomar')
+                elif key == 'ImageDescription': exif_dict["0th"][piexif.ImageIFD.ImageDescription] = self.exif_string(value) # 'pilomar image')
+                elif key == 'ImageHistory': exif_dict["0th"][piexif.ImageIFD.ImageHistory] = self.exif_string(value) # 'pilomar image')
+                elif key == 'ImageID': exif_dict["0th"][piexif.ImageIFD.ImageID] = self.exif_string(value) # "light_yyyymmddhhmmss_01")
+                elif key == 'Make': exif_dict["0th"][piexif.ImageIFD.Make] = self.exif_string(value) # "sony")
+                elif key == 'Model': exif_dict["0th"][piexif.ImageIFD.Model] = self.exif_string(value) # "imx477")
+                elif key == 'ProcessingSoftware': exif_dict["0th"][piexif.ImageIFD.ProcessingSoftware] = self.exif_string(value) # "pilomar")
+                
+                elif key == 'Software': exif_dict["0th"][piexif.ImageIFD.Software] = self.exif_string(value) # "pilomar")
+                elif key == 'GPSDateStamp': exif_dict["GPS"][piexif.GPSIFD.GPSDateStamp] = self.exif_datetime(value) # self.NowUTC())
+                ##           'GPSLatitude': (self.exif_float(54),self.exif_float(0),self.exif_float(0)) # DMS
+                # GPS co-ordinates must be a tuple of 'exif float' values, but the values must be integers. piexif.dump() fails otherwise.
+                elif key == 'GPSLatitude': exif_dict["GPS"][piexif.GPSIFD.GPSLatitude] = (self.exif_float(int(value[0])),self.exif_float(int(value[1])),self.exif_float(int(value[2]))) # DMS
+                elif key == 'GPSLatitudeRef': exif_dict["GPS"][piexif.GPSIFD.GPSLatitudeRef] = self.exif_string(value) # 'N') # DMS
+                ##           'GPSLongitude': (self.exif_float(0),self.exif_float(30),self.exif_float(0)) # DMS
+                elif key == 'GPSLongitude': exif_dict["GPS"][piexif.GPSIFD.GPSLongitude] = (self.exif_float(int(value[0])),self.exif_float(int(value[1])),self.exif_float(int(value[2]))) # DMS
+                elif key == 'GPSLongitudeRef': exif_dict["GPS"][piexif.GPSIFD.GPSLongitudeRef] = self.exif_string(value) # 'W') # DMS
+                elif key == 'CameraOwnerName': exif_dict["Exif"][piexif.ExifIFD.CameraOwnerName] = self.exif_string(value) # 'owner') # Who owns the equipment?
+                elif key == 'DateTimeOriginal': exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = self.exif_datetime(value) # self.NowUTC())
+                
+                elif key == 'DateTimeDigitized': exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = self.exif_datetime(value) # self.NowUTC())
+                elif key == 'ExposureMode': exif_dict["Exif"][piexif.ExifIFD.ExposureMode] = self.exif_int(value) # 1) # Exposure mode - manual.
+                elif key == 'FocalLength': exif_dict["Exif"][piexif.ExifIFD.FocalLength] = self.exif_float(value) # 50.0) # mm
+                elif key == 'FocalLengthIn35mmFilm': exif_dict["Exif"][piexif.ExifIFD.FocalLengthIn35mmFilm] = self.exif_float(value) # 280.0) # mm
+                elif key == 'Humidity': exif_dict["Exif"][piexif.ExifIFD.Humidity] = self.exif_float(value) # 80.0) # Percentage
+                elif key == 'Pressure': exif_dict["Exif"][piexif.ExifIFD.Pressure] = self.exif_float(value) # 990.0) # hPa.
+                elif key == 'ShutterSpeedValue': exif_dict["Exif"][piexif.ExifIFD.ShutterSpeedValue] = self.exif_float(value) # 0.5) # Exposure seconds.
+                elif key == 'Temperature': exif_dict["Exif"][piexif.ExifIFD.Temperature] = self.exif_float(value) # -10.0) # C 
+        exif_bytes = piexif.dump(exif_dict) # Turn exif data back into binary.
+        im.save(filename, "jpeg", exif=exif_bytes, quality=100) # Save image with new exif data tags. Still at 100% quality, but some artifacts will be created.
+        return True
+
+    def merge_exif_dict(self,master_dict,*dicts):
+        """ Merge secondary_dict contents into master_dict.
+            Use this if you are extracting exif tags from multiple separate sources.
+            This will combine values into a single dictionary. 
+            You can have multiple dictionaries in a single call, they are all merged into the first one. """
+        for secondary_dict in dicts: # Process each secondary dictionary listed in turn.
+            for groupkey,taggroup in secondary_dict.items(): # Go through the different groups of tags.
+                if not groupkey in master_dict: master_dict[groupkey] = {} # Add group if it's not already there.
+                for tagname,value in taggroup.items(): # go through each tag entry in the group.
+                    master_dict[groupkey][tagname] = value # Transfer the value into the master dictionary.
+        return master_dict
+
+    def print_file_exif_tags(self,filename):
+        if piexif == None: # Check piexif library is available.
+            print("pilomarimage.print_file_exif_tags: piexif library is not available. Try installing it.")
+            return False
+        exif_dict = piexif.load(filename)
+        for ifd in ("0th", "Exif", "GPS", "1st"):
+            print("Tags for IFD:",ifd)
+            for tag in exif_dict[ifd]:
+                print(ifd, # Section of exif tags.
+                      piexif.TAGS[ifd][tag]["name"], # Tag within that section.
+                      exif_dict[ifd][tag]) # Value of the tag.
+
+    def ValidateExifStructure(self,dictionary):
+        for a in ["0th","Exif","GPS","1st"]: # Make sure all the sections of exif data are available.
+            if not a in dictionary:
+                dictionary[a] = {}
+        return dictionary
   
     def GetExif(self,filename):
         """ Given a disc file, load any EXIF tags available. 
             Returns a dictionary of TAG name and value.
             It does not populate self.ExifData dictionary. """
-        # from PIL import Image as PIL_Image
-        # from PIL import ExifTags as PIL_ExifTags
-        with PIL_Image.open('img.jpg') as img: # Use PIL to open the image.
-            raw_data = img.getexif() # Use PIL getexif() method to extract raw exif data.
-        if raw_data == None: raw_data = {} # No exif data available.
-        for key,val in raw_data.items(): # Convert the raw exif keys into recognisable tags.
-            if key in PIL_ExifTags: # Can convert key into a tag.
-                exif_data[PIL_ExifTags.TAGS[key]] = val
-            else: # Cannot convert the key.
-                exif_data[key] = val
-        return exif_data
-  
+        exif_data = {} # Start with empty exif dictionary.
+        if piexif != None: # piexif is available.
+            try: # Try to load feom the file.
+                with PIL_Image.open(filename) as im: # Use PIL to open the image.
+                    if 'exif' in im.info: # Create empty dictionary for exif data if it's not already in the information area.
+                        exif_data = piexif.load(im.info["exif"]) # Get EXIF data.
+                    else:
+                        exif_data = {}
+            except Exception as e:
+                print("pilomarimage.GetExif(",filename,")failed:",e)
+                self.Log("pilomarimage.GetExif(",filename,") failed:",e,terminal=False)
+        else:
+            self.Log("pilomarimage.GetExif(",filename,") piexif not available.",terminal=False)
+        exif_data = self.ValidateExifStructure(exif_data) # Make sure all the sections are available.
+        
     def LoadFile(self,filename,loadexif=False):
         """ Load image buffer from disc. """
         self.Log("pilomarimage",self.Name,".LoadFile(",filename,")",terminal=False)
@@ -1386,6 +1625,7 @@ class pilomarimage():
                 self.ExifData = self.GetExif(filename)
             else:
                 self.ExifData = {} # Empty.
+            self.Log("pilomarimage",self.Name,".LoadFile(): Loaded",self.GetDimensions(),self.GetType(),terminal=False)
         else:
             # File didn't load!
             self.Log("pilomarimage",self.Name,".LoadFile(",filename,") failed.",terminal=False)
@@ -1396,17 +1636,33 @@ class pilomarimage():
         """ Given a filename, return a lower case file type. """
         return filename.split('.')[-1].lower()
 
-    def SaveFile(self,filename,quality=None):
+    def SaveFile(self,filename,quality=None,library='opencv',exif_dict=None):
         """ Save image buffer to disc.
             To specify the quality for jpeg files you can use a call like this...
                 cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), 90] # 90% image quality.
-            Set the 'quality' input parameter when making this call to override the jpg quality to your preferred value. """
+            Parameters ------------------------------------------------------------
+            filename:  The filename to be saved.
+            quality:   Set the 'quality' input parameter when making this call to override the jpg quality to your preferred value.
+            library:   library can be 'opencv' or 'pil'. Image is saved via appropriate library.
+                       When using pil library, it saves as .jpg files only.
+            exif_dict: Can be a dictionary of exif_tags to write. Created by piexif utility. (Fill force writing via 'pil' library.)
+                       If you specify EXIF tags in this parameter the library will automatically switch to 'pil'. """
         self.Log("pilomarimage",self.Name,".SaveFile(",filename,")",terminal=False)
+        if exif_dict != None: 
+            library = 'pil' # Must use Pillow to write files with exif tags.
         if self.ImageExists():
-            if quality != None: # Image quality was specified.
-                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]) # imwrite doesn't report errors very well, beware.
-            else: # Image quality can be default.
-                cv2.imwrite(filename,self.ImageBuffer) # imwrite doesn't report errors very well, beware.
+            if library == 'pil': # Use Pillow to write the image file.
+                self.Log("pilomarimage",self.Name,".SaveFile(",filename,") via PIL.",terminal=False)
+                pil_buffer = self.OpenCVtoPIL(self.ImageBuffer) # Get buffer as a PIL object.
+                if exif_dict == None: exif_dict = {} # No EXIF tags to write.
+                if quality == None: quality = 75 # Default to 75% quality.
+                pil_buffer.save(targetfile, "jpeg", exif=exif_bytes, quality=quality) # Save with specific quality and exif tags.
+            else: # Use OpenCV to write the image file.
+                self.Log("pilomarimage",self.Name,".SaveFile(",filename,") via OpenCV.",terminal=False)
+                if quality != None: # Image quality was specified.
+                    cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]) # imwrite doesn't report errors very well, beware.
+                else: # Image quality can be default.
+                    cv2.imwrite(filename,self.ImageBuffer) # imwrite doesn't report errors very well, beware.
             self.ActionList.append(['save',filename])
         else:
             print("pilomarimage.SaveFile(",filename,"): No ImageBuffer.")
@@ -1428,6 +1684,56 @@ class pilomarimage():
             print("pilomarimage.SaveFile(",filename,"): The file was not saved.")
         return result
 
+    def SaveBuffer(self,image_buffer,filename,quality=None,library='opencv',exif_dict=None):
+        """ Save image buffer to disc.
+            To specify the quality for jpeg files you can use a call like this...
+                cv2.imwrite(filename,self.ImageBuffer,[int(cv2.IMWRITE_JPEG_QUALITY), 90] # 90% image quality.
+            Parameters ------------------------------------------------------------
+            image_buffer: An image buffer.
+            filename:     The filename to be saved.
+            quality:      Set the 'quality' input parameter when making this call to override the jpg quality to your preferred value.
+            library:      library can be 'opencv' or 'pil'. Image is saved via appropriate library.
+                          When using pil library, it saves as .jpg files only.
+            exif_dict:    Can be a dictionary of exif_tags to write. Created by piexif utility. (Fill force writing via 'pil' library.)
+                          If you specify EXIF tags in this parameter the library will automatically switch to 'pil'. """
+        self.Log("pilomarimage",self.Name,".SaveBuffer(",filename,")",terminal=False)
+        if exif_dict != None: 
+            library = 'pil' # Must use Pillow to write files with exif tags.
+        if type(image_buffer) != type(None):
+            if library == 'pil': # Use Pillow to write the image file.
+                self.Log("pilomarimage",self.Name,".SaveBuffer(",filename,") via PIL.",terminal=False)
+                pil_buffer = self.OpenCVtoPIL(image_buffer) # Get buffer as a PIL object.
+                if exif_dict == None: exif_dict = {} # No EXIF tags to write.
+                if quality == None: quality = 75 # Default to 75% quality.
+                pil_buffer.save(targetfile, "jpeg", exif=exif_bytes, quality=quality) # Save with specific quality and exif tags.
+            else: # Use OpenCV to write the image file.
+                self.Log("pilomarimage",self.Name,".SaveBuffer(",filename,") via OpenCV.",terminal=False)
+                if quality != None: # Image quality was specified.
+                    cv2.imwrite(filename,image_buffer,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]) # imwrite doesn't report errors very well, beware.
+                else: # Image quality can be default.
+                    cv2.imwrite(filename,image_buffer) # imwrite doesn't report errors very well, beware.
+            self.ActionList.append(['save',filename])
+        else:
+            print("pilomarimage.SaveBuffer(",filename,"): No ImageBuffer.")
+        height = image_buffer.shape[0]
+        width = image_buffer.shape[1]
+        maxdim = max(height,width) # Which is the largest dimension? Some file formats have limits.
+        ift = self.ImageFileType(filename) # What file type are we generating?
+        if ift in ['bmp'] and maxdim > 32768: # bmp dimensions can't exceed this size.
+            print("pilomarimage.SaveBuffer(",filename,"): Image dimensions exceed bmp limits.(",height,width,")")
+        elif ift in ['jpg','jpeg'] and maxdim > 65535: # jpeg dimensions can't exceed this size.
+            print("pilomarimage.SaveBuffer(",filename,"): Image dimensions exceed jpeg limits.(",height,width,")")
+        # Check it worked. Big images fail silently!
+        result = False # Failed unless a file exists which contains something.
+        if os.path.exists(filename):
+            if os.path.getsize(filename) == 0:
+                print("pilomarimage.SaveBuffer(",filename,"): The file exists but it is empty.")
+            else:
+                result = True
+        else:
+            print("pilomarimage.SaveBuffer(",filename,"): The file was not saved.")
+        return result
+
     def ClipImage(self,xstart,ystart,xend,yend):
         """ Clip the image. """
         self.Log("pilomarimage",self.Name,".ClipImage(",xstart,ystart,xend,yend,")",terminal=False)
@@ -1438,28 +1744,76 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
         
-    def ScaleImage(self,scale=None,vscale=None,hscale=None):
+    def ScaleImage(self,scale=None,vscale=None,hscale=None,width=None,height=None):
         """ Scale the current image buffer by 'scale' ratio.
             scale is applied in both dimensions.
             vscale is applied to vertical only.
-            hscale is applied to horizontal only. """
+            hscale is applied to horizontal only. 
+            width is absolute width to produce.
+            height is absolute height to produce. """
         self.Log("pilomarimage",self.Name,".ScaleImage(",scale,")",terminal=False)
-        if scale != None: # Same scale in both directions.
-            vscale = scale
-            hscale = scale
-        if vscale <= 0.0:
-            print("pilomarimage.ScaleImage(vscale",vscale,") must be > 0.0")
-            return False
-        if hscale <= 0.0:
-            print("pilomarimage.ScaleImage(hscale",hscale,") must be > 0.0")
-            return False
-        height = int(self.ImageBuffer.shape[0] * vscale)
-        width = int(self.ImageBuffer.shape[1] * hscale)
+        if width == None or height == None: # No absolute value given.
+            if scale != None: # Same scale in both directions.
+                vscale = scale
+                hscale = scale
+            if vscale <= 0.0:
+                print("pilomarimage.ScaleImage(vscale",vscale,") must be > 0.0")
+                return False
+            if hscale <= 0.0:
+                print("pilomarimage.ScaleImage(hscale",hscale,") must be > 0.0")
+                return False
+            height = int(self.ImageBuffer.shape[0] * vscale)
+            width = int(self.ImageBuffer.shape[1] * hscale)
         self.Log("pilomarimage",self.Name,".ScaleImage: Dimensions h",height,"w",width,terminal=False)
         self.ImageBuffer = cv2.resize(self.ImageBuffer,(width,height),interpolation=self.ResizeMethod) # Note RESIZE takes (width,height) rather than usual openCV (height,width)!
         self.ActionList.append(['scale',scale,vscale,hscale,(width,height)])
         self.ModifiedTimestamp = self.NowUTC()
         return True
+
+    def NormalizeBuffer(self,image_buffer,min_out,max_out,min_in=None,max_in=None):
+        """ Normalize values of an array to between min_out and max_out.
+            Parameters ------------------------------------
+            image_buffer : The array to normalise.
+            min_out      : The minimum value in the normalised result.
+            max_out      : The maximum value in the normalised result.
+            min_in       : Default None: If set, forces the minimum value for input numbers.
+            max_in       : Default None: If set, forces the maximum value for input numbers. """
+        image_buffer = image_buffer.astype(np.float32) # Convert to floating point.
+        c_min = np.min(image_buffer)
+        c_max = np.max(image_buffer)
+        if min_in != None: c_min = min(c_min,min_in) # Force a minimum input value even if it's not in the array.
+        if max_in != None: c_max = max(c_max,max_in) # Firce a maximum input value even if it's not in the array.
+        c_span = c_max - c_min
+        self.Log("pilomarimage.NormalizeArray(): Output limits: min:",min_out,"max:",max_out,"span:",(max_out - min_out))
+        self.Log("pilomarimage.NormalizeArray(): Input limits: min:",c_min,"max:",c_max,"span:",c_span)
+        try:
+            result_buffer = ((max_out - min_out) * (image_buffer - c_min) / c_span) + min_out # Normalize to new range.
+        except Exception as e:
+            print("pilomarimage.NormalizeArray(",min_out,max_out,") failed:",e)
+            self.Log("pilomarimage.NormalizeArray(): error_NormalizeArray_001:",e,terminal=True)
+            self.Log("pilomarimage.NormalizeArray",min_out,max_out,')failed.',terminal=True)
+            result_buffer = np.clip(image_buffer.astype(np.float32),0,max_out) # Couldn't normalize, so clip instead.
+        return result_buffer
+
+    def DrawContours(self,contourcolor=(255,255,255),thickness=1,lower_t=30,upper_t=200):
+        """ WIP: Create new image buffer with contours added. """
+        image_buffer = self.ImageBuffer.copy() # Get copy of the current image.
+        normal_buffer = self.NormalizeBuffer(image_buffer,0,255) # Normalize first to enhance the image.
+        image_buffer = self.DrawBufferContours(normal_buffer,contourcolor=contourcolor,thickness=thickness,lower_t=lower_t,upper_t=upper_t)
+        #gray = self.NewBufferType('grayscale') # Get grayscale copy of the current image.
+        #edges = cv2.Canny(gray, 30, 200) # Find Canny edges 
+        #contour_list, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
+        #image_buffer = cv2.drawContours(image_buffer, contour_list, -1, contourcolor, thickness) # -1 = 'draw all the detected contours'
+        return image_buffer        
+    
+    def DrawBufferContours(self,image_buffer,contourcolor=(255,255,255),thickness=1,lower_t=30,upper_t=200):
+        """ WIP: Create new image buffer with contours added. """
+        normal_buffer = self.NormalizeBuffer(image_buffer,0,255) # Normalize first to enhance the image.
+        gray = self.ChangeBufferType(normal_buffer,'grayscale') # Get grayscale copy of the current image.
+        edges = cv2.Canny(gray, lower_t, upper_t) # Find Canny edges 
+        contour_list, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
+        image_buffer = cv2.drawContours(image_buffer, contour_list, -1, contourcolor, thickness) # -1 = 'draw all the detected contours'
+        return image_buffer
     
     def HorizontalBlurImage(self,band):
         """ Shrink the current image buffer horizontally, averaging the colors. 
@@ -1530,7 +1884,7 @@ class pilomarimage():
         else: self.ImageAccumulator = donor.ImageAccumulator.copy()
         if isinstance(donor.ImageCounter,type(None)): self.ImageCounter = None 
         else: self.ImageCounter = donor.ImageCounter.copy()
-        self.ActionList = []
+        self.ActionList = [['__version__',str(pilomarimage.__version__)]]
         self.CreatedTimestamp = self.CreatedTimestamp
         self.ModifiedTimestamp = donor.ModifiedTimestamp
         self.StarList = donor.StarList
@@ -1610,6 +1964,139 @@ class pilomarimage():
             newy = y
         return newx,newy
 
+    def SetAltAzRange(self,alt_min,alt_max,az_min,az_max,az_offset=180):
+        """ Set control values for alt/az diagrams.
+            Methods like AltAzToPixel() and PixelToAltAx() use these limits. """
+        self.AltMin = alt_min # Minimum altitude that bottom of image represents.
+        self.AltMax = alt_max # Maximum altitude that top of image represents.
+        self.AzMin = az_min # Minimum azimuth that width of image represents.
+        self.AzMax = az_max # Maximum azimuth that width of image represents.
+        self.AzOffset = az_offset # Offset angle for the ZERO point in the azimuth. Eg: 180 puts the 0 point 180 degrees into the image (ie the center).
+
+    def AltSpan(self):
+        """ Return the altitude degree span of the image. """
+        return self.AltMax - self.AltMin
+        
+    def AzSpan(self):
+        """ Return the azimuth degree span of the image. """
+        return self.AzMax - self.AzMin
+        
+    def LatLonToPixel(self,lat,lon):
+        """ Convert a Lat/Lon pair into a coordinate in the image buffer.
+            Lat in range -90 to 90.
+            lon in range 0 to 360 (can wrap).
+            Lat increases from bottom to top of image (opposite to image addressing)
+            lon increases from left to right (same as image addressing).
+            Lat 0 = center of image.
+            lon 0 = center of image.
+            x,y returned as integers.
+            Note: Does not apply OrientHeight() or OrientCoord(). """            
+        max_height, max_width = self.GetLimits()
+        lat -= self.AltMin # Shift the altitude so that the minimum value falls at the bottom of the image.
+        lon = (lon + self.AzOffset) % 360 # Shift longitude so that 0 is in center of the image, and keep all values in range 0 - 360 degrees.
+        x = int(round(max_width * lon / self.AzSpan(),0))
+        y = int(round(max_height * lat / self.AltSpan(),0))
+        return x,y
+
+    def AltAzToPixel(self,alt,az):
+        """ Convert an Alt/Az pair into a coordinate in the image buffer.
+            alt in range -90 to 90.
+            az in range 0 to 360 (can wrap).
+            alt increases from bottom to top of image (opposite to image addressing)
+            az increases from left to right (same as image addressing).
+            alt 0 = center of image.
+            az 0 = center of image.
+            x,y returned as integers.
+            Note: Does not apply OrientHeight() or OrientCoord()! """            
+        max_height, max_width = self.GetLimits()
+        alt -= self.AltMin # Shift the altitude so that the minimum value falls at the bottom of the image.
+        az = (az + self.AzOffset) % 360 # Shift azimuth so that 0 is in center of the image, and keep all values in range 0 - 360 degrees.
+        x = int(round(max_width * az / self.AzSpan(),0))
+        y = int(round(max_height * alt / self.AltSpan(),0))
+        return x,y
+
+    #def AltAzToPixel_xxx(self,alt,az):
+    #    """ Convert an Alt/Az pair into a coordinate in the image buffer.
+    #        alt in range -90 to 90.
+    #        az in range 0 to 360 (can wrap).
+    #        alt increases from bottom to top of image (opposite to image addressing)
+    #        az increases from left to right (same as image addressing).
+    #        alt 0 = center of image.
+    #        az 0 = center of image.
+    #        x,y returned as integers.
+    #        *Q* Does not yet respect OrientHeight() or OrientCoord()! """            
+    #    image_height, image_width = self.GetDimensions()
+    #    alt += 90 # Get in range 0 - 180. So that an input '0' is in the center of the image.
+    #    az = (az + 180) % 360 # Shift azimuth so that 0 is in center of the image.
+    #    x = int(image_width * az / 360)
+    #    y = int(image_height - (image_height * alt / 180))
+    #    return x,y
+
+    def PixelToLatLon(self,x,y):
+        """ Convert an x,y coordinate pair into an Lat/Lon pair. 
+            imagehandle must be a pilomarimage compatible instance. 
+            x in range 0 <-> (image_width -1) 
+            y in range 0 <-> (image_height -1) 
+            lat in range -90 to 90.
+            lon in range 0 to 360 (can wrap).
+            lat increases from bottom to top of image (opposite to image addressing)
+            lon increases from left to right (same as image addressing).
+            lat 0 = center of image.
+            lon 0 = center of image. 
+            lat/lon returned as float. 
+            NOTE: Does not apply OrientHeight() or OrientCoord()! """
+        max_y, max_x = self.GetLimits()
+        lon = float(self.AzSpan()) * x / max_x # Convert pixel to degrees.
+        lon = (lon - self.AzOffset) % 360 # az 0 is in the centre of the image, so shift values by 180degrees to get back to simple linear scale.
+        y = max_y - y # Invert 'y' value because we measure angles from bottom up.
+        lat = float(self.AltSpan()) * y / max_y # Convert pixel to degrees.
+        lat = lat + self.AltMin # alt 0 is in the centre of the image, so shift values by 90 degrees to get back to -90 to 90 scale.
+        return lat,lon
+
+    def PixelToAltAz(self,x,y):
+        """ Convert an x,y coordinate pair into an Alt/Az pair. 
+            imagehandle must be a pilomarimage compatible instance. 
+            x in range 0 <-> (image_width -1) 
+            y in range 0 <-> (image_height -1) 
+            alt in range -90 to 90.
+            az in range 0 to 360 (can wrap).
+            alt increases from bottom to top of image (opposite to image addressing)
+            az increases from left to right (same as image addressing).
+            alt 0 = center of image.
+            az 0 = center of image. 
+            alt/az returned as float. 
+            NOTE: Does not apply OrientHeight() or OrientCoord()! """
+        max_y, max_x = self.GetLimits()
+        az = float(self.AzSpan()) * x / max_x # Convert pixel to degrees.
+        az = (az - self.AzOffset) % 360 # az 0 is in the centre of the image, so shift values by 180degrees to get back to simple linear scale.
+        y = max_y - y # Invert 'y' value because we measure angles from bottom up.
+        alt = float(self.AltSpan()) * y / max_y # Convert pixel to degrees.
+        alt = alt + self.AltMin # alt 0 is in the centre of the image, so shift values by 90 degrees to get back to -90 to 90 scale.
+        return alt,az 
+
+    #def PixelToAltAz_xxx(self,x,y):
+    #    """ Convert an x,y coordinate pair into an Alt/Az pair. 
+    #        imagehandle must be a pilomarimage compatible instance. 
+    #        x in range 0 <-> (image_width -1) 
+    #        y in range 0 <-> (image_height -1) 
+    #        alt in range -90 to 90.
+    #        az in range 0 to 360 (can wrap).
+    #        alt increases from bottom to top of image (opposite to image addressing)
+    #        az increases from left to right (same as image addressing).
+    #        alt 0 = center of image.
+    #        az 0 = center of image. 
+    #        alt/az returned as float. 
+    #        *Q* Does not yet respect OrientHeight() or OrientCoord()! """
+    #    image_height, image_width = self.GetDimensions()
+    #    max_y = image_height - 1
+    #    max_x = image_width - 1
+    #    az = float(360) * x / max_x # Convert pixel to degrees.
+    #    az = (az - 180) % 360 # az 0 is in the centre of the image, so shift values by 180degrees to get back to simple linear scale.
+    #    y = max_y - y # Invert 'y' value because we measure angles from bottom up.
+    #    alt = float(180) * y / max_y # Convert pixel to degrees.
+    #    alt = alt - 90 # alt 0 is in the centre of the image, so shift values by 90 degrees to get back to -90 to 90 scale.
+    #    return alt,az 
+
     def CenterVectorToPixel(self, PixDist, PixAngle):
         """ Given ANGLE and PIXEL DISTANCE from current centre of image, return the resulting point. """
         FromX, FromY = self.CenterCoordinates()
@@ -1649,13 +2136,47 @@ class pilomarimage():
         PixDist, PixAngle = self.CalculateVector(cx, cy, ToX, ToY)
         return PixDist, PixAngle
 
-    def ContainsMeteors(self):
+    def ContainsMeteors(self,markupfile=None):
         """ Return TRUE if meteors or aircraft trails are detected in an image. """
-        if len(self.LineDetection()) > 0: return True
+        if len(self.LineDetection(markupfile=markupfile)) > 0: return True
         else: return False
 
-    def LineDetection(self):
-        """ Detect lines (satellites, meteors). """
+    def LineDetection(self,markupfile=None):
+        """ Detect lines (satellites, meteors). 
+            markupfile: Optional. Filename for a marked copy of the original image. """
+        self.Log("pilomarimage",self.Name,".LineDetection()",terminal=False)
+        # Code based upon https://www.meteornews.net/2020/05/05/d64-nl-meteor-detecting-project/
+        # Make a gray-scale copy and save the result in the variable 'gray'
+        markup_copy = self.ImageBuffer.copy() # Make a copy of the buffer for marking up later.
+        if len(markup_copy.shape) < 3: markup_color = 255 # 'grayscale'
+        elif self.ImageBuffer.shape[2] == 3: markup_color = (255,255,255) # 'bgr'
+        else: markup_color = (255,255,255,255) # 'bgra'
+        gray = self.NewBufferType('grayscale')
+        # Apply blur and save the result in the variable 'blur'
+        blur = cv2.GaussianBlur(gray, (5,5), 0)
+        # Apply the Canny edge algorithm
+        canny = cv2.Canny(blur, 100, 200, 3)
+        # The Hough line detection algorithm.
+        lines = cv2.HoughLinesP(canny, 1, np.pi/180, 25, minLineLength=50, maxLineGap=5)
+        linereturn = [] # The list of selected lines that will be returned.
+        longest = 0 # Length of longest line.
+        if type(lines) != type(None): # We have something to process.
+            for i,line in enumerate(lines): # Check each detected line in turn.
+                x1, y1, x2, y2 = line[0] # Coordinates of each end of the line.
+                length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2) # Length of the line.
+                if length < 10: continue # Too short.
+                self.Log("pilomarimage",self.Name,".LineDetection: Line", i, ",", line[0], ", length", length,terminal=False)
+                longest = max(length,longest) # Is this the longest line found so far?
+                linereturn.append([x1,y1,x2,y2]) # Add to the list of detected lines.
+                if markupfile != None: # Created a marked up copy of the image on disc.
+                    markup_copy = cv2.line(markup_copy,(x1,y1),(x2,y2),markup_color,1, lineType=cv2.LINE_AA) # Mark the line.
+        if markupfile != None: # Save markup file to disc.
+            cv2.imwrite(markupfile,markup_copy)
+        return linereturn
+
+    def LineDetection_old(self):
+        """ Detect lines (satellites, meteors). 
+            markupfile: Optional. Filename for a marked copy of the original image. """
         self.Log("pilomarimage",self.Name,".LineDetection()",terminal=False)
         # Code based upon https://www.meteornews.net/2020/05/05/d64-nl-meteor-detecting-project/
         # Make a gray-scale copy and save the result in the variable 'gray'
@@ -1725,12 +2246,10 @@ class pilomarimage():
         if self.CreatedTimestamp != None: td = int((self.NowUTC() - self.CreatedTimestamp).total_seconds())
         return td
         
-    def NewBufferType(self,newtype):
-        """ Turn current ImageBuffer into a new type, but return as new buffer,
-            doesn't overwrite the original image buffer. """
-        cvimagebuffer = self.ImageBuffer.copy()
+    def ChangeBufferType(self,cvimagebuffer,newtype):
+        """ Turn any ImageBuffer into a new type and return it modified. """
         if not newtype in pilomarimage.IMAGETYPES:
-            self.Log("pilomarimage",self.Name,".ChangeType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
+            self.Log("pilomarimage",self.Name,".ChangeBufferType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
             return cvimagebuffer
         oldtype = self.GetType()
         if oldtype == 'bgra':
@@ -1752,7 +2271,37 @@ class pilomarimage():
         elif cvimagebuffer.shape[2] == 4:
             checktype = 'bgra'
         if checktype != newtype:
-            self.Log("pilomarimage",self.Name,".ChangeType: Failed. From",oldtype,"to",newtype,"Found",checktype,terminal=False)
+            self.Log("pilomarimage",self.Name,".ChangeBufferType: Failed. From",oldtype,"to",newtype,"Found",checktype,terminal=False)
+        return cvimagebuffer
+
+    def NewBufferType(self,newtype):
+        """ Turn current ImageBuffer into a new type, but return as new buffer,
+            doesn't overwrite the original image buffer. """
+        cvimagebuffer = self.ImageBuffer.copy()
+        if not newtype in pilomarimage.IMAGETYPES:
+            self.Log("pilomarimage",self.Name,".NewBufferType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
+            return cvimagebuffer
+        oldtype = self.GetType()
+        if oldtype == 'bgra':
+            if newtype == 'bgr': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_BGRA2BGR)
+            elif newtype == 'grayscale': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_BGRA2GRAY)
+        elif oldtype == 'bgr':
+            if newtype == 'bgra': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_BGR2BGRA)
+            elif newtype == 'grayscale': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_BGR2GRAY)
+        elif oldtype == 'grayscale':
+            if newtype == 'bgr': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_GRAY2BGR)
+            elif newtype == 'bgra': cvimagebuffer = cv2.cvtColor(cvimagebuffer, cv2.COLOR_GRAY2BGRA)
+        checktype = None
+        if type(cvimagebuffer) == type(None):
+            checktype = None
+        elif len(cvimagebuffer.shape) < 3:
+            checktype = 'grayscale'
+        elif cvimagebuffer.shape[2] == 3:
+            checktype = 'bgr'
+        elif cvimagebuffer.shape[2] == 4:
+            checktype = 'bgra'
+        if checktype != newtype:
+            self.Log("pilomarimage",self.Name,".NewBufferType: Failed. From",oldtype,"to",newtype,"Found",checktype,terminal=False)
         return cvimagebuffer
         
     def ChangeType(self,newtype):
@@ -1781,12 +2330,38 @@ class pilomarimage():
         """ Return the ImageBuffer dimensions in pixels. """
         return (self.GetHeight(),self.GetWidth())
     
-    def GetPixelColor(self,y,x):
+    def GetLimits(self):
+        """ Return the ImageBuffer maximum height/width indexes in pixels.
+            This will be 1 less than the height and 1 less than the width. """
+        h,w = self.GetDimensions()
+        return (h - 1, w - 1)
+
+    def GetImageCenter(self):
+        """ Return the coordinates of the CENTER PIXEL of the image. """
+        h,w = self.GetLimits()
+        h = int(round(h / 2, 0))
+        w = int(round(w / 2, 0))
+        return (h,w)
+  
+    def GetPixelColor(self,y,x,trusted=True):
         """ Return color of pixel.
             y = row
             x = column
-            Converts datatype to int() """
+            trusted : when TRUE the y,x values are not validated.
+                      when FALSE the y,x values are validated first.
+            Converts datatype to int()
+            Respects 'InvertHeight' attribute.    
+            
+            BEWARE: See also GetPixel() method.             """
         tg = self.GetType()
+        
+        if not trusted: # Validate the values.
+            max_y, max_x = self.GetLimits()
+            if y < 0 or y > max_y or x < 0 or x > max_x: # Out of bounds.
+                color = (0,0,0)
+                return color
+                
+        y = self.OrientHeight(y) # Make sure HEIGHT is right way up.
         try:
             if tg == 'grayscale': color = (int(self.ImageBuffer[y,x]),int(self.ImageBuffer[y,x]),int(self.ImageBuffer[y,x]))
             else: color = (int(self.ImageBuffer[y,x,0]),int(self.ImageBuffer[y,x,1]),int(self.ImageBuffer[y,x,2]))
@@ -2075,6 +2650,10 @@ class pilomarimage():
                 break
         self.StarList = starlist
         self.StarCount = starcount
+        self.CountStars_last_minval = minval # Record the parameters used. Smallest pixel area considered a star.
+        self.CountStars_last_maxval = maxval # Record the parameters used. Largest pixel area considered a star.
+        self.CountStars_last_maxstars = maxstars # Record the parameters used. Maximum number of items to consider a star.
+        self.CountStars_last_threshold = threshold # Record the parameters used. Brightness threshold when increasing contrast.
         self.CalculateStarSpread() # How widely spread are the stars across the image? Indicates good/bad tracking tuning.
         self.Log("pilomarimage",self.Name,".CountStars: End. Counted",starcount,terminal=False)
         return starcount, starlist
@@ -2351,10 +2930,98 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
-    def RunFilterScript(self,scriptname):
+    def StepThruFilterScript(self,scriptname,outputdir,window=None):
         """ Given a script name, apply the filters and parameters defined in the script.
-            filterrules is a dictionary """
+            This applies each filter in turn and saves intermediate images after each one.
+            This is for development purposes.
+            filterrules is a dictionary
+            scriptname = name of filter script to run.
+            outputdir = Location of intermediate output files. Usually a temp directory.
+            window = Optional textcolor colordisplay window to report to. 
+            
+            A filter script looks like this...
+            
+        'UrbanFilter':{ # Name of the script
+            'ToGrayscale':{ # Name of the 'step'.
+                'method':'grayscale', # Method to apply
+                }, # /ToGrayscale
+            'DeHaze':{ # Name of the next 'step'
+                'method':'dehaze', # Method to apply.
+                'samples':1, # Specific parameters.
+                'strength':100,
+                'comment': # Documentation comment.
+                }, # /DeHaze
+            'BlurStars':{ # Use blur to enlarge remaining stars.
+                'method':'gaussianblur',
+                'radius':2,
+                'comment':'Apply Gaussian blur to widen remaining items',
+                }, # /BlurStars
+            'BoostStars':{ # Enhance remaining stars.
+                'method':'threshold',
+                'threshold':16,
+                'maxval':255,
+                'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                'comment':'Apply adaptive threshold to boost remaining stars.',
+                } # /BoostStars
+            } # /UrbanFilter
+            
+            """
+        self.Log("pilomarimage",self.Name,".StepThruFilterScript()",terminal=False)
+        if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
+        if not type(scriptname) == str: # Nothing useful set.
+            self.Log("StepThruFilterScript(): No valid script name.",terminal=False)
+            print("StepThruFilterScript(): No valid script name.")
+            return False 
+        if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
+            self.Log("StepThruFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
+            print("StepThruFilterScript(",scriptname,"). Script does not exist.")
+            return False
+        filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
+            
+        filtercount = 0
+        result = True
+        
+        for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
+            filtercount += 1 # Increment count.
+            self.Log("pilomarimage.StepThruFilterScript(",scriptname,"): Running",filtercount,entryname,"...",terminal=True) # Report the name of the filter
+            temp = json.dumps(filterdata,default=str,indent=2).split('\n') # Show all the parameters for this step in the filter script.
+            for line in temp:
+                print(line)
+            # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
+            filtermethod = filterdata.get('method',None)
+            if hasattr(window,'Print'): window.Print("Running",entryname,"filter (",filtermethod,").") # Can report progress to a display window.
+            result = True
+            if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
+            elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
+            elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
+            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
+            elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
+            else: # Filter method is not recognised.
+                self.Log("pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
+                print("**ERROR** pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
+                result = False
+            if not result: break # Failure.
+            # Save image after each step.
+            intermediate_name = outputdir + "/StepThruFilterScript_" + str(filtercount).rjust(3,"0") + ".jpg"
+            self.SaveFile(intermediate_name)
+            if hasattr(window,'Print'): window.Print("Saving intermediate",intermediate_name.split("/")[-1])
+            self.Log("pilomarimage.StepThruFilterScript: Step",filtercount,"result saved as",intermediate_name,terminal=True)
+        if result:
+            self.Log("The script '" + scriptname + "' completed.",terminal=True)
+        else:
+            self.Log("pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.",level='warning')
+            print("WARNING: pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.")
+            if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
+        return result
+
+
+    def RunFilterScript(self,scriptname,window=None):
+        """ Given a script name, apply the filters and parameters defined in the script.
+            filterrules is a dictionary
+            scriptname = name of filter script to run.
+            window = Optional textcolor colordisplay window to report to. """
         self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
+        if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
         if not type(scriptname) == str: # Nothing useful set.
             self.Log("RunFilterScript(): No valid script name.",terminal=False)
             print("RunFilterScript(): No valid script name.")
@@ -2369,14 +3036,15 @@ class pilomarimage():
         result = True
         
         for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
-            self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running script...",terminal=False) # Report the name of the filter
+            self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running filter...",terminal=False) # Report the name of the filter
             # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
             filtermethod = filterdata['method']
+            if hasattr(window,'Print'): window.Print("Running",entryname,"filter (",filtermethod,").") # Can report progress to a display window.
             result = True
             if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
             elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
             elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
-            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Apply a threshold filter.
+            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
             elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
             else: # Filter method is not recognised.
                 self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
@@ -2387,6 +3055,7 @@ class pilomarimage():
         if not result:
             self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
             print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
+            if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
         return result
 
     def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255,strength=100):
@@ -2423,9 +3092,51 @@ class pilomarimage():
     def DimChannel(self,channel,ratio): # 3 references.
         """ simple multiplier for single color channel.
             ratio = 0.0 - 1.0        """
-        channel = channel * ratio
+        channel = int(round(channel * ratio,0))
         channel = min(max(channel,0),255) # 0 <= x <= 255
         return channel
+
+    def MonotoneColor(self,color1,color2):
+        """ Convert color1 into a monotone version of color2. 
+            Eg if color2 is pure BLUE, then color1 is converted to a blue scale value. """
+        if len(color1) == 4: # Adjust BGRA
+            level = (color1[0] + color1[1] + color1[2]) / (3.0 * 255)
+            b = self.DimChannel(color2[0],level)
+            g = self.DimChannel(color2[1],level)
+            r = self.DimChannel(color2[2],level)
+            a = color2[3]
+            return (b,g,r,a)
+        elif len(color1) == 3: # Adjust BGR
+            level = (color1[0] + color1[1] + color1[2]) / (3.0 * 255)
+            b = self.DimChannel(color2[0],level)
+            g = self.DimChannel(color2[1],level)
+            r = self.DimChannel(color2[2],level)
+            return (b,g,r)
+        else: # grayscale colour. 
+            level = color1 / 255.0
+            g = self.DimChannel(color2,level)
+            return g
+
+    def BlendColor(self,color1,color2,ratio):
+        """ Simple blend between two colours. 
+            color1 & color2 are the two colours to blend. 
+            ratio is 0.0 - 1.0
+            ratio is the proportion of color1.
+            (1 - ratio) is the proportion of color2. """
+        ratio = min(max(ratio,0.0),1.0) # Keep within permitted limits.
+        if len(color1) == 4: # Adjust BGRA
+            b = min(self.DimChannel(color1[0],ratio) + self.DimChannel(color2[0],(1 - ratio)),255)
+            g = min(self.DimChannel(color1[1],ratio) + self.DimChannel(color2[1],(1 - ratio)),255)
+            r = min(self.DimChannel(color1[2],ratio) + self.DimChannel(color2[2],(1 - ratio)),255)
+            a = min(self.DimChannel(color1[3],ratio) + self.DimChannel(color2[3],(1 - ratio)),255)
+            return (b,g,r,a)
+        elif len(color1) == 3: # Adjust BGR
+            b = min(self.DimChannel(color1[0],ratio) + self.DimChannel(color2[0],(1 - ratio)),255)
+            g = min(self.DimChannel(color1[1],ratio) + self.DimChannel(color2[1],(1 - ratio)),255)
+            r = min(self.DimChannel(color1[2],ratio) + self.DimChannel(color2[2],(1 - ratio)),255)
+            return (b,g,r)
+        else: # grayscale colour. 
+            return min(self.DimChannel(color1,ratio) + self.DimChannel(color2,(1 - ratio)),255)
 
     def DimColor(self,color,ratio): # 4 references.
         """ Simple multiplier for BGR or BGRA color tuples.
@@ -2434,7 +3145,7 @@ class pilomarimage():
             return (self.DimChannel(color[0],ratio),self.DimChannel(color[1],ratio),self.DimChannel(color[2],ratio),color[3])
         elif len(color) == 3: # Adjust BGR
             return (self.DimChannel(color[0],ratio),self.DimChannel(color[1],ratio),self.DimChannel(color[2],ratio))
-        else: return DimChannel(color,ratio) # Assume single channel.
+        else: return self.DimChannel(color,ratio) # Assume single channel.
 
     def FakeField(self): # Generate fake field noise.
         """ Create a small blank image and add some fake electronic noise to it. 
@@ -2644,7 +3355,10 @@ class pilomarimage():
         return newcolor
         
     def DrawLine(self,startcoord,endcoord,color=None,thickness=None,arrowpixels=None):
-        """ Use opencv linedrawing. """
+        """ Use opencv linedrawing. 
+            startcoord = (x,y)
+            endcoord = (x,y) 
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawLine: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2661,7 +3375,10 @@ class pilomarimage():
         return True
 
     def DrawEdgeLine(self,startcoord,endcoord,color=None,edgecolor=None,thickness=None,edgethickness=1,arrowpixels=None):
-        """ Use opencv linedrawing. """
+        """ Use opencv linedrawing.
+            startcoord = (x,y)
+            endcoord = (x,y) 
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeLine: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2681,7 +3398,9 @@ class pilomarimage():
         return True
 
     def DrawCircle(self,center_x,center_y,rad,color=None,thickness=None):
-        """ Draw a circle on the image. """
+        """ Draw a circle on the image.
+            center_x, center_y = center of circle.
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawCircle: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2692,7 +3411,9 @@ class pilomarimage():
         return True
         
     def DrawEdgeCircle(self,center_x,center_y,rad,color=None,thickness=None,edgecolor=None,edgethickness=1):
-        """ Draw a circle on the image with a colored edge. """
+        """ Draw a circle on the image with a colored edge.
+            center_x, center_y = center of circle.
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawCircle: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
@@ -2704,7 +3425,9 @@ class pilomarimage():
         return True
 
     def FillCircle(self,center_x,center_y,rad,color=None):
-        """ Fill a circle on the image. """
+        """ Fill a circle on the image.
+            center_x, center_y = center of circle.
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillCircle: No image in the buffer.')
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
@@ -2713,9 +3436,14 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
-    def SetPixel(self,center_x,center_y,color=None):
-        """ Set a single pixel on the image. """
+    def SetPixel(self,center_x,center_y,color=None,trusted=False):
+        """ Set a single pixel on the image. 
+            trusted = True: Coordinates are not validated.
+            center_x, center_y = location of pixel.
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.SetPixel: No image in the buffer.')
+        if not trusted: 
+            if center_x < 0 or center_y < 0 or center_x >= self.GetWidth() or center_y >= self.GetHeight(): return True # Off the image, ignore.
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         self.ImageBuffer[center_y,center_x] = color
@@ -2723,37 +3451,45 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
-    def GetPixel(self,center_x,center_y):
+    def GetPixel(self,center_x,center_y,trusted=False):
         """ Return value of a single pixel on the image.
-            Doesn't convert datatype! """
+            center_x, center_y = location of pixel.
+            Respects 'InvertHeight' attribute.
+            Doesn't convert datatype! 
+            
+            BEWARE: See also GetPixelColor() method. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.GetPixel: No image in the buffer.')
+        if not trusted: 
+            if center_x < 0 or center_y < 0 or center_x >= self.GetWidth() or center_y >= self.GetHeight(): return True # Off the image, ignore.
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
         color = tuple(self.ImageBuffer[center_y,center_x])
         return color
 
-    def BlendColor(self,fromcolor,tocolor,ratio):
-        """ Find color between two values. Ratio says how much of each color to use.
-            0.0 = All FROM COLOR
-            1.0 = All TO COLOR """
-        ratio = min(max(ratio,0.0),1.0) # Clip value.
-        fromratio = ratio
-        toratio = 1.0 - ratio
-        gt = self.GetType()
-        if gt == 'grayscale':
-            color = int(min(fromcolor * fromratio + tocolor * toratio),255)
-        elif gt == 'bgr':
-            color = (min(fromcolor[0] * fromratio + tocolor[0] * toratio,255),
-                     min(fromcolor[1] * fromratio + tocolor[1] * toratio,255),
-                     min(fromcolor[2] * fromratio + tocolor[2] * toratio,255))
-        else: # 'bgra'
-            color = (min(fromcolor[0] * fromratio + tocolor[0] * toratio,255),
-                     min(fromcolor[1] * fromratio + tocolor[1] * toratio,255),
-                     min(fromcolor[2] * fromratio + tocolor[2] * toratio,255),
-                     min(fromcolor[3] * fromratio + tocolor[3] * toratio,255))
-        return color
+    #def BlendColor(self,fromcolor,tocolor,ratio):
+    #    """ Find color between two values. Ratio says how much of each color to use.
+    #        0.0 = All FROM COLOR
+    #        1.0 = All TO COLOR """
+    #    ratio = min(max(ratio,0.0),1.0) # Clip value.
+    #    fromratio = ratio
+    #    toratio = 1.0 - ratio
+    #    gt = self.GetType()
+    #    if gt == 'grayscale':
+    #        color = int(min(fromcolor * fromratio + tocolor * toratio),255)
+    #    elif gt == 'bgr':
+    #        color = (min(fromcolor[0] * fromratio + tocolor[0] * toratio,255),
+    #                 min(fromcolor[1] * fromratio + tocolor[1] * toratio,255),
+    #                 min(fromcolor[2] * fromratio + tocolor[2] * toratio,255))
+    #    else: # 'bgra'
+    #        color = (min(fromcolor[0] * fromratio + tocolor[0] * toratio,255),
+    #                 min(fromcolor[1] * fromratio + tocolor[1] * toratio,255),
+    #                 min(fromcolor[2] * fromratio + tocolor[2] * toratio,255),
+    #                 min(fromcolor[3] * fromratio + tocolor[3] * toratio,255))
+    #    return color
 
     def FadeCircle(self,center_x,center_y,rad,color=None,fadecolor=None):
-        """ Fill a circle on the image, but the color fades from center to edge """
+        """ Fill a circle on the image, but the color fades from center to edge.
+            center_x, center_y = location of pixel.
+            Respects 'InvertHeight' attribute. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FadeCircle: No image in the buffer.')
         color = self.SafeColor(color)
         center_y = self.OrientHeight(center_y) # Make sure HEIGHT is right way up.
@@ -3006,7 +3742,8 @@ class pilomarimage():
             *Q* STILL UNDER DEVELOPMENT. NOT FINISHED YET.
                 ONLY SUPPORTS 90DEGREE ANGLE SO FAR. 
                 
-            NOTE: This is SLOW!! """
+            NOTE: This is SLOW!!
+            Respects 'InvertHeight' attribute.            """
         angle = angle % 360
         supportedangles = [0,90] # Which angles are supported?
         if not angle in supportedangles:
@@ -3246,12 +3983,13 @@ class pilomarimage():
             axeslength = (a,b)
             angle = 0-360
             startAngle = 0-360
-            endAngle = 0-360 """
+            endAngle = 0-360
+            Respects 'InvertHeight' attribute.            """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEllipse: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
         # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
-        center_y = self.OrientHeight(center_y)
+        center_y = self.OrientHeight(center_y) # Does height increase from the TOP or BOTTOM of the image?
         # *Q* OrientHeight needs to switch angles too.
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness, lineType=cv2.LINE_AA)
         self.ActionList.append(['drawellipse',center_x,center_y,axis_x,axis_y,angle,startAngle,endAngle,color,thickness])
@@ -3264,14 +4002,15 @@ class pilomarimage():
             axeslength = (a,b)
             angle = 0-360
             startAngle = 0-360
-            endAngle = 0-360 """
+            endAngle = 0-360
+            Respects 'InvertHeight' attribute.            """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeEllipse: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
         edgethickness = self.SafeThickness(edgethickness)
         edgecolor = self.SafeColor(edgecolor)
         # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
-        center_y = self.OrientHeight(center_y)
+        center_y = self.OrientHeight(center_y) # Does height increase from the TOP or BOTTOM of the image?
         # *Q* OrientHeight needs to switch angles too.
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), edgecolor, (thickness + 2 * edgethickness), lineType=cv2.LINE_AA)
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness, lineType=cv2.LINE_AA)
@@ -3285,18 +4024,52 @@ class pilomarimage():
             axeslength = (a,b)
             angle = 0-360
             startAngle = 0-360
-            endAngle = 0-360 """
+            endAngle = 0-360
+            Respects 'InvertHeight' attribute.            """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.FillEllipse: No image in the buffer.')
         color = self.SafeColor(color)
-        center_y = self.OrientHeight(center_y)
+        center_y = self.OrientHeight(center_y) # Does height increase from the TOP or BOTTOM of the image?
         # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
         self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness=-1, lineType=cv2.LINE_AA)
         self.ActionList.append(['fillellipse', center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color])
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
+    def FillEllipse2(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None):
+        """ Draw an ellipse on the image. 
+            center_coordinates = (x,y)
+            axeslength = (a,b)
+            angle = 0-360
+            startAngle = 0-360
+            endAngle = 0-360 
+            If ellipse is out of the bounds of the image then it does nothing because drawing and filling an ellipse is relatively slow.
+            Respects 'InvertHeight' attribute.            """
+        if self.ImageMissing(): print('pilomarimage',self.Name,'.FillEllipse2: No image in the buffer.')
+        color = self.SafeColor(color)
+        center_y = self.OrientHeight(center_y) # Does height increase from the TOP or BOTTOM of the image?
+        # Is the ellipse within the bounds of the image?
+        radius = int(max(axis_x / 2, axis_y / 2))
+        left = center_x - radius
+        right = center_x + radius
+        bottom = center_y - radius
+        top = center_y + radius
+        inframe = True
+        height = self.GetHeight()
+        width = self.GetWidth()
+        if bottom < 0: inframe = False # out of bounds. 
+        elif top > height: inframe = False # out of bounds.
+        elif left < 0: inframe = False # out of bounds.
+        elif right > width: inframe = False # out of bounds.
+        if inframe: # Filling an ellipse can be slow, so only do it if the object is likely to be in bounds.
+            # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
+            self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (int(axis_x), int(axis_y)), int(angle), int(startAngle), int(endAngle), color, thickness=-1, lineType=cv2.LINE_AA)
+        self.ActionList.append(['fillellipse2', center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color, left, right, bottom, top, width, height])
+        self.ModifiedTimestamp = self.NowUTC()
+        return True
+
     def FadeEllipse(self,center_x, center_y, axis_x, axis_y, angle=0, startAngle=0, endAngle=360, color=None, fadecolor=None):
-        """ Fill an ellipse on the image, but the color fades from center to edge """
+        """ Fill an ellipse on the image, but the color fades from center to edge
+            Respects 'InvertHeight' attribute.        """
         if self.ImageMissing(): 
             print('pilomarimage',self.Name,'.FadeEllipse: No image in the buffer.')
             self.Log('pilomarimage',self.Name,'.FadeEllipse: No image in the buffer.',level='error',terminal=True)
@@ -3314,13 +4087,99 @@ class pilomarimage():
                 # Weird behaviour of this function in Python3 (See online) - parameters very fussy about grouping and datatype.
                 xt = int(axis_x * sizeratio)
                 yt = int(axis_y * sizeratio)
-                center_y = self.OrientHeight(center_y)
+                center_y = self.OrientHeight(center_y) # Does height increase from the TOP or BOTTOM of the image?
                 self.ImageBuffer = cv2.ellipse(self.ImageBuffer, (int(center_x), int(center_y)), (xt, yt), int(angle), int(startAngle), int(endAngle), gradedcolor, thickness=-1, lineType=cv2.LINE_AA)
                 prevcolor = gradedcolor
         self.ActionList.append(['fadeellipse', center_x, center_y, axis_x, axis_y, angle, startAngle, endAngle, color, fadecolor])
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
+    def RotateAboutPoint(self,center,point,angle):
+        """ Rotate a point about a center.
+            center = tuple(x,y)
+            point = tuple(x,y)
+            Angle = 0degrees = +ve Y axis direction.
+            NOTE: Angle may be inverted in final image depending upon the Y axis inversion state (InvertHeight property) of the image. """
+        r_x = point[0] - center[0] # Remove 'center'
+        r_y = point[1] - center[1]
+        linelen = math.sqrt(r_x ** 2 + r_y ** 2)
+        rad = math.radians(angle)
+        sin = math.sin(rad)
+        cos = math.cos(rad)
+        new_x = int((linelen * sin) + center[0]) # Convert and realign with 'center'
+        new_y = int((linelen * cos) + center[1])
+        return (new_x,new_y)
+
+    def DrawCrosshairs(self,x,y,radius,style=255,outerradius=None,spoke_count=4,spoke_angle=0,color=None,thickness=None,arrowpixels=None):
+        """ Draw various forms of crosshair (no border). The style parameter defines what is included.
+        
+        
+                               x
+                               x
+                             xxxxx
+                           x       x
+                       xxxxx   x   xxxxx
+                           x       x     
+                             xxxxx
+                               x
+                               x
+        
+            Parameters -------------------------------------------------------------------------------
+            x,y : Center pixel of the crosshairs.
+            radius : inner diameter of the crosshairs.
+            style: Attributes to draw. (default, all features)
+                pilomarimage.CROSSHAIR_DOT = 1 # Central dot.
+                pilomarimage.CROSSHAIR_RING = 2 # Surrounding ring/circle.
+                pilomarimage.CROSSHAIR_SPOKES = 4 # Crosshairs around the center.
+            outerradius: outer diameter of the crosshairs.
+            spoke_count: How many spokes to draw if they are in the style.
+            spoke_angle: Angle of the first spoke.
+            color: color to draw the crosshairs.
+            thickness: line thickness.
+
+            You can add crosshair styles to combine them. """
+        if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawCrosshairs: No image in the buffer.')
+        thickness = self.SafeThickness(thickness)
+        color = self.SafeColor(color)
+        if outerradius == None: outerradius = radius * 2
+        if style & pilomarimage.CROSSHAIR_DOT: # Draw dot in the centre of the crosshairs.
+            self.DrawCircle(center_x=x,center_y=y,rad=2,color=color,thickness=-1) # Filled.
+        if style & pilomarimage.CROSSHAIR_RING: # Draw ring around the centre of the crosshairs.
+            self.DrawCircle(center_x=x,center_y=y,rad=radius,color=color,thickness=thickness)
+        if style & pilomarimage.CROSSHAIR_SPOKES: # Draw vertical and horizontal lines of the crosshairs.
+            for i in range(spoke_count): # Process each spoke in turn.
+                angle = (360 * (float(i) / spoke_count)) + spoke_angle # How is this spoke rotated, from 'due north'.
+                #print("pilomarimage.DrawCrosshairs:",i,"of",spoke_count,"spokes, =",angle)
+                start_point = self.RotateAboutPoint(center=(x,y),point=(x,y + radius),angle=angle)
+                end_point = self.RotateAboutPoint(center=(x,y),point=(x,y + outerradius),angle=angle)
+                if i == 0: self.DrawLine(start_point,end_point,color=color,thickness=thickness,arrowpixels=arrowpixels) # Draw spoke with optional direction arrow head.
+                else: self.DrawLine(start_point,end_point,color=color,thickness=thickness,arrowpixels=None) # Draw spoke without direction arrow head.
+        return False
+        
+    def DrawEdgeCrosshairs(self,x,y,radius,style=255,outerradius=None,spoke_count=4,spoke_angle=0,color=None,edgecolor=None,thickness=None,edgethickness=None,arrowpixels=None):
+        """ Draw various forms of crosshair with a border color too.
+            The style parameter defines what is included.
+            Parameters -------------------------------------------------------------------------------
+            x,y : Center pixel of the crosshairs.
+            radius : inner diameter of the crosshairs.
+            style: Attributes to draw. (default, all features)
+                pilomarimage.CROSSHAIR_DOT = 1 # Central dot.
+                pilomarimage.CROSSHAIR_RING = 2 # Surrounding ring/circle.
+                pilomarimage.CROSSHAIR_SPOKES = 4 # Crosshairs around the center.
+            outerradius: outer diameter of the crosshairs.
+            spoke_count: How many spokes to draw if they are in the style.
+            spoke_angle: Angle of the first spoke.
+            color: color to draw the crosshairs.
+            edgecolor: edge color to draw the crosshairs.
+            thickness: line thickness.
+            edgethickness: edge line thickness.
+
+            You can add crosshair styles to combine them. """
+        if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeCrosshairs: No image in the buffer.')
+        self.DrawCrosshairs(self,x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=edgecolor,thickness=edgethickness,arrowpixels=arroxpixels) # Draw edge first.
+        self.DrawCrosshairs(self,x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=color,thickness=thickness,arrowpixels=arroxpixels) # Draw inner second.
+        return False
+        
     def DrawDumbbell(self,drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow,thickness=None):
         """ Add a 'dumbbell' to an image between two different points.
         
@@ -3394,6 +4253,23 @@ class pilomarimage():
         wb = round(weightedtotal / pixeltotal,0) - 1 # Calculate weighted average, but subtract 1 to return '0' brightness pixels within range again.
         return wb
 
+    def AnimateFrames(self,filepattern,filename,framerate=10,cleanup=False):
+        """ Take a file pattern and generate an animation from the individual images.
+            cleanup = True: When the video file is complete the original frames are deleted.
+              BEWARE! It's a brutal delete, make sure your filepattern is good! """
+        self.Log("Generating animation of observation previews...",terminal=False)
+        from pilomaroscommand import oscommand # Pilomar's OS command executor.
+        OSCommand = oscommand(None) # Create OS Command executor. 
+        osCmd = OSCommand.Execute # Shortcut point to the execution method which returns the output.
+        # *Q* GLOB facility may disappear from later versions of ffmpeg, this will need revising when that happens.
+        cmd = "ffmpeg -y -framerate " + str(framerate) + " -pattern_type glob -i '" + filepattern + "' -vf scale='iw/2:ih/2' " + filename
+        osCmd(cmd)
+        if cleanup: # Remove the original frames, they are nolonger required.
+            cmd = 'rm ' + filepattern
+            osCmd(cmd)
+        self.Log("GeneratePreviewAvi: Completed animation of observation previews.",terminal=False)
+        return True
+        
     def DescribeImage(self):
         """ Print information about the current image buffer. """
         print("Describe image:")
@@ -3466,7 +4342,17 @@ class pilomarkeogram():
 
     def BuildImageBuffer(self):
         """ """
-        writebuffer = cv2.resize(self.KeogramPixels,(self.Width,self.Height),interpolation=cv2.INTER_AREA)
+        #print("pilomarkeogram.BuildImageBuffer(): KeogramPixels type:",type(self.KeogramPixels))
+        #try:
+        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels len:",len(self.KeogramPixels))
+        #except:
+        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels len: NOT AVAILABLE")
+        #try:
+        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels dtype:",self.KeogramPixels.dtype)
+        #except:
+        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels dtype: NOT AVAILABLE")
+        #print("pilomarkeogram.BuildImageBuffer():",self.Width,self.Height,cv2.INTER_AREA)
+        writebuffer = cv2.resize(self.KeogramPixels.astype(np.uint8),(self.Width,self.Height),interpolation=cv2.INTER_AREA)
         self.Keogram.LoadBuffer(writebuffer)
 
     def SaveFile(self,filename):        

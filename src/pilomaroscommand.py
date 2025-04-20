@@ -15,12 +15,47 @@
 
 # Import required libraries
 import subprocess # Threadsafe os command execution with access to command output.
+import locale
 
 class oscommand():
     """ object to execute OS commands. """
     
+    @staticmethod
+    def Delocalize(text):
+        """ Convert a text from the locale number format into a standardised en_US format.
+            The parent program must have already set the local environment before calling this.
+                import locale
+                locale.setlocale(locale.LC_ALL, '') # Get user's locale.                """
+        text = text.strip() # Remove blanks and special characters.
+        #locale.localeconv()['decimal_point']
+        text = locale.delocalize(text)
+        #dp = locale.localeconv()['decimal_point']
+        #ts = locale.localeconv()['thousands_sep']
+        #if dp != '.' or ts != ',': 
+        #    text = text.replace(ts,'') # Remove thousands separators. We don't need them.
+        #    text = text.replace(dp,'.') # Make sure the DECIMAL point is used.
+        return text
+
+    def SetLogger(self,logger):
+        """ Set up link to logging class and shortcuts to common methods. """
+        # The logging methods default to 'consumers' which will just silently eat any parameters passed.
+        self.Log = logger # Log method instance. Default to original solution, logger = a logfile.Log() method handle.
+        self.ReportException = None # Cannot report exception details to logfile.
+        self.RaiseException = None # Cannot report and raise exception. 
+        # Support new solution, if logger is a logfile instance, assign method handles dynamically.
+        if hasattr(logger,'Log'): self.Log = logger.Log # Log method.
+        if hasattr(logger,'ReportException'): self.ReportException = logger.ReportException # Report exception details to logfile.
+        if hasattr(logger,'RaiseException'): self.RaiseException = logger.RaiseException # Report and raise exception. 
+        #self.Log("astrocamera.SetLogger: Linked to this log file.",terminal=False)
+
+    def _NullLogger(self,*args, **kwargs):
+        """ Null logger. Absorbs parameters and .Log call but does nothing. 
+            Use this when there is no logger defined. """
+        return
+
     def __init__(self,logger=None):
-        self.Log = logger # Must be a reference to a .Log() style method.
+        self.SetLogger(logger) # CamLog # Handle to the class that handles logging and error tracing.
+        #self.Log = logger # Must be a reference to a .Log() style method.
         self.LastError = None
         self.ReturnCode = 0
         self.LastOutput = []
@@ -53,11 +88,11 @@ class oscommand():
         lines = result.split('\n')
         returnlist = []
         for line in lines:
-            if '.' in output:
+            if '.' in output: # Assume output is a disc file.
                 with open(output,'a') as f: # Create or append to the specified file.
                     f.write(line + "\n")
             if output == 'terminal': print (line) # display to the terminal
-            if self.Log != None: self.Log(line,terminal=False)
+            if self.Log != None: self.Log("cmd output '" + line + "'",terminal=False)
             returnlist.append(line) # Construct clean returnlist of the output.
         self.LastOutput = returnlist
         self.ReturnCode = returncode
@@ -95,7 +130,7 @@ class oscommand():
                 with open(output,'a') as f: # Create or append to the specified file.
                     f.write(line + "\n")
             if output == 'terminal': print (line) # display to the terminal
-            if self.Log != None: self.Log(line,terminal=False)
+            if self.Log != None: self.Log("cmd output '" + line + "'",terminal=False)
             returnlist.append(line)
         self.LastOutput = returnlist
         self.ReturnCode = returncode

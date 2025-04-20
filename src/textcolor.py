@@ -15,9 +15,14 @@
 
 import subprocess
 import curses # For non-blocking keyboard scan.
-from datetime import datetime
+from datetime import datetime,timezone
+import pytz # Timezone handling.
+import time
 import traceback # For exception handling in menu.
 import json # To dump dictionaries for export.
+import locale # Internationalisation support.
+from pathlib import Path # For navigating folder structure.
+import os 
 
 class keyboardscanner():
     """ Use curses library to scan the keyboard (non-blocking).
@@ -29,6 +34,17 @@ class keyboardscanner():
     def __init__(self):
         self.CurrentKeyCode = -1
         self.CurrentCharacter = ''
+        self.Translations = { # Character sequences can be translated into these more meaningful values.
+            chr(9): 'tab',
+            chr(10): 'enter',
+            chr(27): 'esc',
+            chr(27) + chr(91) + chr(97): 'cursorup',
+            chr(27) + chr(91) + chr(98): 'cursordown',
+            chr(27) + chr(91) + chr(99): 'cursorright',
+            chr(27) + chr(91) + chr(100): 'cursorleft',
+            chr(265): 'f1',
+            chr(267): 'f2'
+        }
 
     def Scan(self,stdscr):
         """ Non-blocking check for keypress. """
@@ -38,10 +54,40 @@ class keyboardscanner():
         if self.CurrentKeyCode > -1:
             self.CurrentCharacter = chr(self.CurrentKeyCode)
 
+    def WaitForKeypress(self,timeout):
+        """ Pause for a set number of seconds, but scan the keyboard. 
+            Any input will interrupt the delay and be returned.
+            timeout = number of seconds to wait.
+            Keyboard is checked every second. """
+        keypress = ""
+        while keypress == "" and timeout > 0:
+            time.sleep(1)
+            timeout -= 1
+            keypress = self.Scan()
+        return keypress
+
     def Check(self):
         curses.wrapper(self.Scan)
         return self.CurrentCharacter
+
+    def Translate(self,string):
+        """ Translate a string of character codes into descriptive text. 
+            eg code 27 becomes 'esc' """
+        result = self.Translations(string,string) # If the character string can be translated, convert it here.
+        return result
         
+    def StringCheck(self,translate=False):
+        """ Non-blocking check for keypress. 
+            Concatenates entire queue of keypresses into a single value.
+            translate=True: Some character sequences are translated into more meaningful values. """
+        keypress = ''
+        key_a = self.Check()
+        while key_a != '': # Pull entire buffer of characters in one go.
+            keypress += key_a
+            key_a = self.Check()    
+        if translate: keypress = self.Translate(keypress)
+        return keypress
+
     def Flush(self):
         """ Flush any pending keypresses from the buffer. """
         while self.Check() != '': pass
@@ -330,12 +376,51 @@ class textcolor:
     GREY85 = 253
     GREY89 = 254
     GREY93 = 255
+    
+    # UTF-8 symbols for special items.
     SYMBOLS = {'left' : '\u2190', 'right' : '\u2192', 'up' : '\u2191', 'down' : '\u2193', 
                'degree' : '\u00B0', 'delta' : '\u0394', 
                'horizontal' : '\u2500', 'vertical' : '\u2502', 'corner_tl' : '\u250c', 'corner_tr' : '\u2510', 'corner_bl' : '\u2514', 'corner_br' : '\u2518', 'crossover' : '\u253c',
                'left_junction' : '\u2524', 'right_junction' : '\u251c', 'top_junction' : '\u2534', 'bottom_junction' : '\u252c',
                'sun' : '\u2609', 'moon' : '\u263D', 'mercury' : '\u263F', 'venus' : '\u2640', 'earth' : '\u2641', 'mars' : '\u2642', 'jupiter' : '\u2643', 'saturn' : '\u2644', 'uranus' : '\u2645', 'neptune' : '\u2646', 'pluto' : '\u2647', 'comet' : '\u2604', 'star' : '\u2736'
               }
+    # Alternative 8bit character symbols for special items. (If environment doesn't support UTF-8)
+    SYMBOLS8 = {'left' : '<', 'right' : '>', 'up' : '^', 'down' : 'v', 
+               'degree' : 'd', 'delta' : '~', 
+               'horizontal' : '-', 'vertical' : '|', 'corner_tl' : '+', 'corner_tr' : '+', 'corner_bl' : '+', 'corner_br' : '+', 'crossover' : '+',
+               'left_junction' : '+', 'right_junction' : '+', 'top_junction' : '+', 'bottom_junction' : '+',
+               'sun' : 'S', 'moon' : 'l', 'mercury' : 'm', 'venus' : 'v', 'earth' : 'e', 'mars' : 'M', 'jupiter' : 'J', 'saturn' : 's', 'uranus' : 'u', 'neptune' : 'n', 'pluto' : 'p', 'comet' : '@', 'star' : '*'
+              }
+
+    @staticmethod
+    def SetCurrentLocale():
+        """ Load the locale into the textcolor library.
+            Python may assume it's in UTF-8 unless we load the current environment's settings. """
+        locale.setlocale(locale.LC_ALL, '')
+        
+    @staticmethod
+    def GetLocale():
+        """ Retrieve the current locale setting for the session.
+            Output -------------------------------------------------------------------
+            Returns the detected locale (Language, Characterset) tuple. """
+        Lang, CharSet = locale.getlocale()
+        return (Lang, CharSet)
+
+    @staticmethod
+    def CheckLocale(switch=False):
+        """ If the character set is not UTF-8 then special characters won't print. 
+            In that case, convert the SYMBOLS list to safer ISO8859-1 characters.
+            Call this at the start of a session before using other textcolor methods.
+            Parameters ---------------------------------------------------------------
+            switch: False. No changes are made.
+            switch: True. The SYMBOLS list is switched to a simpler version that will work with more character sets.
+            Output -------------------------------------------------------------------
+            Returns the detected locale (Language, Characterset) tuple. """
+        Lang, CharSet = textcolor.GetLocale()
+        if not CharSet in ["UTF-8"] and switch: # Special characters won't work, but we can switch to an alternative list.
+            print("textcolor.CheckLocale: Downgrading special characters for character set",CharSet)
+            textcolor.SYMBOLS = textcolor.SYMBOLS8
+        return (Lang, CharSet)
 
     @staticmethod
     def TextBox(linelist,row=None,col=None,fg=None,bg=None,textfg=None,textbg=None,borderfg=None,borderbg=None,minwidth=None,justify=None):
@@ -349,8 +434,11 @@ class textcolor:
             - textfg/textbg applies to text only. 
             - borderfg/borderbg applies to border only.
             - minwidth = minimum character width.
-            - justify = 'l'(left),'c'(center),'r'(right) """
-        if type(linelist) != type([]): linelist = [linelist] # Convert single values to list for simpler processing.
+            - justify = 'l'(left),'c'(center),'r'(right) 
+            
+            If the O/S character set is not UTF-8 the line drawing can fail. 
+            So if the print() statements fail, this routine will just print the lines individually instead. """
+        if type(linelist) != list: linelist = [linelist] # Convert single values to list for simpler processing.
         if justify != None: justify = justify[0].lower() # standardise code.
         # Convert embedded newline characters into separate list elements.
         templinelist = []
@@ -403,10 +491,16 @@ class textcolor:
         else: # No colors specified.
             temp = textcolor.SYMBOLS['corner_bl'] + (textcolor.SYMBOLS['horizontal'] * maxlen) + textcolor.SYMBOLS['corner_br']
             printlines.append(temp)
-        for i,line in enumerate(printlines): # Now display the whole box.
-            if row != None and col != None: line = textcolor.cursor(col=col,row=row + i) + line # Add screen location (row and column).
-            elif col != None: line = textcolor.cursorright(cols=col) + line # Add screen location (column only).
-            print(line)
+        try: # Try to print with full graphics, but if character set does not allow it, print basic text instead.
+            for i,line in enumerate(printlines): # Now display the whole box.
+                if row != None and col != None: line = textcolor.cursor(col=col,row=row + i) + line # Add screen location (row and column).
+                elif col != None: line = textcolor.cursorright(cols=col) + line # Add screen location (column only).
+                textcolor.safeprint(line)
+                #textcolor.safeprint(line) # This would reduce to latin1 even if the characters are utf-8
+        except Exception as e: # Print simple text if the display won't allow UTF-8 characters.
+            print(textcolor.red("textcolor.TextBox():",str(e)))
+            for line in linelist:
+                print(line)
 
     @staticmethod
     def ListSymbols():
@@ -449,15 +543,36 @@ class textcolor:
     def neatprint(*args,**kwargs):
         """ Own 'print' function. 
             Formats neatly in early Python versions. """
-        if True: # Output to terminal/stdout.
-            line = ''
-            for a in args:
-                a = textcolor.safetype(a)
-                if len(line) > 0: line += ' '
-                line += a
-            print(line)
-        else: # Suppress output.
-            pass
+        sep = ' '
+        end = '\n'
+        for key,value in kwargs.items():
+            if key == 'sep': sep = value
+            elif key == 'end': end = value
+        line = ''
+        for a in args:
+            a = textcolor.safetype(a)
+            if len(line) > 0: line += sep
+            line += a
+        print(line,end=end)
+
+    @staticmethod
+    def safeprint(*args,**kwargs):
+        """ Own 'print' function. 
+            Formats neatly in early Python versions, and reduces utf8 to latin1. """
+        sep = ' '
+        end = '\n'
+        for key,value in kwargs.items():
+            if key == 'sep': sep = value
+            elif key == 'end': end = value
+        line = ''
+        for a in args:
+            a = textcolor.safetype(a)
+            if len(line) > 0: line += sep
+            line += a
+        _, CharSet = locale.getlocale()
+        if not CharSet in ["UTF-8"]: # We cannot use utf-8 full set, reduce to simpler iso-8859-1 character set.
+            line = line.encode('iso-8859-1', errors='replace').decode()
+        print(line,end=end)
 
     @staticmethod
     def getterminalsize(): # Common
@@ -736,20 +851,6 @@ class textcolor:
         v = v % 256 # Clip for safety.
         return v
 
-    #@staticmethod
-    #def fgbgcolorxxx(fg=7,bg=0,text='',reset=True):
-    #    """ 256 colour mode supported. 
-    #        if reset=True, the color is stopped at the end of the text. 
-    #        if reset=False, the color setting remains active after the text. """
-    #    print ('fgbgcolorxxx is a depricated version of fgbgcolor()')
-    #    if textcolor.Mode == 'simple':
-    #        return text
-    #    else:
-    #        if reset: 
-    #            return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text + textcolor.reset() # Stop using this color after the text.
-    #        else:
-    #            return "\033[38;5;" + str(fg) + "m" + "\033[48;5;" + str(bg) + "m" + text # Leave the color active.
-
     @staticmethod
     def fgbgcolor(fg=7,bg=0,*args,sep=' ',reset=True):
         """ 256 colour mode supported. 
@@ -830,13 +931,13 @@ class textcolor:
         else:
             return textcolor.fgbgcolor(textcolor.GREEN,textcolor.BLACK,text)
 
-    @staticmethod
-    def yellowxxx(text="",invert=False):
-        print('yellowxxx is a depricated version of yellow()')
-        if invert:
-            return textcolor.fgbgcolor(textcolor.BLACK,textcolor.YELLOW,text)
-        else:
-            return textcolor.fgbgcolor(textcolor.YELLOW,textcolor.BLACK,text)
+    #@staticmethod
+    #def yellowxxx(text="",invert=False):
+    #    print('yellowxxx is a depricated version of yellow()')
+    #    if invert:
+    #        return textcolor.fgbgcolor(textcolor.BLACK,textcolor.YELLOW,text)
+    #    else:
+    #        return textcolor.fgbgcolor(textcolor.YELLOW,textcolor.BLACK,text)
 
     @staticmethod
     def yellow(*args,sep=' ',invert=False):
@@ -1024,7 +1125,6 @@ class messagewindow():
         elif self.LastRefresh == None: result = True # Need to do initial drawing. 
         elif (datetime.now() - self.LastRefresh).total_seconds() >= self.RefreshRate: result = True # Refresh is due.
         return result 
-        
 
     def Clear(self,immediate=False):
         """ Clear the window. """
@@ -1090,66 +1190,28 @@ class bigletters():
     def InitialiseLD(self):
         self.LetterDictionary = {}
         self.LetterDictionary['unknown'] = ["#####","# # #","## ##","# # #","#####"]
-        self.LetterDictionary[' '] = ["     ","     ","     ","     ","     "]
-        self.LetterDictionary['"'] = [" # # "," # # ","     ","     ","     "]
-        self.LetterDictionary["'"] = ["  #  ","  #  ","     ","     ","     "]
-        self.LetterDictionary['0'] = ["#####","#  ##","# # #","##  #","#####"]
-        self.LetterDictionary['1'] = ["   # ","  ## ","   # ","   # "," ####"]                                      
-        self.LetterDictionary['2'] = ["#####","    #","#####","#    ","#####"]                                      
-        self.LetterDictionary['3'] = ["#####","    #","#####","    #","#####"]                                      
-        self.LetterDictionary['4'] = ["#   #","#   #","#####","    #","    #"]                                      
-        self.LetterDictionary['5'] = ["#####","#    ","#####","    #","#####"]                                      
-        self.LetterDictionary['6'] = ["#####","#    ","#####","#   #","#####"]                                      
-        self.LetterDictionary['7'] = ["#####","    #","    #","    #","    #"]                                      
-        self.LetterDictionary['8'] = ["#####","#   #","#####","#   #","#####"]                                      
-        self.LetterDictionary['9'] = ["#####","#   #","#####","    #","    #"]                                      
-        self.LetterDictionary['.'] = ["     ","     ","     ","     ","  #  "]                                      
-        self.LetterDictionary[','] = ["     ","     ","     ","  ## ","   # "]                                      
-        self.LetterDictionary[':'] = ["     ",
-                                      "  #  ",
-                                      "     ",
-                                      "  #  ",
-                                      "     "]                                      
-        self.LetterDictionary['!'] = ["  #  ",
-                                      "  #  ",
-                                      "  #  ",
-                                      "     ",
-                                      "  #  "]                                      
-        self.LetterDictionary['-'] = ["     ",
-                                      "     ",
-                                      " ### ",
-                                      "     ",
-                                      "     "]                                      
-        self.LetterDictionary['+'] = ["     ",
-                                      "  #  ",
-                                      " ### ",
-                                      "  #  ",
-                                      "     "]                                      
-        self.LetterDictionary['*'] = ["  #  ",
-                                      "# # #",
-                                      " ### ",
-                                      " # # ",
-                                      "#   #"]                                      
-        self.LetterDictionary['='] = ["     ",
-                                      " ### ",
-                                      "     ",
-                                      " ### ",
-                                      "     "]                                      
-        self.LetterDictionary['?'] = [" ### ",
-                                      "#   #",
-                                      "  ## ",
-                                      "     ",
-                                      "  #  "]                                      
-        #for key,item in self.LetterDictionary.items():
-        #    # item is a list of 5 lines. Convert the '#' characters into BLOCKS.
-        #    newitem = []
-        #    for lineitem in item:
-        #        newline = ''
-        #        for i in range(len(lineitem)):
-        #            if lineitem[i] == ' ': newline += ' '
-        #            else: newline += '\u2588'
-        #        newitem.append(newline)
-        #    self.LetterDictionary[key] = newitem
+        self.LetterDictionary[' '] =       ["     ","     ","     ","     ","     "]
+        self.LetterDictionary['"'] =       [" # # "," # # ","     ","     ","     "]
+        self.LetterDictionary["'"] =       ["  #  ","  #  ","     ","     ","     "]
+        self.LetterDictionary['0'] =       ["#####","#  ##","# # #","##  #","#####"]
+        self.LetterDictionary['1'] =       ["   # ","  ## ","   # ","   # "," ####"]                                      
+        self.LetterDictionary['2'] =       ["#####","    #","#####","#    ","#####"]                                      
+        self.LetterDictionary['3'] =       ["#####","    #","#####","    #","#####"]                                      
+        self.LetterDictionary['4'] =       ["#   #","#   #","#####","    #","    #"]                                      
+        self.LetterDictionary['5'] =       ["#####","#    ","#####","    #","#####"]                                      
+        self.LetterDictionary['6'] =       ["#####","#    ","#####","#   #","#####"]                                      
+        self.LetterDictionary['7'] =       ["#####","    #","    #","    #","    #"]                                      
+        self.LetterDictionary['8'] =       ["#####","#   #","#####","#   #","#####"]                                      
+        self.LetterDictionary['9'] =       ["#####","#   #","#####","    #","    #"]                                      
+        self.LetterDictionary['.'] =       ["     ","     ","     ","     ","  #  "]                                      
+        self.LetterDictionary[','] =       ["     ","     ","     ","  ## ","   # "]                                      
+        self.LetterDictionary[':'] =       ["     ","  #  ","     ","  #  ","     "]                                      
+        self.LetterDictionary['!'] =       ["  #  ","  #  ","  #  ","     ","  #  "]                                      
+        self.LetterDictionary['-'] =       ["     ","     "," ### ","     ","     "]                                      
+        self.LetterDictionary['+'] =       ["     ","  #  "," ### ","  #  ","     "]                                      
+        self.LetterDictionary['*'] =       ["  #  ","# # #"," ### "," # # ","#   #"]                                      
+        self.LetterDictionary['='] =       ["     "," ### ","     "," ### ","     "]                                      
+        self.LetterDictionary['?'] =       [" ### ","#   #","  ## ","     ","  #  "]                                      
 
     def GetLetter(self,letter):
         """ Return letter pattern. """
@@ -1164,7 +1226,7 @@ class bigletters():
             for i,LL in enumerate(LD): # Parse each line in turn.
                 lines[i].append(LL + ' ')
         return lines
-                                      
+
 # -------------------------------------------------------------------------------------------------------------------------------- 
 
 class field():
@@ -1213,10 +1275,13 @@ class field():
 
 class colordisplay():
     """ Class to create a coloured character display buffer, and to display on the terminal as needed.
-        Can operate as addressible screen space, or
-        can operate as simple scrolling text windows.
-        Supports sprites.
-        Supports labelled data fields. """
+    
+        Offers three basic modes of operation:
+        1) Operate as addressible screen space
+        2) Operate as simple scrolling text windows
+        3) Operate as a form with defined data fields
+        
+        Supports sprites. """
     
     __version__ = '0.0.6'
     DefinedWindows = [] # Handles of all defined windows. Useful for scanning/updating all available windows.
@@ -1229,7 +1294,10 @@ class colordisplay():
     def AddCDEntry(colwidth,startcol=None):
         """ Add new entry to the colordisplay.CDLayout list.
             You must assign colwidth, but startcol is optional.
-            If startcol is not specified, the next available one is assigned. """
+            If startcol is not specified, the next available one is assigned. 
+            
+            CDLayout is a list of display columns that individual colordisplay instances can be placed in. 
+            This is used to simplify the creation of multi-panel displays. """
         if startcol == None: # Starting column isn't specified, so calculate the next available one.
             startcol = 1 # Find the next free one. 1st column if nothing exists yet.
             for cd in colordisplay.CDLayout: # Check each layout already defined.
@@ -1239,7 +1307,7 @@ class colordisplay():
         colordisplay.CDLayout.append([startcol,colwidth])
         return True
     
-    def __init__(self,rows,columns=None,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None,cdlayout=None):
+    def __init__(self,rows,columns=None,name='',row=None,col=None,fg=15,bg=0,FirstScrollRow=0,title=None,rjtitle=None,titlefg=None,titlebg=None,borderfg=None,borderbg=None,cdlayout=None):
         """ fg and bg parameters can be single integer value (0-255) or a list of values [(0-255),(0-255),..] 
             The Print() method will cycle through the colors if lists are given. 
             Other modes operate with just the first given fg and bg values, the rest of any lists are ignored. 
@@ -1251,6 +1319,7 @@ class colordisplay():
             bg = Background. Single color code (0-255) of list of values to cycle through.
             FirstScrollRow = When printing to window, this is the first row that will scroll up as new lines are printed. (allows titles to stay fixed etc)
             title = Window title.
+            rjtitle = Extra text for window title that will be right justified. It overwrites basic window title.
             titlefg = Title foreground. Single color code (0-255). None will use window bg value.
             titlebg = Title background. Single color code (0-255). None will use window fg value. 
             cdlayout = index of the colordisplay.CDLayout list. A shortcut to set col and or row values more dynamically.
@@ -1279,11 +1348,10 @@ class colordisplay():
         else:
             self.LastDisplayRow = None
         if self.DisplayCol != None and self.DisplayColumns != None:
-            #self.LastDisplayCol = self.DisplayCol + self.DisplayColumns - 1
             self.LastDisplayCol = self.DisplayCol + self.DisplayColumns
         else:
             self.LastDisplayCol = None
-        if type(fg) == list:
+        if type(fg) == list: # For scrolling displays you can provide a list of alternating text colors to use. This visually separates individual entries.
             self.DefaultFG = fg[0] # What's the default foreground color?
             self.DefaultFGs = fg
         else:
@@ -1291,7 +1359,7 @@ class colordisplay():
             self.DefaultFGs = [fg]
         self.FGColorCount = len(self.DefaultFGs) # How many colors are available?
         self.FGColorIndex = 0 # Which color do we start with if multiple available?
-        if type(bg) == list:
+        if type(bg) == list: # For scrolling displays you can provide a list of alternating background colors to use. This visually separates individual entries.
             self.DefaultBG = bg[0] # What's the default background color?
             self.DefaultBGs = bg # List of all background colors.
         else:
@@ -1323,12 +1391,13 @@ class colordisplay():
         self.Log = None # Can store handle to a 'Log' method for logging messages. Needs to be defined and assigned by the calling program.
         self.RefreshRate = None # Can specify how quickly the display refreshes (in seconds).
         self.LastRefresh = None # When did the display last update?
-        #self.Metadata = {} # Dictionary of metadata for fields in the display. (Experimental)
-        #                   # {'name' : 'xxx', 'row' : nn, 'col' : nn, 'fg' : nn, 'bg' : nn}
         self.Fields = [] # List of fields if defined.
         self.MarkDisplay = False # If TRUE the corners are highlighted in RED, and the FIELDS are highlighted in YELLOW(for layout checking)
-        if title == None: self.WindowTitle = None # Does the window have a title row?
-        else: self.SetTitle(title)
+        if title != None: self.WindowTitle = ' ' + title.strip()
+        else: self.WindowTitle = None
+        if rjtitle != None: self.RJTitle = rjtitle.strip() + ' ' # A secondary title that is right justified on top of the title line.
+        else: self.RJTitle = None
+        if self.WindowTitle != None: self.SetTitle()
         self.ClipWindow = False # If TRUE, the window can be clipped to fit available terminal display. This will simply truncate.
         self.DrawBorder = False # If TRUE, an additional single line border is drawn on the RIGHT and BOTTOM of the window. Takes 1 extra character in each dimension.
         self.BorderFG = self.DefaultFG
@@ -1343,26 +1412,34 @@ class colordisplay():
                 del colordisplay.DefinedWindows[i]
                 break
 
-    def SetTitle(self,title):
+    def SetTitle(self):
         """ Turn first row of a window into a title row.
             Color appropriately and change the scroll behaviour of the window.
             1st line nolonger scrolls. """
-        self.WindowTitle = ' ' + title.strip()
-        if self.WindowTitle != None: 
-            temp = self.WindowTitle
-            self.FirstScrollRow = 1
-        else:
-            temp = ''
+        if self.WindowTitle == None: # Deactivate the title line.
             self.FirstScrollRow = 0
-        temp = (temp + (' ' * self.DisplayColumns))[:self.DisplayColumns]
-        for c in range(self.DisplayColumns):
-            self.character[0][c] = temp[c]
-            if self.WindowTitle != None:
-                self.fgcolor[0][c] = self.TitleFG # Invert colors for titles.
-                self.bgcolor[0][c] = self.TitleBG # Invert colors for titles.
-            else:
+            for c in range(self.DisplayColumns):
                 self.fgcolor[0][c] = self.DefaultFG # Regular colors if no title.
                 self.bgcolor[0][c] = self.DefaultBG # Regular colors if no title.
+        else: # Activate the title line.
+            self.FirstScrollRow = 1
+            temp = (self.WindowTitle + (' ' * self.DisplayColumns))[:self.DisplayColumns] # Pad out to full window width.
+            for c in range(self.DisplayColumns):
+                self.character[0][c] = temp[c] # Add title to window display top line.
+                self.fgcolor[0][c] = self.TitleFG # Invert colors for titles.
+                self.bgcolor[0][c] = self.TitleBG # Invert colors for titles.
+            if self.RJTitle != None: # There is a right justified element to the title to add.
+                sc = self.DisplayColumns - len(self.RJTitle)
+                for i in range(len(self.RJTitle)): # Work backwards because we are right justifying this on top of existing title.
+                    c = sc + i # Where does the character go?
+                    self.character[0][c] = self.RJTitle[i]
+
+    def ReadTitleRow(self):
+        """ Read the title row directly from the buffer. """
+        line = ''
+        for c in range(self.DisplayColumns):
+            line += self.character[0][c]
+        return line
 
     def AddField(self,name,row,column,length=10,justify='l'):
         """ Add a field to the list of fields recognised in this window. 
@@ -1751,6 +1828,8 @@ class colordisplay():
                 self.character[r][c] = self.default_character[r][c]
                 self.fgcolor[r][c] = self.default_fgcolor[r][c]
                 self.bgcolor[r][c] = self.default_bgcolor[r][c]
+        # Reconstruct the title if it is set.
+        self.SetTitle()
         if immediate: self.Draw() # Clear the display immediately.
 
     def CellValue(self,row,col):
@@ -1786,6 +1865,15 @@ class colordisplay():
             self.fgcolor.append([self.DefaultFGs[self.FGColorIndex] for c in range(self.DisplayColumns)])
             self.bgcolor.append([self.DefaultBGs[self.BGColorIndex] for c in range(self.DisplayColumns)])
         if immediate: self.Display(immediate=immediate)
+
+    def Concat(self,*args,sep=' '):
+        """ Convert all the input arguments into a single string. """
+        result = ''
+        for arg in args:
+            if result != '': result = result.strip() + sep # add single clean separator between existing values and the new one.
+            result += str(arg) # Add new value.
+        result = result.strip() # Clean up.
+        return result
 
     def Print(self,*args,fg=None,bg=None,immediate=False):
         """ Simple scrolling print function. 
@@ -2087,8 +2175,17 @@ class colordisplay():
     @staticmethod
     def GlobalReduceIO(reduce=True):
         """ Turn on/off the ReduceIO function in all defined windows. 
-            True turns it on.
-            False turns it off. """
+            reduce = True turns it on.
+            reduce = False turns it off. 
+            
+            When True: All defined display windows will apply the ReduceIO rules. 
+                       When refreshing the display ONLY the changed characters are 
+                       updated to the terminal. This makes the refresh considerably
+                       faster for displays where only a few characters change each time. 
+                       In most cases this is the most efficient way to refresh the displays.
+            When False: All the defined display windows will completely redraw
+                       all their contents each time the display is refreshed, even if
+                       nothing has changed. """
         for w in colordisplay.DefinedWindows:
             try:
                 w.ReduceIO = reduce
@@ -2146,7 +2243,7 @@ class proceduremenu():
         Menu quits when user selects 'x' option. 
         
         dictionary format 
-                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call, 'break': False},
+                {'menuitem1key':{'label':'menu item 1 label', 'bold':True/False, 'call': ProcedureName to call, 'break': False, 'color': textcolor.yellow},
                  'menuitem2key':{'label':'menu item 2 label', 'bold':True/False, 'call': ProcedureName to call}
                 }
                 
@@ -2158,6 +2255,10 @@ class proceduremenu():
                 'label' = The label to appear in the menu.
                 'precall' = Optional: Procedure call to make BEFORE the 'call' procedure is called. If this fails, the 'call' and 'postcall' procedures are not called.
                 'postcall' = Optional: Procedure call to make AFTER the 'call' procedure is called. This is executed even if the 'call' procedure fails.
+                'color' = The name of the textcolor color to use for the label. If missing the default is used.
+
+                'id' is added automatically. It is the menu ID number.
+                'enabled' is added automatically. It indicates that the menu option is currently visible and selectable.
                 
         You can also specify global PRE and POST procedure calls by setting the procedure handle in 
         self.PreCall and self.PostCall attributes.
@@ -2176,6 +2277,7 @@ class proceduremenu():
             immediately to the cleanup 'postcall' and self.PostCall procedures.
         - 'postcall' gives an option specific cleanup routine to run after the menu option even if it failed.
         - self.PostCall gives a global cleanup routine to run after all menu options even if they failed.
+        - 'close' when True the menu closes when the procedure completes. Otherwise the user returns to the menu.
                 
         You can trigger user input via the Prompt() method.
         You can directly run a menu option without user input via the Run() method.
@@ -2206,6 +2308,7 @@ class proceduremenu():
         for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
             Counter += 1
             value['id'] = Counter
+            value['enabled'] = True # All menu options are enabled and visible by default.
             self.LabelWidth = max(self.LabelWidth,len(value['label']))
             
             try: # Check that the procedure name to be called looks valid.
@@ -2280,8 +2383,11 @@ class proceduremenu():
         print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
         print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
         for key,value in self.Dictionary.items(): # Go through each menu item in turn.
+            if value['enabled'] == False: continue # Not visible or selectable, skip it.
             entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
-            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
+            if value.get('color',None) != None: # Menu item has a specific label color.
+                entry += value['color'](value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
+            elif value.get('bold',False): # If the menu item is in bold, make it so.
                 entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
             else: # Menu item is not in bold.
                 entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
@@ -2290,7 +2396,7 @@ class proceduremenu():
             count += 1 # Count how many entries.
             if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
                 print ('')
-            if 'break' in value and value['break']: 
+            if value.get('break',False): 
                 if count % self.Columns != 0: # We're terminating the line early.
                     print ('')
                     count = 0
@@ -2369,7 +2475,7 @@ class proceduremenu():
                 Success = False # Set the return code.
 
         # Global Post procedure. # Execute AFTER the main procedure call.
-        if self.PreCall != None: # See if it's a callable function.
+        if self.PostCall != None: # See if it's a callable function.
             try: # See if the post-procedure will execute. 
                 self.PostCall() # Call it.
             except Exception as e:
@@ -2404,6 +2510,7 @@ class proceduremenu():
             Note, you can also trigger options from the menu without user prompting by using the menu.Run(name) method. """
         # Now paint the menu and ask the user what to do.
         self.Draw(menuprefix=menuprefix) # Paint the menu.
+        closeflag = False
         while True: # Loop until explicitly told to terminate.
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
             answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
@@ -2426,20 +2533,24 @@ class proceduremenu():
             # Process menu choice.
             try: # Convert text into integer if possible.
                 menuid = int(answer)
-            # except Exception as e:
             except Exception:
                 # Text would not convert into integer. 
                 menuid = None
             if menuid != None: # 
                 found = False # Have we found and executed the menu option?
+                closeflag = False # Don't close the menu.
                 for key,value in self.Dictionary.items():
+                    if value['enabled'] == False: continue # Not visible or selectable, skip it.
+                    closeflag = self.Dictionary[key].get('close',False) # Should the menu close immediately?
                     if value['id'] == menuid:
                         self.Run(key) # Execute the option.
-                        self.Draw() # Refresh the menu.
                         found = True # We have found and executed the option. OK to return to ask user for new input.
-                        break # Next
+                        self.Draw() # Refresh the menu.
+                        break # No need to check other key value pairs.
                 if found: # Option was found and executed. Return to user input.
                     continue # Next user input.
+            if closeflag: # The menu should shut down once the procedure has completed.
+                break
             if answer.lower() == '?': # Refresh option chosen.
                 self.Draw() # Refresh the menu.
                 continue # Next user input.
@@ -2471,25 +2582,30 @@ class optionmenu():
                 'bold' = Print the menu option in bold text.
                 'label' = The label to appear in the menu.
                 
+                'id' is added automatically. It is the menu ID number.
+                'enabled' is added automatically. It indicates that the menu option is currently visible and selectable.
+                
         You can trigger user input via the Prompt() method.
         You can directly run a menu option without user input via the Run() method.
         """
 
     __version__ = '0.0.2'
 
-    def __init__(self,dictionary,title='Menu',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None):
+    def __init__(self,dictionary,title='Options',titlefg=None,titlebg=None,helpdir=None,helpurl=None,logger=None,columns=2):
         """ Create the menu, load the dictionary.
             Initialize and validate the data.
             title = Title of menu.
             titlebg/fg colors of menu title.
             helpdir = directory where help text files exist. 
-            helpurl = url to help file. """
+            helpurl = url to help file. 
+            logger = pilomarlog.Log() instance (optional)
+            columns = Initial number of columns to display the menu in."""
         self.Dictionary = dictionary
         self.Title = title
         self.IdWidth = 2
         self.LabelWidth = 26
         self.TitleFG = titlefg
-        self.Columns = 2 # How many columns to draw?
+        self.Columns = columns # How many columns to draw?
         self.Log = logger # Can define a logging function to use.
         if titlefg == None: self.TitleFG = textcolor.BLACK
         self.TitleBG = titlebg
@@ -2497,7 +2613,9 @@ class optionmenu():
         Counter = 0
         for key,value in self.Dictionary.items(): # Assign menu ID number to each entry.
             Counter += 1
+            #print("Adding:",Counter,value)
             value['id'] = Counter
+            value['enabled'] = True # All menu options are enabled and visible by default.
             self.LabelWidth = max(self.LabelWidth,len(value['label']))
         self.HelpDir = helpdir
         self.HelpUrl = helpurl
@@ -2545,8 +2663,11 @@ class optionmenu():
         print (textcolor.clearforward()) # Blank line before menu and clear everything below that.
         print (textcolor.fgbgcolor(self.TitleFG,self.TitleBG,' ' + menuprefix + self.Title + ' ')) # Menu title is painted in inverse colours. 
         for key,value in self.Dictionary.items(): # Go through each menu item in turn.
+            if value['enabled'] == False: continue # Not visible or selectable, skip it.
             entry = textcolor.yellow(str(value['id']).rjust(self.IdWidth,' ')) + ' ' # ID number in yellow. 
-            if 'bold' in value and value['bold']: # If the menu item is in bold, make it so.
+            if value.get('color',None) != None: # Menu item has a specific label color.
+                entry += value['color'](value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
+            elif value.get('bold',False): # If the menu item is in bold, make it so.
                 entry += textcolor.white(value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth])
             else: # Menu item is not in bold.
                 entry += value['label'].ljust(self.LabelWidth,' ')[:self.LabelWidth]
@@ -2555,7 +2676,7 @@ class optionmenu():
             count += 1 # Count how many entries.
             if count % self.Columns == 0: # Print 'newline' after 2nd column entry.
                 print ('')
-            if 'break' in value and value['break']: 
+            if value.get('break',False): 
                 if count % self.Columns != 0: # We're terminating the line early.
                     print ('')
                     count = 0
@@ -2604,7 +2725,7 @@ class optionmenu():
         found = False # Set to True if a choice is successfully made, else False is returned.
         while True: # Loop until explicitly told to terminate.
             if self.Log != None: self.Log('Menu waiting for user input.',terminal=False)
-            answer = input(textcolor.cyan('Menu option : ')) # Prompt for input.
+            answer = input(textcolor.cyan('Choose option : ')) # Prompt for input.
             if self.Log != None: self.Log('Menu received user input',answer,'.',terminal=False)
             if answer == '?': # Refresh the menu.
                 self.Draw() # Refresh the menu.
@@ -2624,13 +2745,13 @@ class optionmenu():
             # Process menu choice.
             try: # Convert text into integer if possible.
                 menuid = int(answer)
-            # except Exception as e:
             except Exception:
                 # Text would not convert into integer. 
                 menuid = None
             if menuid != None: # 
                 found = False # Have we found and executed the menu option?
                 for key,value in self.Dictionary.items():
+                    if value['enabled'] == False: continue # Not visible or selectable, skip it.
                     if value['id'] == menuid:
                         result = self.Select(key) # Choose the selected value to return.
                         found = True # We have found and selected the option.
@@ -2691,7 +2812,7 @@ class listchooser():
         while True:
             choice = []
             self.Print(inputlist)
-            inputtext = input("Choice ('x' to return) : ")
+            inputtext = input(textcolor.cyan("Choice ('x' to return) : "))
             inputtext = inputtext.lower()
             if inputtext == 'x': break # Quit.
             if len(inputtext) < 1: continue # Nothing to check, ask again.
@@ -2715,4 +2836,180 @@ class listchooser():
         # In all other cases return the selected list.
         return result
     
+# -------------------------------------------------------------------------------------------------------------------------------- 
+
+class filechooser():
+    """ Allow a user to browse and select a file from disc. 
+    
+        Define where you want to start the search. 
+        User selects a file from there, or navigates the directory structure.
+        
+        Returns the chosen file and a 'success' flag. 
+        
+        Example ------------------------------------------------------
+        FC = filechooser(title='Choose an image file',default='/home/pi/pilomar/data/',types=['jpg','jpeg'])
+        chosen_file, success = FC.ChooseFile()
+        if success: 
+            print("Chose",chosen_file)
+        else:
+            print("No file chosen")
+            
+        """
+    
+    def __init__(self,title,default=None,types=None):
+        """ default = Default location to open browser.
+                      If NONE: pwd is used.
+                      If folder is not found, the parent is chosen.
+            types = optional list of file types.
+                    If NONE: All files are listed. """
+        self.Title = title
+        self.DefaultDir = default
+        self.CurrentDir = default
+        self.FileTypes = types
+
+    def ToPathType(self,filepath):
+        """ Make sure filepath is a Path type.
+            When referring to file and folder names in the code it is easy to confuse string and Path objects.
+            This makes sure that you are always using a Path object by converting string values to Path objects. """
+        if type(filepath) != Path:
+            filepath = Path(filepath)
+        return filepath
+    
+    def PathExists(self,folderpath):
+        """ Return TRUE if a path exists. Else False. """
+        folderpath = self.ToPathType(folderpath) # Convert to Path object.
+        return folderpath.exists()
+        
+    def NameOnly(self,folderpath):
+        """ Strip full path, return only the name of the file. """        
+        folderpath = self.ToPathType(folderpath) # Convert to Path object.
+        return folderpath.name
+
+    def IsFile(self,folderpath):
+        """ Return TRUE if a path points to a file. Else False. """
+        folderpath = self.ToPathType(folderpath) # Convert to Path object.
+        return folderpath.is_file()
+
+    def IsDir(self,folderpath):
+        """ Return TRUE if a path points to a file. Else False. """
+        folderpath = self.ToPathType(folderpath) # Convert to Path object.
+        return folderpath.is_dir()
+        
+    def GetParent(self,filepath):
+        """ Return PARENT of a folder. """
+        filepath = self.ToPathType(filepath)        
+        return filepath.parent
+        
+    def IsType(self,filepath, filetype, casesensitive=False):
+        """ Return TRUE if the path is a file matching filetype. 
+            filepath is the path to check.
+            filetype can be a single value or a list that must be matched.
+            casesensitive controls whether case must match. 
+            File does not need to exist on disc. """
+        if type(filetype) == str: filetype = [filetype] # Convert to list in all cases.
+        filepath = self.ToPathType(filepath) # Convert to Path object.
+        foundtype = filepath.suffix.replace('.','') # Get suffix (file type) and drop the '.' separator.
+        result = False 
+        if casesensitive: # Perform case sensitive match.
+            if foundtype in filetype: # We found a match.
+                result = True
+        else: # Not case sensitive.
+            filetype = [ft.lower() for ft in filetype] # Convert to lower case.
+            if foundtype.lower() in filetype:
+                result = True
+        return result
+
+    def VerifyFolder(self,folder=None):
+        """ Given a folder name, make sure it exists, if it doesn't return the closest parent. 
+            If none exist, return home directory. """
+        if folder == None: 
+            folder = Path.home() # returns user's home directory
+        folder = self.ToPathType(folder)
+        keeplooking = True # Keep searching for a valid path?
+        while keeplooking:
+            if self.PathExists(folder) and self.IsDir(folder): # Found valid folder.
+                keeplooking = False
+                break
+            # This isn't valid, try parent.
+            try:
+                folder = folder.parent
+            except:
+                folder = None
+                break
+        if folder == None: 
+            folder = Path.home() # returns user's home directory
+        return folder
+    
+    def FileList(self,show_files=True,show_folders=True,must_exist=True):
+        """ Return dictionary of files and subfolders in current folder. 
+            Parameters ------------------------------------------------------
+            show_files : True - will list files found.
+            show_folders : True - will list folders found.
+            must_exist : True - can only select existing files.
+                         False - user can enter a filename that does not exist.
+            Outputs ---------------------------------------------------------
+            Dictionary list of files and folders identified.
+            
+            The list is sorted,
+              1st entry is always the parent directory. 
+              2nd set of entries are always the sub-directories. 
+              3rd set of entries are the files. 
+              directory and file groups are alphabetically sorted. """
+        self.CurrentDir = self.VerifyFolder(self.CurrentDir)
+        dirs = []
+        files = []
+        result = {}
+        if show_folders: result[".."] = {'value':str(self.GetParent(self.CurrentDir)), 'label':'..', 'type':'dir', 'color':textcolor.cyan} # Always allow UP to parent.
+        for root, dirs, files in os.walk(str(self.CurrentDir)):
+            if show_folders:
+                for entry in sorted(dirs):
+                    fn = entry.split("/")[-1]
+                    result[fn] = {'value':root + "/" + entry, 'label':fn, 'type':'dir', 'color':textcolor.cyan} # Folders show in CYAN.
+            if show_files:
+                for entry in sorted(files):
+                    fn = entry.split("/")[-1]
+                    ty = fn.split(".")[-1] # Get file type.
+                    filepath = root + "/" + entry
+                    if self.FileTypes == None or self.IsType(filepath, self.FileTypes, casesensitive=False):
+                        result[fn] = {'value':filepath, 'label':fn, 'type':'file'}
+            break
+        if not must_exist:
+            result['+'] = {'value':'+', 'label':'New file', 'type':'file', 'color':textcolor.yellow} # NEW file option is in YELLOW.
+        return result
+
+    def ChooseFile(self):
+        """ Use the listchooser class to present a list of files and folders, 
+            let the user select one.
+            User can navigate up/down directory tree looking for appropriate files.
+            Outputs ------------------------------------------------------------
+            chosen_file : Full path to chosen file.
+                          None if nothing selected.
+            found : True if file chosen.
+                    False if file was not found.
+                    None if user quit without choosing anything. """
+        chosen_file = None
+        found = False
+        title = self.Title 
+        if type(self.FileTypes) == list and len(self.FileTypes) > 0:
+            title = (title + " " + str(self.FileTypes)).strip()
+        while chosen_file == None:
+            options = self.FileList() # List all the files and subfolders in the chosen directory.
+            OptionMenu = optionmenu(options,title) # Create new option menu for the current directory.
+            chosen_file, found = OptionMenu.Prompt() # Ask the user to select a file from the list.
+            # chosen_file = full path chosen.
+            # found = Was a choice made?
+            if found and self.IsDir(chosen_file): # Directory
+                self.CurrentDir = chosen_file # Switch to chosen directory
+                chosen_file = None
+                continue # Try again.
+            if found and chosen_file == '+': # User can create new file here.
+                tf = input(textcolor.cyan("Enter filename:")).trim()
+                if tf == '': # Nothing entered.
+                    chosen_file = None
+                    continue # Try again.
+                chosen_file = self.CurrentDir + "/" + tf
+            #print("ChosenItem:",chosen_file,found)
+            break # The choice is made.
+        return chosen_file, found
+        
 # -------------------------------------------------------------------------------------------------------------------------------- 

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# Pilomar's cpu monitor class.
+# Pilomar's disc (storage) monitor class.
 
 # This software is published under the GNU General Public License v3.0.
 # Also respect any pre-existing terms of any components that this incorporates.
@@ -74,22 +74,28 @@ class discmonitor(): # 2 references.
         lines = self.osCmd(cCmd) # Execute command and gather result.
         fieldnames = None # This will be a list of the column headers from the first line of the 'df' command output.
         for i,line in enumerate(lines): # Read the output lines one at a time.
+            #self.Log("pilomardisc.GetDfDictionary(): Processing:",i,line,terminal=False)
             lineitems = line.strip().split() # Split into individual fields.
             if len(lineitems) > 0: # Poll through the devices.
                 if i == 0: # 1st line is just field names.
-                    fieldnames = lineitems
+                    fieldnames = ['Filesystem','Size','Used','Avail','Use%','Mounted on'] # lineitems - Always use the 'en_US' labels, ignore the headings in the user's locale.
                 else: # Other lines contain data.
-                    for j in range(1,5): # Poll through the columns.
+                    for j in [1,2,3,4]: # Run through the columns 1,2,3&4. Ignore the filesystem and mount column.
                         v = lineitems[j] # Get raw column value.
                         for ji in convlist: # Convert from HumanReadable into absolute value. Check all conversions.
                             if ji[0] in v: # This HR value can be converted.
-                                v = int(float(v[:-1]) * ji[1]) # Convert from HR text value into absolute value.
+                                fv = oscommand.Delocalize(v[:-1]) # Ignore final magnitude character, convert the rest into a safe decimal string.
+                                #self.Log("pilomardisc.GetDfDictionary(): Converted",v,"into",fv,terminal=False)
+                                #v = int(float(v[:-1]) * ji[1]) # Convert from HR text value into absolute value.
+                                sv = ji[1] # How many powers of 10 does the magnitude character represent?
+                                v = int(float(fv) * sv) # Convert from HR text value into absolute value.
                                 break # No need to convert further.
                         lineitems[j] = v # Store back in the line.
                     dictentry = {} # Create an entry for this particular drive mount.
                     for j,v in enumerate(lineitems): # Pull each field and convert into dictionary entry.
                         dictentry[fieldnames[j]] = lineitems[j]
                     dictionary[lineitems[-1]] = dictentry # Append this entry to the dictionary of all mount points.
+        #self.Log("pilomardisc.GetDfDictionary():",dictionary,terminal=False)
         return dictionary 
         
     def Poll(self,force = False):
