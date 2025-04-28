@@ -129,7 +129,7 @@
 # *Q* Complete EXIF tag setting.
 # *Q* Validate Julian Date conversion.
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 import os
 os.environ["LIBCAMERA_LOG_LEVELS"] = "3" # Report errors only. Supresses a lot of unwanted messages to the terminal.
