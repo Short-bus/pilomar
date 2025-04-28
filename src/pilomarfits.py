@@ -654,7 +654,8 @@ if DebugMode:
                 'min:',np.min(colour),'max:',np.max(colour),
                 'shape:',colour.shape,'dtype:',colour.dtype,'unique_count:',len(np.unique(colour)),terminal=VerboseMode)
 
-RightDeadColumns = 10 # The 10 rightmost columns are 'dead' after the debayering. These are generally value '[0,0,0]' which can distort later normalisation.
+#RightDeadColumns = 10 # The 10 rightmost columns are 'dead' after the debayering. These are generally value '[0,0,0]' which can distort later normalisation.
+RightDeadColumns = 8 # The 8 rightmost columns are 'dead' after the debayering. These are generally value '[0,0,0]' which can distort later normalisation.
 colour = colour[:,:-1 * RightDeadColumns,:] # Loose the 'dead' right hand columns. Will contain numbers in range 0 - 4095 (2 ^ 12)
 if DebugMode:
     MainLog.Log(PROGRAMNAME + ": colour_post_trim:",
@@ -726,13 +727,13 @@ if '--exif-tag-file' in ArgumentDict:
         else: # Can't find the specified tag file.
             print("** pilomarfits: Cannot find exif header tag file",obsfilename)
 
-# Add back the right hand border to retain original image dimensions.
-#                           source   top    bottom    left     right      bordertype        filltype   value
-colour = cv2.copyMakeBorder(colour,   0,      0,        0,      RightDeadColumns,   cv2.BORDER_CONSTANT,   None) # , value = [0,0,0])     
+## Add back the right hand border to retain original image dimensions.
+##                           source   top    bottom    left     right      bordertype        filltype   value
+#colour = cv2.copyMakeBorder(colour,   0,      0,        0,      RightDeadColumns,   cv2.BORDER_CONSTANT,   None) # , value = [0,0,0])     
 
 # Always save the .jpg file.
 JpgStartTime = NowUTC() # When did jpg save start?
-MainLog.Log(PROGRAMNAME + ": jpgfilename:",jpgfilename,terminal=VerboseMode)
+MainLog.Log(PROGRAMNAME + ": jpgfilename:",jpgfilename,"(shape",colour.shape,")",terminal=VerboseMode)
 cv2.imwrite(jpgfilename,colour,[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)])
 JpgEndTime = NowUTC() # When did jpg save end?
 
