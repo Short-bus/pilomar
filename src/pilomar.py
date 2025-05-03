@@ -105,7 +105,7 @@
 # - MAJOR = Breaking change. Not fully compatible with previous versions. Usually requires RPI and MICROCONTROLLER updates together.
 # - MINOR = New features but backwards compatible. Usually allows RPI or MICROCONTROLLER to be updated independently.
 # - MICRO = Development/bugfix releases.
-VERSION = '1.2.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+VERSION = '1.2.2' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
 
 import sys # For version verification.
 
@@ -188,7 +188,7 @@ else:
 
 # ------------------------------------------------------------------------------------------------------
 
-textcolor.SetCurrentLocale() # Get the user's locale. Without this the program runs assuming eu_US decimals and UTF-8 from the O/S which causes problems. 
+textcolor.SetCurrentLocale() # Get the user's locale. Without this the program runs assuming en_US decimals and UTF-8 from the O/S which causes problems. 
 
 # Check the locale for the application. (Language and Character set). Will not adapt the textcolor.SYMBOLS list.
 LOCALE = textcolor.CheckLocale(switch=True) # This makes textcolor.SYMBOLS compatible with environment character set.
@@ -690,10 +690,12 @@ class hardware(attributemaster):
         self.native_camera_driver()
         # Some configuration checks.
         if self.i2c_enabled(): # Warn if i2c interface is on.
-            self.Log("hardware.__init__():",str(self.program_title) + " is not designed to run with i2c interface enabled. Please disable it.",level='error',terminal=True)
-            raise Exception(str(self.program_title) + " is not designed to run with i2c interface enabled. Please disable it.")
+            self.Log("hardware.__init__():",str(self.program_title) + " is not designed to run with I2C interface enabled. Please disable it.",level='error',terminal=True)
+            raise Exception(str(self.program_title) + " is not designed to run with I2C interface enabled. Please disable it.")
         if self.spi_enabled(): # Warn if spi interface is on.
-            self.Log("hardware.__init__():",str(self.program_title) + " is not designed to run with spi interface enabled. Please disable it.",level='error',terminal=True)
+            self.Log("hardware.__init__(): Detected an SPI interface kernel module is loaded.",level='error')
+            self.Log("hardware.__init__():",str(self.program_title) + " is not designed to run with SPI interface enabled. Please disable it.",level='error')
+            self.Log("hardware.__init__(): If you have recently disabled SPI, please reboot the Raspberry Pi.",level='error')
             raise Exception(str(self.program_title) + " is not designed to run with spi interface enabled. Please disable it.")
          # Safe to start checking GPIO pins for other information.
         self.identify_pcb()
@@ -828,7 +830,6 @@ class hardware(attributemaster):
 
     def i2c_enabled(self): 
         """ Return TRUE if i2c is enabled."""
-        #lines = osCmd('sudo i2cdetect -y 1')
         result = False
         returncode = osCmdCode('sudo i2cdetect -y 1')
         if returncode == 0: # This command will only succeed if i2c is enabled.
@@ -836,13 +837,17 @@ class hardware(attributemaster):
         return result
 
     def spi_enabled(self):
-        """ Return TRUE if SPI is enabled. """
+        """ Return TRUE if SPI is enabled.
+            Looks for specific SPI kernel modules being loaded. """
         lines = osCmd('lsmod')
         result = False
         for line in lines:
-            if 'spi_' in line:
-                result = True
-                break
+            for entry in ['spi_bcm2708','spi_bcm2835']:
+                if entry in line: # SPI kernel module is loaded.
+                    self.Log("hardware.spi_enabled(): Detected",entry,"kernel module is loaded.",terminal=False)
+                    result = True
+                    break
+            if result: break # No point searching further.
         return result
         
     def hardware_is_supported(self,allow_fail=True):
@@ -1145,9 +1150,8 @@ class parameters(attributemaster): # Common
                      ' ',
                      'The Parameter file defines LocalTZ as ' + str(self.LocalTZ),
                      ' ',
-                     'This is not recognised. It has been reset to UTC',
-                     'for safety. You can select a new LocalTZ value from the',
-                     'Miscellaneous tools menu.']
+                     'This is not recognised. It has been reset to UTC for safety.',
+                     'You can select a new LocalTZ value from the Miscellaneous tools menu.']
             self.LocalTZ = 'UTC' # Reset to safe default.
             textcolor.TextBox(lines,fg=textcolor.BLACK,bg=textcolor.YELLOW,justify='c')
         self.HomeLat = self.GetParmVal('HomeLat',None) # Latitude of the observer.
@@ -4629,7 +4633,7 @@ class imagetracker(attributemaster):
 
     def SetTargetImage(self,cvimagebuffer,timestamp=None,zone=0):
         """ This registers a new target reference image. """
-        self.Log("ImageTracker.SetTargetImage: Begin: Zone",i,terminal=False)
+        self.Log("ImageTracker.SetTargetImage: Begin: Zone",zone,terminal=False)
         self.Log("ImageTracker.SetTargetImage: Received image buffer type", str(type(cvimagebuffer)),terminal=False)
         if isinstance(cvimagebuffer,type(None)):
             self.Log("ImageTracker.SetTargetImage: Received None type image buffer. Nothing set.",terminal=False)
@@ -4657,8 +4661,8 @@ class imagetracker(attributemaster):
             This creates a batch of search zone images on disc.
             All available zone images are created even if they are not needed. """
         self.Log("imagetracker.CreateTargetZones: This function should be redundant now.",level='error',terminal=False)
-        for i,sequence_entry in enumerate(self.ZoneList):
-            self.Log("pilomarimage.CreateTargetZones:",i,sequence_entry,terminal=False)
+        for zone,sequence_entry in enumerate(self.ZoneList):
+            self.Log("pilomarimage.CreateTargetZones:",zone,sequence_entry,terminal=False)
             distance = sequence_entry[0] # Distance to centre of master map (for sorting)
             zone_width = sequence_entry[1] # Search area width.
             zone_height = sequence_entry[2] # Search area height. 
@@ -4671,22 +4675,24 @@ class imagetracker(attributemaster):
             filename = sequence_entry[9] # Filename to generate on disc.
             NewImageBuffer = pilomarimage(name='searchsequence',logger=CamLog) # Create image handler.
             NewImageBuffer.New(self.LatestImage.GetHeight(),self.LatestImage.GetWidth()) # Create new image buffer.
-            self.Log("pilomarimage.CreateTargetZones: Creating",
-                     "[",y_start,":",y_start + zone_height,",",
-                     "[",x_start,":",x_start + zone_width,",",
-                     ":","]",filename,terminal=False)
+            self.Log("pilomarimage.CreateTargetZones: Creating zone",zone,
+                     "[height",y_start,":",y_start + zone_height,",",
+                     "width",x_start,":",x_start + zone_width,",",
+                     "depth",":","]",filename,terminal=False)
             NewImageBuffer.ImageBuffer = self.MasterImage.ImageBuffer[y_start:y_start + zone_height,x_start:x_start + zone_width,...] # Pull JUST the selected zone from the master map.
             self.Log("pilomarimage.CreateTargetZones: Created",
                      "(",NewImageBuffer.GetWidth(),"w by",NewImageBuffer.GetHeight()," h)","pixel image.",terminal=False)
             if NewImageBuffer.GetDimensions() != self.LatestImage.GetDimensions():
-                self.Log("pilomarimage.CreateTargetZones: Dimension mismatch:",i,
+                self.Log("pilomarimage.CreateTargetZones: Dimension mismatch:",zone,
                          "zone:",NewImageBuffer.GetDimensions(),
                          "latest:",self.LatestImage.GetDimensions(),terminal=True)
             NewImageBuffer.SaveFile(filename)
 
     def CreateTargetZoneBuffer(self,zone):
         """ Given a SearchSequence (See ChooseSearchSequence) create an image buffer for a selected zone.
-            returns an opencv compatible image buffer (NOT a pilomarimage object) """
+            returns an opencv compatible image buffer (NOT a pilomarimage object)
+            Parameters -------------------------------------------------------
+            zone : Integer. The zone number to extract from the search sequence of zones. """
         self.Log("pilomarimage.CreateTargetZoneBuffer: Begin: zone",zone,terminal=False)
         if zone < 0 or zone >= len(self.ZoneList):
             self.Log("pilomarimage.CreateTargetZoneBuffer: zone must be in range",0,"to",len(self.ZoneList) - 1,level='error',terminal=True)
@@ -4701,17 +4707,29 @@ class imagetracker(attributemaster):
         drift_offset_y = sequence_entry[6] # Search result y offset.
         x_start = sequence_entry[7] # Starting pixel for this zone on the master target map.
         y_start = sequence_entry[8] # Starting pixel for this zone on the master target map.
-        self.Log("pilomarimage.CreateTargetZoneBuffer: Creating",
-                 "[",y_start,":",y_start + zone_height,",",
-                 "[",x_start,":",x_start + zone_width,",",
-                 ":","]",terminal=False)
+        self.Log("pilomarimage.CreateTargetZoneBuffer: Choosing entry",zone,"from",self.ZoneList,terminal=False)
+        self.Log("pilomarimage.CreateTargetZoneBuffer:",
+                 "distance",distance,
+                 "zone_width",zone_width,
+                 "zone_height",zone_height,
+                 "zone_centre_x",zone_centre_x,
+                 "zone_centre_y",zone_centre_y,
+                 "drift_offset_x",drift_offset_x,
+                 "drift_offset_y",drift_offset_y,
+                 "x_start",x_start,
+                 "y_start",y_start,terminal=False)
+        self.Log("pilomarimage.CreateTargetZoneBuffer: Creating zone",zone,
+                 "[height",y_start,":",y_start + zone_height,",",
+                 "width",x_start,":",x_start + zone_width,",",
+                 "depth",":","]",terminal=False)
         image_buffer = self.MasterImage.ImageBuffer[y_start:y_start + zone_height,x_start:x_start + zone_width,...] # Pull JUST the selected zone from the master map.
         self.Log("pilomarimage.CreateTargetZoneBuffer: Created",
-                 "(",image_buffer.shape,"pixel image.",terminal=False)
+                 image_buffer.shape,"pixel image.",terminal=False)
         if image_buffer.shape != self.LatestImage.ImageBuffer.shape:
-            self.Log("pilomarimage.CreateTargetZoneBuffer: Dimension mismatch:",i,
-                     "zone:",image_buffer.shape,
-                     "latest:",self.LatestImage.ImageBuffer.shape,terminal=True)
+            #self.Log("pilomarimage.CreateTargetZoneBuffer: Dimension mismatch:",i,
+            self.Log("pilomarimage.CreateTargetZoneBuffer: Dimension mismatch: Zone",zone,
+                     ". zone shape:",image_buffer.shape,
+                     "latest shape:",self.LatestImage.ImageBuffer.shape,terminal=True)
         return image_buffer
 
     def ChooseSearchSequence(self):
@@ -4731,7 +4749,7 @@ class imagetracker(attributemaster):
         search_shift = Parameters.TrackingZoneShift # 0.33 # 33% shift between search areas (=67% overlap).
         x_shift = int(latest_image_width * search_shift) # How many pixels do we shift the search area across the map each time?
         y_shift = int(latest_image_height * search_shift) # How many pixels do we shift the search area up the map each time?
-        self.Log("imagetracker.ChooseSearchSequence: Master dims:","(",master_image_width,master_image_height,")","Latest dims:","(",latest_image_width,latest_image_height,")",terminal=False)
+        self.Log("imagetracker.ChooseSearchSequence: Master dims:","(w",master_image_width,"h",master_image_height,")","Latest dims:","(w",latest_image_width,"h",latest_image_height,")",terminal=False)
         self.Log("imagetracker.ChooseSearchSequence: Centre of master map:","(",master_center_x,master_center_y,")",terminal=False)
         self.Log("imagetracker.ChooseSearchSequence: Search shift:",search_shift,"=","(",x_shift,y_shift,")",terminal=False)
         zone_center_x = master_center_x # Centre of search zone starts in centre of target map.
@@ -4745,12 +4763,16 @@ class imagetracker(attributemaster):
                 # Create this as a search zone.
                 dist = math.sqrt((zone_center_x - master_center_x) ** 2 + (zone_center_y - master_center_y) ** 2) # How far is the search area from the centre of the target map?
                 self.Log("imagetracker.ChooseSearchSequence: Search area centre:","(",zone_center_x,zone_center_y,")","=",dist,terminal=False)
-                mirrorlist = [[zone_center_x,zone_center_y]] # Always generate 1st zone.
+                mirrorlist = [[zone_center_x,zone_center_y]] # List of all the zones we will create in this pass. Always generate 1st zone.
                 zone_filename = '' # Complete this in sorted sequence. FolderHandler.PrepFile('tracking',"ZoneTarget_" + str(i).rjust(3,"0") + "_" + UtcTimeStamp() + ".jpg")
+                # If the zone is in the CENTER then there is only 1 zone to create.
+                # If the zone is NOT in the CENTER then we can also create the opposing zones that radiate from the center in each direction.
                 if row_count > 0: mirrorlist.append([zone_center_x,master_image_height - zone_center_y]) # Create a mirror in the opposite row.
                 if col_count > 0: mirrorlist.append([master_image_width - zone_center_x,zone_center_y]) # Create a mirror in the opposite column.
                 if row_count > 0 and col_count > 0: mirrorlist.append([master_image_width - zone_center_x,master_image_height - zone_center_y]) # Create a mirror in the opposite corner.
                 for zone in mirrorlist:
+                    self.Log("imagetracker.ChooseSearchSequence: x_start calculation",zone[0],"-",int(latest_image_width),"/",2,"=",(zone[0] - int(latest_image_width / 2)),terminal=False)
+                    self.Log("imagetracker.ChooseSearchSequence: y_start calculation",zone[1],"-",int(latest_image_height),"/",2,"=",(zone[1] - int(latest_image_height / 2)),terminal=False)
                     search_entry = [dist, # [0] Distance to centre of target image (for sorting)
                                     int(latest_image_width), # [1] Search area width.
                                     int(latest_image_height), # [2] Search area height. 
@@ -4762,6 +4784,7 @@ class imagetracker(attributemaster):
                                     zone[1] - int(latest_image_height / 2), # [8] Start pixel for this zone on the master target map.
                                     zone_filename] # [9] Zone filename on disc.
                     self.ZoneList.append(search_entry)
+                    self.Log("imagetracker.ChooseSearchSequence: Added zone",search_entry,terminal=False)
                 zone_center_y -= y_shift # Move to next row.
                 if zone_center_y - int(latest_image_height / 2) < 0: # Not enough target map left.
                     break
@@ -7663,7 +7686,7 @@ def ChooseLastTarget():
     se = SessionHistory.SessionList[0] # Read first entry.
     CameraInUse.SetTimelapse(se.TimelapsePeriod)
     CameraInUse.ExposureSeconds = se.ExposureSeconds
-    MainLog.Log("ChooseLastTarget: Selected " + line,terminal=False)
+    MainLog.Log("ChooseLastTarget: Selected",se.SearchTerm,terminal=False)
     if se.SearchGroup == 'solar': obstarget = ChooseSolar(se.SearchTerm) # Create a solar system target.
     elif se.SearchGroup == 'satellite': obstarget = ChooseSatellite(se.SearchTerm) # Create a satellite target.
     elif se.SearchGroup == 'hipparcos': obstarget = ChooseHipparcos(se.SearchTerm) # Create a hipparcos star target.
@@ -7674,7 +7697,7 @@ def ChooseLastTarget():
     elif se.SearchGroup == 'meteor': obstarget = ChooseMeteor(se.SearchTerm) # Create an object from meteor shower details.
     elif se.SearchGroup == 'comet': obstarget = ChooseComet(se.SearchTerm) # Create an object from comet details.
     elif se.SearchGroup == 'ngc': obstarget = ChooseNGC(se.SearchTerm) # Create an object from NGC details.
-    else: MainLog.Log("ChooseLastTarget: Unrecognised searchgroup: Line " + str(temp),level='error')
+    else: MainLog.Log("ChooseLastTarget: Unrecognised searchgroup:",se.SearchGroup,level='error')
     return obstarget
 
 # ------------------------------------------------------------------------------------------------------
@@ -9476,9 +9499,11 @@ def CreateTargetImage(color=False,MinMagnitude=None,MarkAllStars=False,astrotime
     NewTargetImage = pilomarimage(name='target_work',logger=CamLog) # Create a new black canvas to draw upon.
     width = SensorInUse.PixelWidth # Image dimension should match the live photos that will be compared against.
     height = SensorInUse.PixelHeight
+    CamLog.Log("CreateTargetImage: Initial dimensions: w",width,"h",height,terminal=False)
     if mapspan > 1.0: # The map should include a wider area than the camera sensor. Cannot currently go smaller.
         width = int(width * mapspan)
         height = int(height * mapspan)
+    CamLog.Log("CreateTargetImage: MapSpan dimensions: w",width,"h",height,terminal=False)
     if overlay: # Create overlay with transparent background.
         NewTargetImage.New(height,width,imagetype='bgra',datatype=np.uint8)
         NewTargetImage.FillColor((0,0,0,0))
@@ -10492,8 +10517,6 @@ def UpdateCameraCaptureStatus():
     return True
 
 # ------------------------------------------------------------------------------------------------------
-
-# ------------------------------------------------------------------------------------------------------
         
 def GeneratePreviewMovie(folder=None,filename=None):    
     MainLog.Log("Generating animation of observation previews...",terminal=False)
@@ -10535,7 +10558,8 @@ def GenerateLightMovie(folder=None,filename=None):
     
 def ReportObservationErrors():
     # If any errors were recorded during the session, summarise them here.
-    # The display is very active during an observation, so it is useful to summarise errors clearly when the observation is complete.
+    # The dashboard display is very active during an observation, this means that unexpected error messages can be overwritten very quickly.
+    # It is useful to summarise any captured errors clearly when the observation is complete.
     if len(MainLog.ErrorList) > 0: # Error messages were reported during the run.
         print(textcolor.yellow('NOTE: MainLog recorded the following errors DURING the observation :-'))
         for ln in MainLog.ErrorList: print("\t" + textcolor.orange(ln))
@@ -10625,11 +10649,8 @@ def AlternateDisplayTZ():
     ObservationStatusWindow.SetTitle() 
     ImageStatusWindow.RJTitle = temp
     ImageStatusWindow.SetTitle()
-    #MainLog.Log("AlternateDisplayTZ: Before update, titlerow=",SessionWindow.ReadTitleRow(),terminal=False)    
     SessionWindow.RJTitle = temp
     SessionWindow.SetTitle() 
-    #MainLog.Log("AlternateDisplayTZ: After update, titlerow=",SessionWindow.ReadTitleRow(),terminal=False)    
-    #MainLog.Log("AlternateDisplayTZ: SessionWindow.WindowTitle=",SessionWindow.WindowTitle,"RJTitle=",SessionWindow.RJTitle,terminal=False)
     DevWindow.Print(NowHMS() + " Display timezone switched to " + str(Parameters.DisplayTZ))
     
 # ------------------------------------------------------------------------------------------------------
@@ -11196,6 +11217,13 @@ def ObservationRun(batchmode=False):
         ShutdownCamera() # Wait for the camera thread to terminate.
     # Tell the motors it is all over now that the camera is completed. 
     StopMotors() # Tell the motors to immediately stop. 
+
+    # End of observation...    
+    Session.SetMotorControlMode('idle') # The motors should now be idle.
+    FlagObservationEnd() # Mark that the observation run has completed successfully. This tells the next observationrun that all is OK. It's also called by the menu for safety.
+
+    # After this point, no processes have an impact on the state of the observation. It is considered successfully complete.
+    
     print ('\n' + textcolor.cursordown(10) + textcolor.clearforward()) # Move cursor below the ObservationRun display and clear the rest of the screen to make way for the menu.
     if Parameters.GeneratePreview and Parameters.GeneratePreviewVideo and not CameraInUse.FastImageCapture: # Preview images were requested, and could have been captured.
         #if AskYesNo("Do you want to generate an AVI animation of the preview files? [y/N]",False): # We can generate a small animation of the observation from the preview images.
@@ -11214,10 +11242,6 @@ def ObservationRun(batchmode=False):
         print(textcolor.yellow("FastImageCapture is active. Only the raw JPG data files have been created so far."))
         print(textcolor.yellow("If you want to create separate DNG files, or pure JPG files you still need to process them."))
         
-    # End of observation...    
-    Session.SetMotorControlMode('idle') # The motors should now be idle.
-    FlagObservationEnd() # Mark that the observation run has completed successfully. This tells the next observationrun that all is OK. It's also called by the menu for safety.
-    
     MainLog.Log("ObservationRun: end.",terminal=False)
     return observationresult,observationstatuslist
 
