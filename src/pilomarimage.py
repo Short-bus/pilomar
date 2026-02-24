@@ -81,7 +81,7 @@ class fd_edge():
 class pilomarimage():
 
     # Constants.
-    __version__ = '0.1.0'
+    __version__ = '0.2.1'
     IMAGETYPES = ['bgr','bgra','grayscale']
     # COLORPOINTS is used to estimate a RGB color from a Hipparcos star catalog star B-V value.
     COLORPOINTS = [(-0.33,[0x70,0x6f,0xfe]),
@@ -822,6 +822,7 @@ class pilomarimage():
     # Where an action supports parameters those can be defined inside each step in this script.
     # If parameters are not given, defaults will be used.
     FILTERSCRIPTS = {
+        # Examples of available methods.
         'ExampleThreshold':{ # Example script to perform thresholding on an image. Call this with self.RunFilterScript('ExampleThreshold')
             'ThresholdStep':{
                 'method':'threshold',
@@ -852,6 +853,42 @@ class pilomarimage():
                 'comment':'Reduce an image to grayscale.',
                 } # /GrayStep
             }, # /ExampleGrayscale
+        'ExampleRemoveGradient':{ # Example script to remove gradient from an image. Call this with self.RunFilterScript('ExampleGradient')
+            'GradientStep':{
+                'method':'removegradient',
+                'blur_size':101,
+                'comment':'Remove gradient from image.',
+                } # /GradientStep
+            }, # /ExampleRemoveGradient
+        'ExampleRemoveGradientMorph':{
+            'GradientMorphStep':{
+                'method':'removegradient_morph',
+                'kernel_size':75,
+                'comment':'Remove gradient from image.',
+                } # /GradientMorph
+            }, # /ExampleRemoveGradientMorph
+        'ExampleRemoveGradientPolyGray':{
+            'GradientPolyGrayStep':{
+                'method':'removegradient_polygray',
+                'order':3,
+                'comment':'Remove gradient from grayscale image using polynomials',
+                } # /GradientPolyGrayStep
+            }, # /ExampleRemoveGradientPolyGray
+        'ExampleRemoveGradientPolyColor':{
+            'GradientPolyColorStep':{
+                'method':'removegradient_polycolor',
+                'order':3,
+                'comment':'Remove gradient from color image using polynomials',
+                } # /GradientPolyColorStep
+            }, # /ExampleRemoveGradientPolyColor
+        'ExampleRemoveGradientPolyColorMasked':{
+            'GradientPolyGrayColorMaskedStep':{
+                'method':'removegradient_polycolormasked',
+                'order':3,
+                'comment':'Remove gradient from color image using polynomials and star masking',
+                } # /GradientPolyColorMaskedStep
+            }, # /ExampleRemoveGradientPolyColor
+        # Suggested filters    
         'EnhanceClouds':{ # Enhance clouds in the image.  Call this with self.RunFilterScript('EnhanceClouds')
             'CloudThreshold':{
                 'method':'threshold',
@@ -1305,6 +1342,138 @@ class pilomarimage():
                 self.TextList.append([fromx,fromy,tox,toy])
         return result
 
+    def LaplacianSharpness(self):
+        """ Assess sharpness of image using Laplacian operator.
+            Advantages: Fast and straightforward to implement.
+            Limitations: Sensitive to noise; denoising is recommended before application.        
+            (Based upon AI suggested code)
+            Does not modify original ImageBuffer. """
+        img = self.NewBufferType("grayscale")
+        laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
+        return laplacian_var
+
+    #def Sharpness(self): # Renamed as CannySharpness() method.
+    #    """ Assess the crispness of an image. 
+    #        Some images will be sharper than others.
+    #        This uses Canny Edge Detection.
+    #        This is a solution found online .... 
+    #        https://stackoverflow.com/questions/28717054/calculating-sharpness-of-an-image (Vektorsoft)
+    #        low return values = More blurred. 
+    #        high return values = More crisp. """
+    #    self.Log("pilomarimage",self.Name,".Sharpness()",terminal=False)
+    #    canny = cv2.Canny(self.NewBufferType('grayscale'), 50,250) # Use canny edge detection.
+    #    sharpness = np.mean(canny)
+    #    return sharpness
+
+    def CannySharpness(self):
+        """ Assess the crispness of an image. 
+            Some images will be sharper than others.
+            This uses Canny Edge Detection.
+            This is a solution found online .... 
+            https://stackoverflow.com/questions/28717054/calculating-sharpness-of-an-image (Vektorsoft)
+            low return values = More blurred. 
+            high return values = More crisp. """
+        self.Log("pilomarimage",self.Name,".Sharpness()",terminal=False)
+        canny = cv2.Canny(self.NewBufferType('grayscale'), 50,250) # Use canny edge detection.
+        canny_sharpness = np.mean(canny)
+        return canny_sharpness
+        
+    def SobelSharpness(self):
+        """ Assess sharpness of image using Sobel operator.
+            Advantages: Effective for detecting fine edges, such as those of stars.
+            Limitations: Slightly slower than the Laplacian method.        
+            (Based upon AI suggested code)
+            Does not modify original ImageBuffer. """
+        img = self.NewBufferType("grayscale")
+        sobel_x = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=3)
+        tenengrad = np.mean(sobel_x**2 + sobel_y**2)
+        return tenengrad
+
+    def ApplyLevelsBuffer(self,imagebuffer,in_black=0, in_white=255, gamma=1.0, out_black=0, out_white=255):
+        """
+        Apply Levels to the colors of an image buffer. 
+        This sets a minimum and maximum brightness of each channel and then stretches the images to fit this.
+        This is similar to the 'Levels' tool in image processing tools.
+        
+        Parameters ------------------------------------------
+        in_black (int)  : The input value that should become pure black, with all lower values clipped.
+        in_white (int)  : The input value that should become pure white, with all higher values clipped.
+        gamma (int)     : A midtone adjustment factor that brightens or darkens values between black and white without changing the endpoints.
+        out_black (int) : The output value that replaces pure black after processing, effectively lifting the darkest tones.
+        out_white (int) : The output value that replaces pure white after processing, effectively lowering the brightest tones.
+        
+        # Example usage
+        im = pilomarimage()
+        im.LoadFile("input.jpg")
+        result = im.ApplyLevelsBuffer(im.ImageBuffer, in_black=20, in_white=230, gamma=0.8)
+        cv2.imwrite("output.jpg", result)
+        """
+        # Convert to float [0,1]
+        img_f = imagebuffer.astype(np.float32) / 255.0
+
+        # Normalize input range
+        in_black_f = in_black / 255.0
+        in_white_f = in_white / 255.0
+        out_black_f = out_black / 255.0
+        out_white_f = out_white / 255.0
+
+        # Step 1: input clipping + normalization
+        img_norm = (img_f - in_black_f) / (in_white_f - in_black_f)
+        img_norm = np.clip(img_norm, 0, 1)
+
+        # Step 2: gamma
+        img_gamma = img_norm ** (1.0 / gamma)
+
+        # Step 3: output scaling
+        img_out = out_black_f + img_gamma * (out_white_f - out_black_f)
+
+        return (img_out * 255).astype(np.uint8)
+
+    def ApplyLevels(self,in_black=0, in_white=255, gamma=1.0, out_black=0, out_white=255):
+        """
+        Apply Levels to the colors of the loaded image. 
+        This sets a minimum and maximum brightness of each channel and then stretches the images to fit this.
+        This is similar to the 'Levels' tool in image processing tools.
+        
+        Parameters ------------------------------------------
+        in_black (int)  : The input value that should become pure black, with all lower values clipped.
+        in_white (int)  : The input value that should become pure white, with all higher values clipped.
+        gamma (int)     : A midtone adjustment factor that brightens or darkens values between black and white without changing the endpoints.
+        out_black (int) : The output value that replaces pure black after processing, effectively lifting the darkest tones.
+        out_white (int) : The output value that replaces pure white after processing, effectively lowering the brightest tones.
+        
+        # Example usage
+        im = pilomarimage()
+        im.LoadFile("input.jpg")
+        result = im.ApplyLevelsBuffer(im.ImageBuffer, in_black=20, in_white=230, gamma=0.8)
+        cv2.imwrite("output.jpg", result)
+        """
+        self.Log("pilomarimage",self.Name,".ApplyLevels(",in_black,in_white,gamma,out_black,out_white,")",terminal=False)
+        self.ImageBuffer = self.ApplyLevelsBuffer(self.ImageBuffer,in_black=in_black, in_white=in_white, gamma=gamma, out_black=out_black, out_white=out_white)
+        self.ActionList.append(['applylevels',in_black,in_white,gamma,out_black,out_white])
+
+        return True
+        
+    def FFTSharpness(self):
+        """ Assess sharpness of image using FFT method. 
+            Advantages: Less affected by background gradients; suitable for faint star fields.
+            Limitations: Computationally more intensive.
+            (Based upon AI suggested code)
+            Does not modify original ImageBuffer. """
+        img = self.NewBufferType("grayscale")
+        f = np.fft.fft2(img)
+        fshift = np.fft.fftshift(f)
+        magnitude_spectrum = np.abs(fshift)
+
+        rows, cols = img.shape
+        crow, ccol = rows // 2, cols // 2
+        mask = np.ones((rows, cols), np.uint8)
+        mask[crow-20:crow+20, ccol-20:ccol+20] = 0  # suppress low frequencies
+
+        high_freq_energy = np.sum(magnitude_spectrum * mask)
+        return high_freq_energy
+
     def CalculateStarSpread(self):
         """ Calculate an approximation for the % of the frame that contains stars. 
             LOW values mean that the stars are not spread out evenly across the frame. 
@@ -1366,7 +1535,7 @@ class pilomarimage():
         return opencv_buffer
         
     def LoadBuffer(self,imagebuffer):
-        """ Import an existing OpenCV/Numpy image buffer. """
+        """ Import an existing OpenCV/Numpy image buffer into the main ImageBuffer.. """
         self.Log("pilomarimage",self.Name,".LoadBuffer()",terminal=False)
         self.Clear()
         if type(imagebuffer) != type(None):
@@ -1892,19 +2061,6 @@ class pilomarimage():
         self.ActionList.append(['cloneimage',donor.Name])
         return self.ImageExists()
 
-    def Sharpness(self):
-        """ Assess the crispness of an image. 
-            Some images will be sharper than others.
-            *Q* UNDER DEVELOPMENT! 
-            This is a solution found online .... 
-            https://stackoverflow.com/questions/28717054/calculating-sharpness-of-an-image (Vektorsoft)
-            low return values = More blurred. 
-            high return values = More crisp. """
-        self.Log("pilomarimage",self.Name,".Sharpness()",terminal=False)
-        canny = cv2.Canny(self.NewBufferType('grayscale'), 50,250) # Use canny edge detection.
-        sharpness = np.mean(canny)
-        return sharpness
-    
     def CombineImage(self,donor):
         """ Add donor image to this image. 
             Performs simple addition of the two images. 
@@ -2247,7 +2403,8 @@ class pilomarimage():
         return td
         
     def ChangeBufferType(self,cvimagebuffer,newtype):
-        """ Turn any ImageBuffer into a new type and return it modified. """
+        """ Turn any ImageBuffer into a new type and return it modified.
+            IMAGETYPES = ['bgr','bgra','grayscale']        """
         if not newtype in pilomarimage.IMAGETYPES:
             self.Log("pilomarimage",self.Name,".ChangeBufferType(",newtype,") must be in ",pilomarimage.IMAGETYPES,terminal=False)
             return cvimagebuffer
@@ -2305,9 +2462,10 @@ class pilomarimage():
         return cvimagebuffer
         
     def ChangeType(self,newtype):
-        """ Change ImageBuffer type. """
-        self.ImageBuffer = self.NewBufferType(newtype)
-        self.ImageMask = np.ones_like(self.ImageBuffer,np.uint8)
+        """ Change ImageBuffer type.
+            Updates the ImageBuffer. """
+        self.ImageBuffer = self.NewBufferType(newtype) # Convert ImageBuffer and store it back in ImageBuffer.
+        self.ImageMask = np.ones_like(self.ImageBuffer,np.uint8) # Update the image mask to reflect the entire image.
         self.ActionList.append(['changetype',self.GetType()])
         return True
 
@@ -2833,6 +2991,65 @@ class pilomarimage():
         self.Log("pilomarimage",self.Name,".EnhanceStars: End.",terminal=False)
         return True
 
+    def FastLevelsBuffer(self, imagebuffer, in_black=0, in_white=255, gamma=1.0, out_black=0, out_white=255):
+        """ 
+        Use numpy LUT (LookUpTable) feature to perform a fast LEVELS modification to an image buffer.
+        
+        Parameters ---------------------------------
+        imagebuffer (opencv image buffer) : The image buffer to adjust.       
+        in_black (int)  : The input value that should become pure black, with all lower values clipped.
+        in_white (int)  : The input value that should become pure white, with all higher values clipped.
+        gamma (float)   : A midtone adjustment factor that brightens or darkens values between black and white without changing the endpoints.
+        out_black (int) : The output value that replaces pure black after processing, effectively lifting the darkest tones.
+        out_white (int) : The output value that replaces pure white after processing, effectively lowering the brightest tones.
+        
+        Returns ------------------------------------
+        imagebuffer (opencv image buffer)
+        
+        """
+        
+        # *Q* Test this and incorporate into FS_RemoveGradient[..] functionality.
+
+        # Create array [0..255]
+        lut = np.arange(256, dtype=np.float32)
+
+        # Normalize to [0,1] based on input black/white
+        lut = (lut - in_black) / float(in_white - in_black)
+        lut = np.clip(lut, 0, 1)
+
+        # Apply gamma
+        lut = lut ** (1.0 / gamma)
+
+        # Scale to output range
+        lut = out_black + lut * (out_white - out_black)
+        lut = np.clip(lut, 0, 255).astype(np.uint8)
+        imagebuffer = cv2.LUT(imagebuffer, lut)
+        
+        return imagebuffer
+        
+    def FastLevelsImage(self, in_black=0, in_white=255, gamma=1.0, out_black=0, out_white=255):
+        """ 
+        Use numpy LUT (LookUpTable) feature to perform a fast LEVELS modification to the current image.
+        
+        Parameters ---------------------------------
+        in_black (int)  : The input value that should become pure black, with all lower values clipped.
+        in_white (int)  : The input value that should become pure white, with all higher values clipped.
+        gamma (float)   : A midtone adjustment factor that brightens or darkens values between black and white without changing the endpoints.
+        out_black (int) : The output value that replaces pure black after processing, effectively lifting the darkest tones.
+        out_white (int) : The output value that replaces pure white after processing, effectively lowering the brightest tones.
+        
+        References ------------------------------
+        self.ImageBuffer
+        
+        Sets ------------------------------------
+        self.ImageBuffer
+        
+        """
+        
+        self.ImageBuffer = self.FastLevelsBuffer(self.ImageBuffer, in_black=in_black, in_white=in_white, gamma=gamma, out_black=out_black, out_white=out_white)
+        
+        return True
+
     def FS_Save(self,filterdata):
         """ Save the current image buffer and write the current filter data on it. 
             A debugging feature.
@@ -2930,6 +3147,324 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
+    # Normalize each channel
+    def NormalizeChannel(self,channel):
+        channel -= channel.min()
+        channel /= channel.max()
+        channel *= 255
+        return channel.astype(np.uint8)
+
+    #def FS_RemoveGradient(self,image_path, output_path, blur_size=101):
+    def FS_RemoveGradient(self,filterdata):
+        """ Based upon AI generated code. 
+        
+        Large Kernel Gaussian Blur Background Model
+        
+        How it works
+        - Stars disappear under a huge blur.
+        - The blur approximates the smooth gradient.
+        - Subtracting it leaves only high frequency detail.
+
+        When to use
+        - Light pollution is smooth and not too complex. """
+        
+        # *Q* Standardise this code.
+        blur_size = filterdata.get('blur_size',101)
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_RemoveGradient: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_RemoveGradient(",blur_size,")",terminal=False)
+        
+        # Load image
+        img = self.ImageBuffer
+        img_float = img.astype(np.float32)
+
+        # Estimate background using a huge Gaussian blur
+        background = cv2.GaussianBlur(img_float, (blur_size, blur_size), 0)
+
+        # Subtract background
+        corrected = img_float - background
+
+        # Normalize to 0–255
+        corrected = corrected - corrected.min()
+        corrected = corrected / corrected.max() * 255
+
+        self.ImageBuffer = corrected.astype(np.uint8)
+        self.ActionList.append(['FS_RemoveGradient'])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
+    #def FS_RemoveGradientMorph(self,image_path, output_path, kernel_size=75):
+    def FS_RemoveGradientMorph(self,filterdata):
+        """ Based upon AI generated code. 
+        
+        Morphological Opening (Improved Star Masking)
+        This method uses erosion/dilation to remove stars before modeling the background.
+        
+        When to use
+        - Dense star fields
+        - Nebulae with lots of fine structure
+        - Strong gradients """
+        
+        # *Q* Standardise this code.
+        kernel_size = filterdata.get('kernel_size',75)
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_RemoveGradientMorph: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_RemoveGradientMorph(",kernel_size,")",terminal=False)
+        
+        img = self.ImageBuffer
+        img_float = img.astype(np.float32)
+
+        # Structuring element
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+
+        # Morphological opening removes small bright objects (stars)
+        background = cv2.morphologyEx(img_float, cv2.MORPH_OPEN, kernel)
+
+        corrected = img_float - background
+
+        corrected = corrected - corrected.min()
+        corrected = corrected / corrected.max() * 255
+        
+        self.ImageBuffer = corrected.astype(np.uint8)
+        self.ActionList.append(['FS_RemoveGradientMorph'])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
+    def FitPolynomialBackgroundGray(self,gray, order=3):
+        """ Based upon AI generated code. """
+        
+        h, w = gray.shape
+        y, x = np.mgrid[0:h, 0:w]
+
+        # Flatten
+        X = np.column_stack([x.ravel()**i * y.ravel()**j
+                             for i in range(order+1)
+                             for j in range(order+1-i)])
+        Y = gray.ravel()
+
+        # Solve least squares
+        coeffs, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
+        background = np.dot(X, coeffs).reshape(h, w)
+        return background
+
+    def FS_RemoveGradientPolyGray(self,filterdata):
+        """ Based upon AI generated code. 
+        
+        Polynomial Surface Fitting
+        This fits a 2D polynomial to the background. It’s slow but good for curved gradients.
+        
+        When to use
+        - Complex, curved gradients
+        - Wide field astrophotography
+        - Vignetting correction        """
+        
+        order = filterdata.get('order',3)
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyGray: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyGray(",order,")",terminal=False)
+        
+        img = self.ImageBuffer.copy()
+        img = self.ChangeBufferType(img,'grayscale') # Make sure the buffer is grayscale.       
+        img_float = img.astype(np.float32)
+
+        background = self.FitPolynomialBackgroundGray(img_float, order=order)
+
+        corrected = img_float - background
+        corrected = corrected - corrected.min()
+        corrected = corrected / corrected.max() * 255
+
+        self.ImageBuffer = corrected.astype(np.uint8)
+        self.ActionList.append(['FS_RemoveGradientPolyGray'])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
+    def FitPolynomialBackgroundColor(self,gray, order=3):
+        """
+        Fit a 2D polynomial surface to a grayscale image.
+        """
+        h, w = gray.shape
+        y, x = np.mgrid[0:h, 0:w]
+    
+        # Build polynomial terms
+        X = np.column_stack([
+            (x.ravel()**i) * (y.ravel()**j)
+            for i in range(order + 1)
+            for j in range(order + 1 - i)
+        ])
+        Y = gray.ravel()
+    
+        # Solve least squares
+        coeffs, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
+        background = np.dot(X, coeffs).reshape(h, w)
+        return background
+
+    #def FS_RemoveGradientPolyColor(self,image_path, output_path, order=3):
+    def FS_RemoveGradientPolyColor(self,filterdata):
+        """
+        Remove background gradient from a color image using polynomial fitting.
+        
+        This captures:
+        - Curved gradients
+        - Vignetting
+        - Uneven illumination
+        - Light pollution gradients at any angle
+
+        Because stars and nebulae are small, high frequency features, they don’t influence the polynomial much.
+
+        Tips for Best Results
+        - Use order=3 for most images
+        - Use order=4 for wide field lenses with strong vignetting
+
+        Potential improvements: Mask stars for even better accuracy.
+                                Apply a contrast stretch afterward (CLAHE works well) """
+                                
+        order = filterdata.get('order',3) # Order for polynomial calculation.
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyColor: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyColor(",order,")",terminal=False)
+        
+        img = self.ImageBuffer.copy()
+        img_float = img.astype(np.float32)
+
+        # Split channels
+        b, g, r = cv2.split(img_float)
+
+        # Fit polynomial to each channel
+        b_bg = self.FitPolynomialBackgroundColor(b, order)
+        g_bg = self.FitPolynomialBackgroundColor(g, order)
+        r_bg = self.FitPolynomialBackgroundColor(r, order)
+
+        # Subtract background
+        b_corr = b - b_bg
+        g_corr = g - g_bg
+        r_corr = r - r_bg
+
+        b_corr = self.NormalizeChannel(b_corr)
+        g_corr = self.NormalizeChannel(g_corr)
+        r_corr = self.NormalizeChannel(r_corr)
+
+        # Merge back to color
+        self.ImageBuffer = cv2.merge([b_corr, g_corr, r_corr]).astype(np.uint8)
+        self.ActionList.append(['FS_RemoveGradientPolyColor',order])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
+    def DetectStarMaskGray(self,image_buffer, blur=5, thresh=1.5):
+        """
+        Detect stars using Laplacian of Gaussian (LoG).
+        Returns a binary mask where stars = 1.
+        Works on GRAYSCALE images.
+        """
+        # Smooth noise
+        blurred = cv2.GaussianBlur(image_buffer, (blur, blur), 0)
+
+        # Laplacian to detect point sources
+        lap = cv2.Laplacian(blurred, cv2.CV_32F)
+
+        # Threshold based on standard deviation
+        sigma = np.std(lap)
+        mask = (lap > thresh * sigma).astype(np.uint8)
+
+        # Dilate to cover star halos
+        mask = cv2.dilate(mask, np.ones((5, 5), np.uint8))
+
+        return mask
+
+    def FitPolynomialBackgroundMasked(self,gray, mask, order=3):
+        """
+        Fit a 2D polynomial surface to a grayscale image,
+        ignoring masked pixels (stars).
+        """
+        
+        h, w = gray.shape
+        y, x = np.mgrid[0:h, 0:w]
+
+        # Flatten
+        X = np.column_stack([
+            (x.ravel()**i) * (y.ravel()**j)
+            for i in range(order + 1)
+            for j in range(order + 1 - i)
+        ])
+        Y = gray.ravel()
+        M = mask.ravel()
+
+        # Keep only unmasked pixels
+        X_fit = X[M == 0]
+        Y_fit = Y[M == 0]
+
+        # Solve least squares
+        coeffs, _, _, _ = np.linalg.lstsq(X_fit, Y_fit, rcond=None)
+
+        # Reconstruct background
+        background = np.dot(X, coeffs).reshape(h, w)
+        return background
+
+    #def FS_RemoveGradientPolyColorMasked(self,image_path, output_path, order=3):
+    def FS_RemoveGradientPolyColorMasked(self,filterdata):
+        """ Based upon AI generated code. 
+        
+        Remove background gradient from a color image using star-masked polynomial fitting.
+
+        How it works:
+        - Laplacian of Gaussian (LoG) to detect stars
+        - Binary mask to exclude stars from the polynomial fit
+        - Per channel polynomial fitting
+        - Color preserving normalization
+
+        Masking ensures the polynomial sees only the true background.
+        - Has less distortion of the background model.
+        - Weaker halos around stars.
+        - Retains faint nebula detail better.
+        - Reduces over subtraction.
+
+
+        This is good for:
+        - Curved gradients
+        - Vignetting
+        - Light pollution at any angle
+        - Dense star fields
+        - Wide field lenses
+        - Nebula rich regions        """
+        
+        order = filterdata.get('order',3) # Order for polynomial calculation.
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyColorMasked: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_RemoveGradientPolyColorMasked(",order,")",terminal=False)
+        
+        img = self.ImageBuffer.copy()
+        img_float = img.astype(np.float32)
+
+        # Split channels
+        b, g, r = cv2.split(img_float)
+
+        # Create star mask from luminance
+        gray = cv2.cvtColor(img_float.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+        star_mask = self.DetectStarMaskGray(gray)
+
+        # Fit polynomial to each channel using the mask
+        b_bg = self.FitPolynomialBackgroundMasked(b, star_mask, order)
+        g_bg = self.FitPolynomialBackgroundMasked(g, star_mask, order)
+        r_bg = self.FitPolynomialBackgroundMasked(r, star_mask, order)
+
+        # Subtract background
+        b_corr = b - b_bg
+        g_corr = g - g_bg
+        r_corr = r - r_bg
+
+        b_corr = self.NormalizeChannel(b_corr)
+        g_corr = self.NormalizeChannel(g_corr)
+        r_corr = self.NormalizeChannel(r_corr)
+
+        self.ImageBuffer = cv2.merge([b_corr, g_corr, r_corr]).astype(np.uint8)
+        self.ActionList.append(['FS_RemoveGradientPolyColorMasked',order])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
     def StepThruFilterScript(self,scriptname,outputdir,window=None):
         """ Given a script name, apply the filters and parameters defined in the script.
             This applies each filter in turn and saves intermediate images after each one.
@@ -2996,6 +3531,11 @@ class pilomarimage():
             elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
             elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
             elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
+            elif filtermethod == 'removegradient': result = self.FS_RemoveGradient(filterdata) # Apply a FS_RemoveGradient filter.
+            elif filtermethod == 'removegradient_morph': result = self.FS_RemoveGradientMorph(filterdata) # Apply a FS_RemoveGradientMorph filter.
+            elif filtermethod == 'removegradient_polygray': result = self.FS_RemoveGradientPolyGray(filterdata) # Apply a FS_RemoveGradientPoly filter.
+            elif filtermethod == 'removegradient_polycolor': result = self.FS_RemoveGradientPolyColor(filterdata) # Apply a FS_RemoveGradientPolyColor filter.
+            elif filtermethod == 'removegradient_polycolormasked': result = self.FS_RemoveGradientPolyColorMasked(filterdata) # Apply a FS_RemoveGradientPolyColorMasked filter.
             else: # Filter method is not recognised.
                 self.Log("pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
                 print("**ERROR** pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
@@ -3313,6 +3853,16 @@ class pilomarimage():
         self.ActionList.append(['setpenopacity',opacity])
         return True
 
+    def SafeText(self,text):
+        """ Make sure all characters are in 0-127 ASCII range. 
+            All other characters are replaced with "?" 
+            This is because OpenCV text FONT only supports basic ASCII characters. """
+        result = ""
+        for c in text:
+            if ord(c) <= 127: result += c
+            else: result += "?"
+        return result
+        
     def SafeColor(self,color,default=None):
         """ Default color if not specified. """
         depth = self.GetDepth()
@@ -3644,6 +4194,7 @@ class pilomarimage():
         if self.ImageMissing(): print('pilomarimage',self.Name,'.AddText: No image in the buffer.')
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
+        text = self.SafeText(text) # Keep characters to save 0-127 Ascii set.
         xdim,ydim,ybase = self.GetTextArea(text,size=size,thickness=thickness) # Boundaries of the text.
         if hjust == 'c': # Center the text horizontally on the location.
             x = int(fromx - xdim / 2)
@@ -3759,6 +4310,7 @@ class pilomarimage():
             fromx,fromy = self.RotateCoordinates(fromx,fromy,360 - angle) # We counterrotated the image so that the text is written at the desired angle, so counterrotate the text coordinates too.
         thickness = self.SafeThickness(thickness)
         color = self.SafeColor(color)
+        text = self.SafeText(text) # Keep characters to save 0-127 Ascii set.
         xdim,ydim,ybase = self.GetTextArea(text,size=size,thickness=thickness) # Boundaries of the text.
         # Establish x,y as the actual co-ordinates at which to print the text in order to achieve justification.
         if angle == 90:
@@ -4284,7 +4836,10 @@ class pilomarimage():
         michelson_contrast, stddev_contrast = self.MeasureContrast()
         print("Michelson contrast:",michelson_contrast,
               "STD DEV contrast:",stddev_contrast)
-        print("Sharpness:",self.Sharpness())
+        print("LaplacianSharpness:",self.LaplacianSharpness())
+        print("SobelSharpness:",self.SobelSharpness())
+        print("FFTSharpness:",self.FFTSharpness())
+        print("CannySharpness:",self.CannySharpness())
         print("Pen: Color:",self.PenColor,"Thickness:",self.PenThickness)
         print("ActionList:",self.ActionList)
 
