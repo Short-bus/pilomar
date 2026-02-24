@@ -397,6 +397,19 @@ class astrocamera():
 
     CameraList = [] # List of cameras declared. 
     
+    # Search group values (same as 'target' class)
+    GROUP_NONE = None # No target type.
+    GROUP_SOLAR = 'solar' # solar system target.
+    GROUP_SATELLITE = 'satellite' # satellite target.
+    GROUP_HIPPARCOS = 'hipparcos' # hipparcos star target.
+    GROUP_MESSIER = 'messier' # Messier object target.
+    GROUP_RADEC = 'radec' # radec co-ordinate target.
+    GROUP_ALTAZ = 'altaz' # alt/az co-ordinate target.
+    GROUP_AURORA = 'aurora' # Aurora target from alt/az co-ordinates.
+    GROUP_METEOR = 'meteor' # meteor shower target.
+    GROUP_COMET = 'comet' # comet target.
+    GROUP_NGC = 'ngc' # NGC catalog target.
+    
     #@staticmethod
     #def SetGlobalFolderList(folderlist):
     #    """ Update FolderList in all declared cameras. """
@@ -440,7 +453,7 @@ class astrocamera():
         self.FolderHandler = None # Local copy of the FolderList telling where to store files.
         # - 
         self.FileTypes = ['jpg','dng'] # List of file types to make available.
-        self.ObjectType = None # What is the target type? Set by SetObservationParameters() from session information.
+        #self.ObjectType = None # What is the target type? Set by SetObservationParameters() from session information.
         self.Mctl = None # Handle to the microcontroller. Can monitor it for restarts.
         self.Sensor = inp_sensor # The sensor that makes up the camera.
         self.Lens = inp_lens # The lens that makes up the camera.
@@ -617,51 +630,71 @@ class astrocamera():
         # Decide which tasks the camerahandler will deal with.
         self.CameraTasks = ['image','pause']
         self.Target = self.Session.Target # Keep local pointer to the Target object.
-        self.ObjectType = self.Session.Target.ObjectType # What type of object are we looking at?
-        if self.ObjectType in ['aurora','meteor']: # Don't generate preview images for meteors or aurora.
-            if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No preview's generated for " + self.ObjectType + " recordings.")
-            self.Log("astrocamera.SetObservationParameters No preview's generated for", self.ObjectType, "recordings.",terminal=False)
+        #self.ObjectType = self.Session.Target.ObjectType # What type of object are we looking at?
+        self.SearchGroup = self.Session.Target.SearchGroup # What type of object are we looking at?
+        #if self.ObjectType in ['aurora','meteor']: # Don't generate preview images for meteors or aurora.
+        if self.SearchGroup in [astrocamera.GROUP_AURORA,astrocamera.GROUP_METEOR]: # Don't generate preview images for meteors or aurora.
+            #if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No preview's generated for " + self.ObjectType + " recordings.")
+            if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No preview's generated for " + self.SearchGroup + " recordings.")
+            #self.Log("astrocamera.SetObservationParameters No preview's generated for", self.ObjectType, "recordings.",terminal=False)
+            self.Log("astrocamera.SetObservationParameters No preview's generated for", self.SearchGroup, "recordings.",terminal=False)
         elif self.Parameters.GeneratePreview == False:
             if self.CameraWindow != None: self.Print(self.NowHMS() + " Preview generation is disabled in parameters.")
             self.Log("astrocamera.SetObservationParameters Preview generation is disabled in parameters.",terminal=False)
         else: self.CameraTasks.append('preview') 
-        if self.ObjectType in ['meteor','altaz','earth satellite','aurora']: # No need to perform drift tracking for these targets.
+        #if self.ObjectType in ['meteor','altaz','earth satellite','aurora']: # No need to perform drift tracking for these targets.
+        if self.SearchGroup in [astrocamera.GROUP_METEOR,astrocamera.GROUP_ALTAZ,astrocamera.GROUP_SATELLITE,astrocamera.GROUP_AURORA]: # No need to perform drift tracking for these targets.
             # Don't track for fixed targets or fast moving targets.
-            if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No tracking performed for " + self.ObjectType + " targets.")
-            self.Log("astrocamera.SetObservationParameters No tracking performed for", self.ObjectType, "targets.",terminal=False)
+            #if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No tracking performed for " + self.ObjectType + " targets.")
+            if self.CameraWindow != None: self.CameraWindow.Print(self.NowHMS() + " No tracking performed for " + self.SearchGroup + " targets.")
+            #self.Log("astrocamera.SetObservationParameters No tracking performed for", self.ObjectType, "targets.",terminal=False)
+            self.Log("astrocamera.SetObservationParameters No tracking performed for", self.SearchGroup, "targets.",terminal=False)
         else: # Do track for targets that rotate with the sky. Always add tracking to the tasklist, even if it's currently disabled. The tracking routine will handle that, and it could be dynamically enabled during the observation.
             self.CameraTasks.append('tracking') 
-        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", Selected tasks:", self.CameraTasks,terminal=False)
+        #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", Selected tasks:", self.CameraTasks,terminal=False)
+        self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", Selected tasks:", self.CameraTasks,terminal=False)
         
         # Set observation specific parameters for the camera based upon general parameter settings.
         # Eg 'meteor' mode can override some settings, but we don't want to disturb the general settings used for other targets.
-        if self.ObjectType in ['aurora','meteor']: # Disable DNG generation if taking AURORA or METEOR images. 
+        #if self.ObjectType in ['aurora','meteor']: # Disable DNG generation if taking AURORA or METEOR images. 
+        if self.SearchGroup in [astrocamera.GROUP_AURORA,astrocamera.GROUP_METEOR]: # Disable DNG generation if taking AURORA or METEOR images. 
             if self.CameraSaveDng: 
-                self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will not capture DNG (raw) images.",terminal=False)
+                #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will not capture DNG (raw) images.",terminal=False)
+                self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", will not capture DNG (raw) images.",terminal=False)
                 self.CameraSaveDng = False
         else: self.CameraSaveDng = self.Parameters.CameraSaveDng # Revert to parameter preference.
-        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveDng",self.CameraSaveDng,terminal=False)
+        #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveDng",self.CameraSaveDng,terminal=False)
+        self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", CameraSaveDng",self.CameraSaveDng,terminal=False)
 
-        if self.ObjectType in ['aurora','meteor']: # Disable DNG generation if taking AURORA or METEOR images. 
+        #if self.ObjectType in ['aurora','meteor']: # Disable DNG generation if taking AURORA or METEOR images. 
+        if self.SearchGroup in [astrocamera.GROUP_AURORA,astrocamera.GROUP_METEOR]: # Disable DNG generation if taking AURORA or METEOR images. 
             if self.CameraSaveFits: 
-                self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will not capture FITS (raw) images.",terminal=False)
+                #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will not capture FITS (raw) images.",terminal=False)
+                self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", will not capture FITS (raw) images.",terminal=False)
                 self.CameraSaveFits = False
         else: self.CameraSaveFits = self.Parameters.CameraSaveFits # Revert to parameter preference.
-        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveFits",self.CameraSaveFits,terminal=False)
+        #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveFits",self.CameraSaveFits,terminal=False)
+        self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", CameraSaveFits",self.CameraSaveFits,terminal=False)
 
-        if self.ObjectType in ['aurora','meteor']: # Turn on JPG generation if not already set.
+        #if self.ObjectType in ['aurora','meteor']: # Turn on JPG generation if not already set.
+        if self.SearchGroup in [astrocamera.GROUP_AURORA,astrocamera.GROUP_METEOR]: # Turn on JPG generation if not already set.
             if not self.CameraSaveJpg:
-                self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will capture JPG images.",terminal=False)
+                #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will capture JPG images.",terminal=False)
+                self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", will capture JPG images.",terminal=False)
                 self.CameraSaveJpg = True
         else: self.CameraSaveJpg = self.Parameters.CameraSaveJpg # Revert to parameter preference.
-        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveJpg",self.CameraSaveJpg,terminal=False)
+        #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", CameraSaveJpg",self.CameraSaveJpg,terminal=False)
+        self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", CameraSaveJpg",self.CameraSaveJpg,terminal=False)
 
-        if self.ObjectType in ['aurora','meteor']: # Turn on Fast Image Capture if not already set.
+        #if self.ObjectType in ['aurora','meteor']: # Turn on Fast Image Capture if not already set.
+        if self.SearchGroup in [astrocamera.GROUP_AURORA,astrocamera.GROUP_METEOR]: # Turn on Fast Image Capture if not already set.
             if not self.FastImageCapture:
-                self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will use FAST image capture. (Minimal processing)",terminal=False)
+                #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", will use FAST image capture. (Minimal processing)",terminal=False)
+                self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", will use FAST image capture. (Minimal processing)",terminal=False)
                 self.FastImageCapture = True
         else: self.FastImageCapture = self.Parameters.FastImageCapture # Revert to parameter preference.
-        self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", FastImageCapture",self.FastImageCapture,terminal=False)
+        #self.Log("astrocamera.SetObservationParameters Target type", self.ObjectType,", FastImageCapture",self.FastImageCapture,terminal=False)
+        self.Log("astrocamera.SetObservationParameters Target type", self.SearchGroup,", FastImageCapture",self.FastImageCapture,terminal=False)
 
         return True
         
@@ -1039,7 +1072,8 @@ class astrocamera():
         if self.Parameters.FakePollution: # Simulate fake light pollution.
             fakeimage.ImageBuffer = self.FakePollution(fakeimage.ImageBuffer)
             if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: FakePollution() failed.",level='error',terminal=True)
-        if self.ObjectType in ['aurora'] and self.Parameters.FakeAurora: # Simulate aurora
+        #if self.ObjectType in ['aurora'] and self.Parameters.FakeAurora: # Simulate aurora
+        if self.SearchGroup in [astrocamera.GROUP_AURORA] and self.Parameters.FakeAurora: # Simulate aurora
             fakeimage.ImageBuffer = self.FakeAurora(fakeimage.ImageBuffer)
             if fakeimage.ImageMissing(): self.Log("astrocamera.FakePhoto: FakeAurora() failed.",level='error',terminal=True)
         if self.Parameters.FakeMeteorPercent > 0 and random.randint(0,100) < self.Parameters.FakeMeteorPercent: # xxx% of images get fake meteor streaks in them.
@@ -1114,7 +1148,7 @@ class astrocamera():
             new_rec['target_name'] = self.Session.Target.Name # Name of object.
             new_rec['target_group'] = self.Session.Target.SearchGroup # Which search category was used?
             new_rec['target_term'] = self.Session.Target.SearchTerm # Which search term identifies this object?
-            new_rec['target_type'] = self.Session.Target.ObjectType # What type of object is it?
+            #new_rec['target_type'] = self.Session.Target.ObjectType # What type of object is it?
         new_rec['path'] = image_filename
         if hasattr(self.FolderHandler,'NameOnly'): image_filename = self.FolderHandler.NameOnly(image_filename) # Can remove directory structure.
         self.BatchData[image_filename] = new_rec # Append metadata of this frame to the list of images captured.
