@@ -89,7 +89,7 @@ def DMSToAngle(degrees=0.0,minutes=0.0,seconds=0.0):
 
 # ------------------------------------------------------------------------------------------------------
 
-def DisplayHMS(h,m,s,length=12,rounding=1):
+def DisplayHMS(h,m,s,length=12,rounding=1,hsym='h',msym='m',ssym='s'):
     """ Display HMS values in human readable format.
         h = hours.
         m = minutes.
@@ -102,7 +102,32 @@ def DisplayHMS(h,m,s,length=12,rounding=1):
     if len(ms) < 2: ms = ms.rjust(2)
     ss = str(round(s,rounding))
     if len(ss.split('.')[0]) < 2: ss = ' ' + ss
-    DH = hs + "h " + ms + "m " + ss + "s"
+    DH = hs + hsym + " " + ms + msym + " " + ss + ssym
+    DH = DH.rjust(length," ")[(-1 * length):]
+    return DH
+
+# ------------------------------------------------------------------------------------------------------
+
+def DisplayDMS(d,m,s,length=12,rounding=1,dsym='d',msym='m',ssym='s',psym="+"):
+    """ Display DMS values in human readable format.
+        d = degrees.
+        m = minutes.
+        s = seconds (can be decimal). 
+        length = length of returned string. 
+        rounding = number of decimals precision in the seconds value. 
+        dsym = Symbol or string to use for DEGREES.
+        msym = Symbol or string to use for MINUTES.
+        ssym = Symbol or string to use for SECONDS.
+        NOTE: Only the DEGREE element will show -ve sign. 
+              The minute and second values will always be shown as positive due to convention. """
+    ds = str(int(d))
+    if d >= 0: ds = psym + ds # Prepend "+" for positive positions as per convention.
+    #if len(ds) < 2: ds = ds.rjust(2)
+    ms = str(abs(int(m)))
+    #if len(ms) < 2: ms = ms.rjust(2)
+    ss = str(abs(round(s,rounding)))
+    #if len(ss.split('.')[0]) < 2: ss = ' ' + ss
+    DH = ds + dsym + " " + ms + msym + " " + ss + ssym
     DH = DH.rjust(length," ")[(-1 * length):]
     return DH
 
