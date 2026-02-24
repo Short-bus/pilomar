@@ -14,6 +14,7 @@
 # THERE IS THEREFORE A RISK OF INJURY FROM INCORRECT ASSEMBLY, OPERATION OR FAILURE OF COMPONENTS.
 # IT IS YOUR RESPONSIBILITY TO ENSURE THE SAFETY OF THE DEVICES YOU CHOOSE TO CONTROL WITH THIS SOFTWARE.
 
+import subprocess
 import os # OS Command execution.
 import json # json file handling.
 from datetime import datetime, timezone
@@ -26,7 +27,7 @@ class attributemaster(): # A parent class containing some common methods that ot
         Provides useful methods that many classes may use. """
 
     def SetLogger(self,logger):
-        """ Set up link to logging class and shortcuts to common methods. """
+        """ Set up link to logging class and shortcuts to common methods for MAIN logfile. """
         # The logging methods default to 'consumers' which will just silently eat any parameters passed.
         self._NullLoggerCalls = 0 # How many times is _NullLogger called?
         self.Logger = logger # Logger instance.
@@ -36,6 +37,18 @@ class attributemaster(): # A parent class containing some common methods that ot
         if hasattr(logger,'Log'): self.Log = logger.Log # Log method.
         if hasattr(logger,'ReportException'): self.ReportException = logger.ReportException # Report exception details to logfile.
         if hasattr(logger,'RaiseException'): self.RaiseException = logger.RaiseException # Report and raise exception. 
+
+    def SetCamLogger(self,logger):
+        """ Set up link to logging class and shortcuts to common methods for a second CAMERA logfile. """
+        # The logging methods default to 'consumers' which will just silently eat any parameters passed.
+        self._NullLoggerCalls = 0 # How many times is _NullLogger called?
+        self.CamLogger = logger # Logger instance.
+        self.CamLog = self._NullLogger # No log method.
+        self.CamReportException = self._NullLogger # Cannot report exception details to logfile.
+        self.CamRaiseException = self._NullLogger # Cannot report and raise exception. 
+        if hasattr(logger,'Log'): self.CamLog = logger.Log # Log method.
+        if hasattr(logger,'ReportException'): self.CamReportException = logger.ReportException # Report exception details to logfile.
+        if hasattr(logger,'RaiseException'): self.CamRaiseException = logger.RaiseException # Report and raise exception. 
 
     def _NullLogger(self,*args, **kwargs):
         """ Null logger. Absorbs parameters and does nothing. 
@@ -73,6 +86,17 @@ class attributemaster(): # A parent class containing some common methods that ot
                 confdict[attr] = value
         return confdict
 
+# ------------------------------------------------------------------------------------------------------
+
+def launch_in_new_terminal(command):
+    """
+    Launch a command in a new, independent terminal window on Raspberry Pi OS.
+    """
+    subprocess.Popen(
+        ["x-terminal-emulator", "-e", command],
+        preexec_fn=os.setpgrp   # fully detach from the parent process
+    )
+    
 # ------------------------------------------------------------------------------------------------------
 
 def UTCStringToDatetime(utcvalue) -> datetime:
