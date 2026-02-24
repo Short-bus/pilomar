@@ -16,21 +16,26 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 # WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+class gpio_opt():
+    """ Constants. """
+    GPIO_DRIVER = 'GPIO'
+    GPIOD_DRIVER = 'GPIOD'
+
 GPIO_DRIVER = None
 try:
     import RPi.GPIO as GPIO # Handling IO signals. If available.
     GPIO.setmode(GPIO.BCM)
-    GPIO_DRIVER = "GPIO"
+    GPIO_DRIVER = gpio_opt.GPIO_DRIVER # "GPIO"
 except: # No support for RPi.GPIO detected.
     pass
 
 try:
     import gpiod # Handling IO signals. If available.
-    GPIO_DRIVER = "GPIOD"
+    GPIO_DRIVER = gpio_opt.GPIOD_DRIVER # "GPIOD"
 except: # No support for GPIOD detected.
     pass
 
-if GPIO_DRIVER == 'GPIOD': # Select the GPIO handling chip.
+if GPIO_DRIVER == gpio_opt.GPIOD_DRIVER: # 'GPIOD': # Select the GPIO handling chip.
     try:
         GPIOchip = gpiod.Chip('gpiochip4') # In very early RPi5 Bookworm builds the GPIO chip is 'gpiochip4'.
     except:
@@ -47,7 +52,7 @@ class inputpin_gpio():
     
     InputPins = [] # List of all defined input pins.
     __library__ = 'RPi.GPIO' # Which GPIO library does this support?
-    __version__ = '0.0.0' # What version of the library is this?
+    __version__ = '0.1.1' # What version of the library is this?
     
     def __init__(self,pinbcm,name=None,pull="up",enabled=True,invert=False):
         """ Define a GPIO input pin.
@@ -136,12 +141,12 @@ class inputpin_gpio():
     def Status(self):
         """ Return a string describing the current status of the pin. """
         temp = "GPIO: BCM:" + str(self.Pin) + ", INPUT:" + \
-               " Ena:" + str(self.Enabled).rjust(5) + \
-               " Inv:" + str(self.Invert).rjust(5) + \
-               " IsOn:" + str(self.IsOn()).rjust(5) + \
-               " IsOff:" + str(self.IsOff()).rjust(5) + \
-               " IsHigh:" + str(self.IsHigh()).rjust(5) + \
-               " IsLow:" + str(self.IsLow()).rjust(5)
+               ", Ena:" + str(self.Enabled).rjust(5) + \
+               ", Inv:" + str(self.Invert).rjust(5) + \
+               ", IsOn:" + str(self.IsOn()).rjust(5) + \
+               ", IsOff:" + str(self.IsOff()).rjust(5) + \
+               ", IsHigh:" + str(self.IsHigh()).rjust(5) + \
+               ", IsLow:" + str(self.IsLow()).rjust(5)
         return temp
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -159,7 +164,7 @@ class outputpin_gpio():
     
     OutputPins = [] # List of all defined output pins. 
     __library__ = 'RPi.GPIO' # Which GPIO library does this support?
-    __version__ = '0.0.0' # What version of the library is this?
+    __version__ = '0.1.1' # What version of the library is this?
     
     def __init__(self,pinbcm,name=None,enabled=True,state=False,invert=False):
         """ Create a new pin. 
@@ -246,12 +251,12 @@ class outputpin_gpio():
     def Status(self):
         """ Return a string describing the current status of the pin. """
         temp = "GPIO: BCM:" + str(self.Pin) + ", OUTPUT:" + \
-               " Ena:" + str(self.Enabled).rjust(5) + \
-               " Inv:" + str(self.Invert).rjust(5) + \
-               " IsOn:" + str(self.IsOn()).rjust(5) + \
-               " IsOff:" + str(self.IsOff()).rjust(5) + \
-               " IsHigh:" + str(self.IsHigh()).rjust(5) + \
-               " IsLow:" + str(self.IsLow()).rjust(5)
+               ", Ena:" + str(self.Enabled).rjust(5) + \
+               ", Inv:" + str(self.Invert).rjust(5) + \
+               ", IsOn:" + str(self.IsOn()).rjust(5) + \
+               ", IsOff:" + str(self.IsOff()).rjust(5) + \
+               ", IsHigh:" + str(self.IsHigh()).rjust(5) + \
+               ", IsLow:" + str(self.IsLow()).rjust(5)
         return temp
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -264,7 +269,7 @@ class inputpin_gpiod():
         """
     InputPins = [] # List of all defined input pins.
     __library__ = 'GPIOD' # Which GPIO library does this support?
-    __version__ = '0.0.0' # What version of the library is this?
+    __version__ = '0.1.1' # What version of the library is this?
     
     def __init__(self,pinbcm,name=None,pull='up',enabled=True,invert=False):
         """ Define a GPIO input pin.
@@ -360,12 +365,12 @@ class inputpin_gpiod():
     def Status(self):
         """ Return a string describing the current status of the pin. """
         temp = "GPIOD: BCM:" + str(self.Pin) + ", INPUT:" + \
-               " Ena:" + str(self.Enabled).rjust(5) + \
-               " Inv:" + str(self.Invert).rjust(5) + \
-               " IsOn:" + str(self.IsOn()).rjust(5) + \
-               " IsOff:" + str(self.IsOff()).rjust(5) + \
-               " IsHigh:" + str(self.IsHigh()).rjust(5) + \
-               " IsLow:" + str(self.IsLow()).rjust(5)
+               ", Ena:" + str(self.Enabled).rjust(5) + \
+               ", Inv:" + str(self.Invert).rjust(5) + \
+               ", IsOn:" + str(self.IsOn()).rjust(5) + \
+               ", IsOff:" + str(self.IsOff()).rjust(5) + \
+               ", IsHigh:" + str(self.IsHigh()).rjust(5) + \
+               ", IsLow:" + str(self.IsLow()).rjust(5)
         return temp
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -390,7 +395,7 @@ class outputpin_gpiod():
 
     OutputPins = [] # List of defined pins. 
     __library__ = 'GPIOD' # Which GPIO library does this support?
-    __version__ = '0.0.0' # What version of the library is this?
+    __version__ = '0.1.1' # What version of the library is this?
     
     @staticmethod
     def ReleaseAll():
@@ -491,10 +496,10 @@ class outputpin_gpiod():
     def Status(self):
         """ Return a string describing the current status of the pin. """
         temp = "GPIOD: BCM:" + str(self.Pin) + ", OUTPUT:" + \
-               " Ena:" + str(self.Enabled).rjust(5) + \
-               " Inv:" + str(self.Invert).rjust(5) + \
-               " IsOn:" + str(self.IsOn()).rjust(5) + \
-               " IsOff:" + str(self.IsOff()).rjust(5) + \
-               " IsHigh:" + str(self.IsHigh()).rjust(5) + \
-               " IsLow:" + str(self.IsLow()).rjust(5)
+               ", Ena:" + str(self.Enabled).rjust(5) + \
+               ", Inv:" + str(self.Invert).rjust(5) + \
+               ", IsOn:" + str(self.IsOn()).rjust(5) + \
+               ", IsOff:" + str(self.IsOff()).rjust(5) + \
+               ", IsHigh:" + str(self.IsHigh()).rjust(5) + \
+               ", IsLow:" + str(self.IsLow()).rjust(5)
         return temp
