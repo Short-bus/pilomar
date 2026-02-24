@@ -16,6 +16,7 @@
 # Import required libraries
 import subprocess # Threadsafe os command execution with access to command output.
 import locale
+import os
 
 class oscommand():
     """ object to execute OS commands. """
@@ -27,13 +28,7 @@ class oscommand():
                 import locale
                 locale.setlocale(locale.LC_ALL, '') # Get user's locale.                """
         text = text.strip() # Remove blanks and special characters.
-        #locale.localeconv()['decimal_point']
         text = locale.delocalize(text)
-        #dp = locale.localeconv()['decimal_point']
-        #ts = locale.localeconv()['thousands_sep']
-        #if dp != '.' or ts != ',': 
-        #    text = text.replace(ts,'') # Remove thousands separators. We don't need them.
-        #    text = text.replace(dp,'.') # Make sure the DECIMAL point is used.
         return text
 
     def SetLogger(self,logger):
@@ -46,7 +41,6 @@ class oscommand():
         if hasattr(logger,'Log'): self.Log = logger.Log # Log method.
         if hasattr(logger,'ReportException'): self.ReportException = logger.ReportException # Report exception details to logfile.
         if hasattr(logger,'RaiseException'): self.RaiseException = logger.RaiseException # Report and raise exception. 
-        #self.Log("astrocamera.SetLogger: Linked to this log file.",terminal=False)
 
     def _NullLogger(self,*args, **kwargs):
         """ Null logger. Absorbs parameters and .Log call but does nothing. 
@@ -55,11 +49,30 @@ class oscommand():
 
     def __init__(self,logger=None):
         self.SetLogger(logger) # CamLog # Handle to the class that handles logging and error tracing.
-        #self.Log = logger # Must be a reference to a .Log() style method.
         self.LastError = None
         self.ReturnCode = 0
         self.LastOutput = []
 
+    def ExecuteParallel(self,cmd):
+        """ Execute a command in parallel with this process. 
+            return the process code so that the initial program 
+            can understand when it is complete. """
+        command_elements = cmd.split(' ')
+        proc = subprocess.Popen(command_elements)
+        self.Log("oscommand.ExecuteParallel(",cmd,"): Process started with PID:", proc.pid,terminal=False)
+        # Check if the process is still running by checking proc.poll() which gives the command's retcode, it retcode is None, the process is still running.
+        # retcode = proc.poll()
+        # Or wait for the process to end by calling proc.wait()
+        return proc # Return the process handle.            
+
+    def ExecuteIndependent(self,cmd):
+        """ Excute a command but let it run as an independent 
+            process from this one. There is no logging or 
+            value return. """
+        if not cmd.endswith("&"): cmd += " &" # This makes the execution independent of the calling process.
+        if self.Log != None: self.Log(cmd,terminal=False)
+        os.system(cmd)
+        
     def Execute(self,cmd,output: str='none') -> list:
         """ Execute a command and record it to the log file.
             command and result is always recorded in the log file,
@@ -135,3 +148,21 @@ class oscommand():
         self.LastOutput = returnlist
         self.ReturnCode = returncode
         return returncode
+
+# --------------------------------------------------------------
+
+def NewCommandWindow(command,columns=160,rows=40):
+    """
+    Launch a command in a new, independent terminal window.
+    New terminal window is opened, it runs independently of the parent window.
+    
+    Example usage ---------------------------------------------------------
+        from pilomaroscommand import NewCommandWindow
+        NewCommandWindow("python pilomarmetcheck.py")
+    """
+    geometry = f"{columns}x{rows}"
+    subprocess.Popen(
+        #["x-terminal-emulator", "-e", command],
+        ["lxterminal", f"--geometry={geometry}", "-e", command],
+        preexec_fn=os.setpgrp   # fully detach from the parent process
+    )
