@@ -474,6 +474,7 @@ class logfile():
         self.BufferSize = 0 # Current size of the message queue (characters).
         self.MaxLines = 20 # Do not store more than 20 lines due to memory constraints.
         self.Overflows = 0 # How many times has the buffer filled?
+        self.Clock = None # Can assign a Clock reference here.
 
     def setHost(self, RPi):
         """ Tell the instance which UART handler is communicating with the microcontroller. 

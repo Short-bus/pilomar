@@ -1079,7 +1079,6 @@ class steppermotor():
             line += BoolToString(self.MotorHalt) + ' ' # 18: Is the MotorHalt latch set?
             self.RPi.Write(line) # Send over UART to RPi.
             # *Q* During development, dump the position sensor attributes too.
-            #if hasattr(self.position_sensor,"get_status_line"): RPi.Write(self.position_sensor.get_status_line()) # Send over UART to RPi.
             if self.position_sensor != None: self.RPi.Write(self.position_sensor.GetStatusLine()) # Send over UART to RPi.
             # Reset the status timer.
             self.StatusTimer.Reset() # We've sent the regular status message, decide when the next is due.
