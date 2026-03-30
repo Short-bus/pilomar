@@ -133,7 +133,7 @@ class lis3dh_handler():
         # Reset the values of the REG_CTRL1 register. This should power back up and enable all three axes again.
         self.WriteReg(regidx,hold_value)
         ns_sleep(0.1) # Pause for change to take effect.
-        self.last_reset = self.Parent.Clock.Now()
+        self.last_reset = self.Clock.Now()
         self.last_measured = None # Clock when last measured.
         self.reference_angle = 0 # This is the angle fed to the sensor from the RPi telling it where it is currently pointing.
         self.assembly_angle = 0 # The assembly now knows it's pointing here!
@@ -236,7 +236,7 @@ class lis3dh_handler():
         """ Return a status line to be reported back to RPi.
             Standard method for pilomar compatibility. """
         line = "# lis3dh status " + self.Name + " "
-        line += IntToTimeString(self.Parent.Clock.Now()) + " "
+        line += IntToTimeString(self.Clock.Now()) + " "
         line += "AA " + str(self.assembly_angle) + " " 
         line += "CO " + str(self.configured) + " "
         line += "AP " + str(self.absolute_position) + " "
@@ -251,7 +251,7 @@ class lis3dh_handler():
             angle = self.Angle()
             if angle != prev_angle:
                 prev_angle = angle
-                print(IntToTimeString(self.Parent.Clock.Now()),angle)
+                print(IntToTimeString(self.Clock.Now()),angle)
                 time.sleep(0.5)
                 
 # --------------------------------------------------------------------------------------------------------
@@ -328,7 +328,7 @@ class as5600_handler():
         self.configured = False # The as5600 is not configured with reference_angle yet.
         self.reference_angle = 0 # Reference angle received from RPi, used to offset the as5600 angle to the true position.
         self.offset_angle = 0 # Offset to apply to as5600 angles to achieve the true physical angle of the assembly.
-        self.last_reset = self.Parent.Clock.Now()
+        self.last_reset = self.Clock.Now()
         self.last_measured = None # Clock when last measured.
         self.absolute_position = 0 # Rotation position of the sensor in steps. This includes completed revolutions.
         _ = self.Angle() # Initialise to 0 - 4095 values.
@@ -420,7 +420,7 @@ class as5600_handler():
         if prev != None: # If we have a previous reading we can check for full rotations.
             change = self.sensor_position - prev # What's the position change?
             if abs(change) >= 200: # Large enough change to warrant attention.
-                c_now = IntToTimeString(self.Parent.Clock.Now())
+                c_now = IntToTimeString(self.Clock.Now())
                 print(c_now," as5600_handler.Angle(",self.Name,") Large SP change:",change,"from",prev,"to",self.sensor_position)
             if abs(change) > (self.steps_per_rotation / 2): # Large change means we've completed a revolution in one direction or the other.
                 if change > 0: self.position_rotations -= 1 # We've moved to an earlier rotation. (eg from position 1 to position 4095)
@@ -436,7 +436,7 @@ class as5600_handler():
         """ Return a status line to be reported back to RPi.
             Standard method for pilomar compatibility. """
         line = "# as5600 status " + self.Name + " "
-        line += IntToTimeString(self.Parent.Clock.Now()) + " "
+        line += IntToTimeString(self.Clock.Now()) + " "
         line += "AA " + str(self.assembly_angle) + " " 
         line += "CO " + str(self.configured) + " "
         line += "SPR " + str(self.steps_per_rotation) + " "
@@ -459,7 +459,7 @@ class as5600_handler():
             angle = self.Angle()
             if angle != prev_angle:
                 prev_angle = angle
-                print(IntToTimeString(self.Parent.Clock.Now()),angle)
+                print(IntToTimeString(self.Clock.Now()),angle)
                 time.sleep(0.5)
 
 # ---------------------------------------------------------------------------------------------
