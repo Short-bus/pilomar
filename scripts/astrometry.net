@@ -5,5 +5,3 @@ sudo apt update
 sudo apt upgrade
 sudo apt install astrometry.net
 sudo apt install astrometry-data-2mass-08-19
- astrometry-data-4207 astrometry-data-4208 \
- astrometry-data-4210 astrometry-data-4211 \
