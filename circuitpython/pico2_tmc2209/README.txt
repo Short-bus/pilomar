@@ -2,6 +2,8 @@ Files for:
    RASPBERRY PI PICO2 WITH TMC2209 STEPPER DRIVERS.
    These files are not designed to work on other microcontrollers or different stepper drivers.
 
+This requires a circuit based upon the V3.1.1 motorcontroller because the microcontroller and stepper drivers have changed!
+
 pi/circuitpython/pico2_tmc2209
 │  
 ├─ README.txt # This file.
