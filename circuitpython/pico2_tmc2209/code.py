@@ -66,13 +66,11 @@ import digitalio
 import board
 print("This board is",board.board_id)
 from busio import UART as busio_UART # Only need the UART and I2C features.
-print("Creating I2C channel (SDA=GP4, SCL=GP5)")
 from busio import I2C as busio_I2C 
 import time
 import struct
 import math
 import gc # Garbage Collector
-i2c = busio_I2C(board.GP5, board.GP4)
 program_start_ns = time.monotonic_ns() # Monotonic clock as program starts. *Q* Report up-time in status messages.
 
 # What features do we have available on this board?
@@ -115,6 +113,15 @@ from pilomar.uarthost import uarthost # For serial communication over UART with 
 RPi = uarthost(channel=0,logfile=LogFile,exceptioncounter=ExceptionCounter,statusled=StatusLed,clock=Clock) # Create UART serial comms with Raspberry Pi.
 print("RPi UART communication baud rate:",RPi.BaudRate)
 LogFile.setHost(RPi) # Tell the log file where to send messages.
+
+try:
+    print("Creating I2C channel (SDA=GP4, SCL=GP5)")
+    i2c = busio_I2C(board.GP5, board.GP4)
+except Exception as e:
+    print("Unable to create i2c channel:",str(e))
+    LogFile.Log("Unable to create i2C channel:",str(e))
+    i2c = None
+    ExceptionCounter.Raise()
 
 # Show why the microcontroller (re)started.
 print('ResetReason: ' + str(microcontroller.cpu.reset_reason))
@@ -299,6 +306,7 @@ print("Initiating TMCUART (UART1) with TX on GP8, RX on GP9,",TMC_BAUD_RATE,"bau
 TMCuart = busio_UART(board.GP8,board.GP9,baudrate=TMC_BAUD_RATE,receiver_buffer_size=1024,timeout=0) # Define UART1 as the serial comms channel to the TMC2209 chip. (MEDIUM)
 
 # Configure Motors.
+# NOTE: If the configuration fails, the most common problem is NO 12V POWER TO THE TMC2209 CHIP! Check that first!
 Azimuth = steppermotor('azimuth',logfile=LogFile,clock=Clock,exceptioncounter=ExceptionCounter,features=FEATURES,TMCuart=TMCuart,motor_id=0,rpi=RPi,vmot=VMot,statusled=StatusLed)
 Azimuth.SetPins(stepBCM=AzimuthStepBCM,directionBCM=CommonDirectionBCM,enableBCM=CommonEnableBCM,faultBCM=AzimuthFaultBCM) # Direct control over Azimuth motor.
 Azimuth.SetConfig(gearratio=(60 * 4),motorstepsperrev=400,minangle=45.0,maxangle=315.0,restangle=180.0,currentangle=180.0,orientation=1,backlashangle=0.0) # Default configuration, can be overriden from the RPi.
@@ -418,9 +426,9 @@ class picosession():
             a single large packet of everything. Smaller messages work more reliably.
             codes: Optional extra flags added to status message (dev/test/debug etc)
             """
-        if CircuitPythonVersion.split('.')[0] in ('7','8','9'): pass # Supported CircuitPython version.
+        if CircuitPythonVersion.split('.')[0] in ('9','10'): pass # Supported CircuitPython version.
         else: # Unexpected CircuitPython version, report it back.
-            line = '# Expecting CircuitPython 7,8 or 9, found ' + str(CircuitPythonVersion)
+            line = '# Expecting CircuitPython 9 or 10 found ' + str(CircuitPythonVersion)
             RPi.Write(line) # Send over UART to RPi.
         line = "session status "
         i = time.time() - RPi.StartTime # Alive seconds. Use CPU clock not synchronised clock.
