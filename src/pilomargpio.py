@@ -36,10 +36,18 @@ except: # No support for GPIOD detected.
     pass
 
 if GPIO_DRIVER == gpio_opt.GPIOD_DRIVER: # 'GPIOD': # Select the GPIO handling chip.
-    try:
-        GPIOchip = gpiod.Chip('gpiochip4') # In very early RPi5 Bookworm builds the GPIO chip is 'gpiochip4'.
-    except:
-        GPIOchip = gpiod.Chip('gpiochip0') # In later RPi5 Bookworm builds the GPIO chip is 'gpiochip0'.
+    success = False
+    chip_list = ['gpiochip4','gpiochip0','/dev/gpiochip4','/dev/gpiochip0']
+    for chip in chip_list:
+        try:
+            GPIOchip = gpiod.Chip('/dev/gpiochip4') # In very early RPi5 Bookworm builds the GPIO chip is 'gpiochip4'.
+            success = True
+            break
+        except:
+            print("Rejected GPIOD chip:",chip,"Trying another")
+    if not success:
+        print("GPIOD: Unable to select a valid chip from",chip_list)
+        exit()
 
 def cleanup_gpio():
     """ Perform cleanup at end of session. """
