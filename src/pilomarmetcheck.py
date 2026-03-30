@@ -39,6 +39,7 @@ import os
 from textcolor import textcolor
 from pilomartimer import timer
 import json
+import argparse
 
 class metcheck_handler(): # 1 references.
     """ Load and maintain Astronomical Seeing conditions from www.metcheck.com 
@@ -51,7 +52,7 @@ class metcheck_handler(): # 1 references.
 
     VERSION = "0.0.3" # Version number for the class.
     
-    def __init__(self,logger,cachedir,enabled,lonval,latval,suntarget,moontarget):
+    def __init__(self,logger,cachedir,enabled,lonval,latval,suntarget,moontarget,cloudlimit=10,moonlimit=10,gustlimit=25,unitregion="UK"):
         """ Parameters -------------------------------------------------------------------
             logger: Reference to a pilomarlogfile instance. It will be used to create .Log, .ReportException and .RaiseException methods.
             cachedir: The directory where the persistent data cache files are stored. eg '/home/pi/pilomar/data'
@@ -61,7 +62,13 @@ class metcheck_handler(): # 1 references.
             suntarget: Instance of pilomar 'target' class which references the Sun.
                        Position of the Sun is used to establish twilight leve.
             moontarget: Instance of pilomar 'target' class which references the Moon.
-                        Used to calculate if Moon is visible and how bright it is. """
+                        Used to calculate if Moon is visible and how bright it is. 
+            cloudlimit: Maximum cloud cover for a viable observation (0-100) %
+            moonlimit: Maximum moonlight for a viable observation (0-100) %
+            gustlimit: Maximum windgustspeed for a viable observation mph
+            unitregion: "UK","US" or "GLOBAL" for different units of measure.
+        """
+        self.UnitRegion = unitregion # Can be one of 'UK','US','METRIC' - Some measures change unit based upon this.
         self.SetLogger(logger) # Setup links to logging instance and shortcuts to logging methods.
         self.SourceTitle = 'metcheck.com'
         self.ClockOffset = None
@@ -96,6 +103,10 @@ class metcheck_handler(): # 1 references.
         self.CurrentMeasuresCache = None # Dictionary of the current forecast data.
         self.CurrentMeasuresExpiry = None # Datetime when the current forecast data expires.
         self.MaxCacheFileAge = 2 * 60 * 60 # Only use the cache if younger than this. (2hours in seconds.)
+        # These are the limit conditions for an observation to be considered viable.
+        self.cloudlimit=cloudlimit # 10% max total cloud cover allowed.
+        self.moonlimit=moonlimit # Max 10% moon light allowed.
+        self.gustlimit=gustlimit # Max 25mph wind gust speed allowed.
         self.Refresh() # Try to update the information immediately.
         self.TextFG = textcolor.SILVER
         self.TextBG = textcolor.GREY11
@@ -149,40 +160,46 @@ class metcheck_handler(): # 1 references.
         # - '{value}' = Translation of specific values.
         # - 'pattern' = Formatting pattern for the value (use it to add UOM for example).
         # - 'fieldnames' = List of textcolor.colordisplay fieldnames that can be auto-populated by the UpdateWindow() class.
+        # - 'unit' = Unit of measure. Used to translate to different locales.
         self.MeasureTranslation = {
             # Seeing index is one measure of blurring due to atmospheric turbulence.
             "seeingIndex": {'desc': 'Seeing index', 
                             '0':'Worst', '1':'Terrible', '2':'Bad', '3':'Bad', 
                             '2-3':'Bad', '4':'Poor', '5':'Poor', '6':'Poor', 
                             '4-6':'Poor', '7':'Fair', '8':'Fair', '7-8':'Fair', 
-                            '9':'Excellent', '10':'Excellent', '9-10':'Excellent', 'pattern': None, 'fieldnames': ['SI']},
+                            '9':'Excellent', '10':'Excellent', '9-10':'Excellent', 'pattern': None, 'fieldnames': ['SI'], 'unit':None},
             # Pickering seeing index one measure of blurring due to atmospheric turbulence.                
             # Pickering seeing index of 1 to 3 is considered very poor, 4 to 5 is poor, 6 to 7 is good, and 8 to 10 is excellent. (Wikipedia definitions)
             "pickeringIndex": {'desc': 'Pickering seeing', 
                                '0':'Very poor', '1':'Very poor', '2':'Very poor', '3':'Very poor', 
                                '4':'Poor', '5':'Poor', '6':'Good', '7':'Good', 
                                '8':'Excellent','9':'Excellent', '10':'Excellent', '11':'Excellent', 
-                               '12':'Excellent', 'pattern': None, 'fieldnames': ['PI']},
-            "temperature": {'desc': 'Temp', 'pattern': '{0}C', 'fieldnames': ['TE']},
-            "dewpoint": {'desc': 'Dewpoint', 'pattern': '{0}C', 'fieldnames': ['DP']},
-            "rain": {'desc': 'Rain', 'pattern': '{0}mm', 'fieldnames': ['RD']},
-            "freezinglevel": {'desc': 'Freezing level', 'pattern': '{0}m', 'fieldnames': ['FL']},
-            "totalcloud": {'desc': 'Cloud: Total cover', 'pattern': '{0}%', 'fieldnames': ['CT']},
-            "lowcloud": {'desc': 'Cloud: Low cover', 'pattern': '{0}%', 'fieldnames': ['CL']},
-            "medcloud": {'desc': 'Cloud: Medium cover', 'pattern': '{0}%', 'fieldnames': ['CM']},
-            "highcloud": {'desc': 'Cloud: High cover', 'pattern': '{0}%', 'fieldnames': ['CH']},
-            "humidity": {'desc': 'Humidity', 'pattern': '{0}%', 'fieldnames': ['HU']},
-            "windspeed": {'desc': 'Windspeed (mph)', 'pattern': '{0}mph', 'fieldnames': ['WS']},
-            "meansealevelpressure": {'desc': 'Pressure (hPa)', 'pattern': '{0}hPa', 'fieldnames': ['PR']},
-            "windgustspeed": {'desc': 'Wind gusts (mph)', 'pattern': '{0}mph', 'fieldnames': ['WG']},
-            "winddirection": {'desc': 'Wind angle', 'pattern': '{0}deg', 'fieldnames': ['WA']},
-            "chanceofrain": {'desc': 'Rain chance', 'pattern': '{0}%', 'fieldnames': ['RC','RPB']},
-            "chanceofsnow": {'desc': 'Snow chance', 'pattern': '{0}%', 'fieldnames': ['SC','SPB']},
-            "fogRisk": {'desc': 'Fog risk', 'pattern': None, 'fieldnames': ['FOG']},
-            "lightLevel": {'desc': 'Light level', 'pattern': None, 'fieldnames': []},
-            "moonLight": {'desc': 'Moonlight', 'pattern': '{0}%', 'fieldnames': []}
+                               '12':'Excellent', 'pattern': None, 'fieldnames': ['PI'], 'unit':None},
+            "temperature": {'desc': 'Temp', 'pattern': '{0}C', 'fieldnames': ['TE'], 'unit':'C'},
+            "dewpoint": {'desc': 'Dewpoint', 'pattern': '{0}C', 'fieldnames': ['DP'], 'unit':'C'},
+            "rain": {'desc': 'Rain', 'pattern': '{0}mm', 'fieldnames': ['RD'], 'unit':'mm'},
+            "freezinglevel": {'desc': 'Freezing level', 'pattern': '{0}m', 'fieldnames': ['FL'], 'unit':'m'},
+            "totalcloud": {'desc': 'Cloud: Total cover', 'pattern': '{0}%', 'fieldnames': ['CT'], 'unit':'%'},
+            "lowcloud": {'desc': 'Cloud: Low cover', 'pattern': '{0}%', 'fieldnames': ['CL'], 'unit':'%'},
+            "medcloud": {'desc': 'Cloud: Medium cover', 'pattern': '{0}%', 'fieldnames': ['CM'], 'unit':'%'},
+            "highcloud": {'desc': 'Cloud: High cover', 'pattern': '{0}%', 'fieldnames': ['CH'], 'unit':'%'},
+            "humidity": {'desc': 'Humidity', 'pattern': '{0}%', 'fieldnames': ['HU'], 'unit':'%'},
+            "windspeed": {'desc': 'Windspeed (mph)', 'pattern': '{0}mph', 'fieldnames': ['WS'],'unit':'mph'},
+            "meansealevelpressure": {'desc': 'Pressure (hPa)', 'pattern': '{0}hPa', 'fieldnames': ['PR'], 'unit':'hPa'},
+            "windgustspeed": {'desc': 'Wind gusts (mph)', 'pattern': '{0}mph', 'fieldnames': ['WG'], 'unit':'mph'},
+            "winddirection": {'desc': 'Wind angle', 'pattern': '{0}deg', 'fieldnames': ['WA'], 'unit':'deg'},
+            "chanceofrain": {'desc': 'Rain chance', 'pattern': '{0}%', 'fieldnames': ['RC','RPB'], 'unit':'%'},
+            "chanceofsnow": {'desc': 'Snow chance', 'pattern': '{0}%', 'fieldnames': ['SC','SPB'], 'unit':'%'},
+            "fogRisk": {'desc': 'Fog risk', 'pattern': None, 'fieldnames': ['FOG'], 'unit':None},
+            "lightLevel": {'desc': 'Light level', 'pattern': None, 'fieldnames': [], 'unit':None},
+            "moonLight": {'desc': 'Moonlight', 'pattern': '{0}%', 'fieldnames': [], 'unit':'%'}
             }
-        
+        self.RegionalUnits = {
+            "UK":{"mph":"mph","C":"C","hpa":"hpa","m":"m","mm":"mm"},
+            "US":{"mph":"mph","C":"F","hpa":"hpa","m":"ft","mm":"ft"},
+            "METRIC":{"mph":"mps","C":"f","hpa":"hpa","m":"m","mm":"mm"},
+            }
+
     def SetLogger(self,logger): # Set up link to logging class and shortcuts to common methods.
         """ Set up link to logging class and shortcuts to common methods. """
         # The logging methods default to 'consumers' which will just silently eat any parameters passed.
@@ -607,11 +624,20 @@ class metcheck_handler(): # 1 references.
             """
         # Format the value, adding UOM etc.
         dkey = str(key) # Ensure key is a string. (This is the forecast measure eg 'temperature')
-        dval = str(value) # Default value string. (This is the forecast value eg 2.4)
         transvalue = self.MeasureTranslation.get(dkey,{}) # Get the translation entry for the key if it exists. Tells us the formatting required.
         pattern = transvalue.get('pattern',None) # This pattern will format the value in the display.
-        if pattern != None and len(pattern) > 0: # The pattern is valid.
-            dval = str(pattern).format(value) # Format the display string for the value.
+        source_unit = transvalue.get('unit',None) # What UOM are we reading from the file?
+        region_unit = self.RegionalUnits.get(self.UnitRegion,{}).get(source_unit,source_unit) # What should we translate into?
+        dval = str(value) # Default value string. (This is the forecast value eg 2.4)
+        if region_unit != source_unit:
+            if region_unit == 'mps': dval = str(int(value * 0.44704)) + "m/s"
+            elif region_unit == 'F': dval = str(int((value * 1.8) + 32)) + "F"
+            elif region_unit == 'ft': dval = str(int(value * 3.281)) + "ft"
+            elif region_unit == 'in': dval = str(int(value / 0.03937008)) + "in"
+            else: dval = str(value)
+        elif source_unit != None: dval = str(value) + source_unit
+        #if pattern != None and len(pattern) > 0: # The pattern is valid.
+        #    dval = str(pattern).format(value) # Format the display string for the value.
         return dval
 
     def Refresh(self): # Update caches with latest data (from disc or online)
@@ -806,7 +832,7 @@ class metcheck_handler(): # 1 references.
         for c in range(len(self.MatrixDates)): # Go through each timeslot column in turn.
             score = 0 # Calculate a score 0 - 9 for the risk of fog.
             # 0-3 points for approaching dewpoint.
-            t2 = self.MatrixKeys.index('dewpoint')
+            #t2 = self.MatrixKeys.index('dewpoint')
             temp = float(self.ForecastMatrix[self.MatrixKeys.index('temperature')][c]) # Get temperature
             dewp = float(self.ForecastMatrix[self.MatrixKeys.index('dewpoint')][c]) # Get dewpoint
             dpd = temp - dewp # How close is temperature to dewpoint?
@@ -825,6 +851,30 @@ class metcheck_handler(): # 1 references.
             elif speed < 15: score += 1
             self.ForecastMatrix[r][c] = str(score) # Populate column (all values are 'str' type).
 
+    def CalculateObservation(self):
+        """
+        Populate the 'observation' assessment for each timeslot.
+        """
+        r = self.MatrixKeys.index('observation') # Which data row are we filling with observation values?
+        for c in range(len(self.MatrixDates)): # Go through each timeslot column in turn.
+            result = False
+            if self.MoonTarget == None or self.SunTarget == None: # More restrictive limits available. Don't know SUN or MOON condition.
+                risetime = ("0" + self.ForecastMatrix[self.MatrixKeys.index('sunrise')][c])[-5:] # Sunrise time. '5:45' -> "05:45"
+                settime = ("0" + self.ForecastMatrix[self.MatrixKeys.index('sunset')][c])[-5:] # Sunset time. '18:29' -> "18:29"
+                entrytime = str(self.ForecastMatrix[self.MatrixKeys.index('utcTime')][c])[11:16] # Timeslot. '2026-03-28T03:00:00.00' -> "03:00"
+                totalcloud = float(self.ForecastMatrix[self.MatrixKeys.index('totalcloud')][c]) # Get totalcloud
+                windgustspeed = float(self.ForecastMatrix[self.MatrixKeys.index('windgustspeed')][c]) # Get wind gust speed.
+                if totalcloud <= self.cloudlimit and windgustspeed <= self.gustlimit: 
+                    if risetime > entrytime or settime < entrytime: 
+                        result = True
+            else: # More detailed limits available, can include SUN and MOON influence.
+                lightlevel = self.ForecastMatrix[self.MatrixKeys.index('lightLevel')][c] # Get lightlevel.
+                totalcloud = float(self.ForecastMatrix[self.MatrixKeys.index('totalcloud')][c]) # Get totalcloud
+                moonlight = float(self.ForecastMatrix[self.MatrixKeys.index('moonLight')][c]) # Get moonlight
+                windgustspeed = float(self.ForecastMatrix[self.MatrixKeys.index('windgustspeed')][c]) # Get wind gust speed.
+                if lightlevel in ['astro','night'] and totalcloud <= self.cloudlimit and moonlight <= self.moonlimit and windgustspeed <= self.gustlimit: result = True
+            self.ForecastMatrix[r][c] = str(result) # Populate column (all values are 'str' type).
+        
     def IsInt(self,text): # Will string convert to integer?
         """ Return True if string is integer. """
         try:
@@ -888,6 +938,7 @@ class metcheck_handler(): # 1 references.
         self.MatrixKeys.append('lightLevel') # A light level will be calculated based upon the sun's location.
         self.MatrixKeys.append('moonLight') # Is the moon visible, and if so how bright?
         self.MatrixKeys.append('fogRisk') # Assessment of fog/mist risk.
+        self.MatrixKeys.append('observation') # Is this a good window to make observations?
 
         self.MatrixDates.sort() # Make sure dates are in ascending sequence.
         self.MatrixDatetimes.sort() # Make sure datetimes are in ascending sequence.
@@ -976,6 +1027,9 @@ class metcheck_handler(): # 1 references.
         # 'fogRisk' indicates risk of mist/fog forming even if cloudless sky.
         self.Log('metcheck_handler.ForecastTable: Calculate fogrisk...',terminal=False)
         self.CalculateFogrisk()
+        # 'observation' True indicates it's a good observation slot, False indicates it isn't.
+        self.Log('metcheck_handler.ForecastTable: Calculate observation...',terminal=False)
+        self.CalculateObservation()
                 
         # Convert datatypes. Convert values from STR to more appropriate datatypes.
         self.Log('metcheck_handler.ForecastTable: Convert datatypes...',terminal=False)
@@ -1024,7 +1078,7 @@ class metcheck_handler(): # 1 references.
         self.Log("metcheck_handler.SelectColumns: Chose",Columns,terminal=False)
         return Columns
 
-    def ObservationOpportunities(self,cloudlimit=10,moonlimit=10,gustlimit=25): # Display upcoming observation opportunities.
+    def ObservationOpportunities(self): # Display upcoming observation opportunities.
         """ Go forward through the available forecast and list all the 
             upcoming observation opportunities. 
             
@@ -1052,34 +1106,38 @@ class metcheck_handler(): # 1 references.
                 
             """
         if self.MoonTarget == None or self.SunTarget == None: # Not enough information available.
-            self.Log("metcheck_handler.ObservationOpportunities(): No Skyfield targets available.",terminal=True)
+            self.Log("metcheck_handler.ObservationOpportunities(): Sun/Moon Skyfield targets not set.",terminal=True)
             return 
-        print(textcolor.fgbgcolor(self.TextFG,self.TextBG,"Period start (UTC)     Light   Cloud    Moon      Gust  Quality"))
+        print(textcolor.fgbgcolor(self.TextFG,self.TextBG,"Period start (UTC)     Light   Cloud    Moon      Gust"))
         lli = self.MatrixKeys.index('lightLevel')
         tci = self.MatrixKeys.index('totalcloud')
         mli = self.MatrixKeys.index('moonLight')
         wgi = self.MatrixKeys.index('windgustspeed')
+        obi = self.MatrixKeys.index('observation')
         next_d = None # Put a blank line whenever there's a break in an observation window.
         for i,d in enumerate(self.MatrixDatetimes):
-            lightlevel = self.ForecastMatrix[lli][i]
-            totalcloud = self.ForecastMatrix[tci][i]
-            moonlight = self.ForecastMatrix[mli][i]
-            windgustspeed = self.ForecastMatrix[wgi][i]
-            quality = 'BAD'
-            if lightlevel in ['astro','night'] and totalcloud <= cloudlimit and moonlight <= moonlimit and windgustspeed <= gustlimit:
-                quality = 'GOOD'
+            #print("Processing",i,d,self.ForecastMatrix[obi][i])
+            #if not bool(self.ForecastMatrix[obi][i]): continue # Not a good observation opportunity.
+            #if lightlevel in ['astro','night'] and totalcloud <= cloudlimit and moonlight <= moonlimit and windgustspeed <= gustlimit:
+            if self.ForecastMatrix[obi][i] == "True":
                 if next_d != None and next_d != d: print(" ") # We've a break in an observation window.
+                lightlevel = self.ForecastMatrix[lli][i]
+                totalcloud = self.ForecastMatrix[tci][i]
+                moonlight = self.ForecastMatrix[mli][i]
+                windgustspeed = self.ForecastMatrix[wgi][i]
                 print(textcolor.fgbgcolor(self.TextFG,self.TextBG, str(d).split('+')[0]),
                       textcolor.fgbgcolor(self.TextFG,self.TextBG, str(lightlevel).rjust(8)),
                       textcolor.fgbgcolor(self.TextFG,self.TextBG, str(totalcloud).rjust(6) + "%"),
                       textcolor.fgbgcolor(self.TextFG,self.TextBG, str(moonlight).rjust(6) + "%"),
-                      textcolor.fgbgcolor(self.TextFG,self.TextBG, str(windgustspeed).rjust(6) + "mph"),
-                      textcolor.fgbgcolor(self.TextFG,self.TextBG, quality.rjust(8)))
-                if (i + 1) <= len(self.MatrixDatetimes): # Calculate when this forecast ends.
+                      textcolor.fgbgcolor(self.TextFG,self.TextBG, str(windgustspeed).rjust(6) + "mph"))
+                if (i + 1) < len(self.MatrixDatetimes): # Calculate when this forecast ends.
                     next_d = self.MatrixDatetimes[i + 1]
                 else:
                     next_d = None
-        
+                    
+    # obi = self.MatrixKeys.index('observation') # Which 'row' is the 'observation' value?
+    # self.ForecastMatrix[obi][i] == "True"
+                                
     def TwelveHourForecast(self,terminalwidth): # Display color coded forecase matrix to the terminal.
         """ Display a color coded forecast matrix to the terminal.
             The matrix adapts to the width of the terminal screen.
@@ -1097,22 +1155,25 @@ class metcheck_handler(): # 1 references.
         ColumnList = ColumnList[:maxhours] # Clip the list to the available screen width.
         locstr = "lat:" + str(self.Lat) + " lon:" + str(self.Lon)
         print (textcolor.yellow('METCHECK.COM Observing conditions at ' + locstr + ' until ' + str(self.MatrixDatetimes[ColumnList[-1]]).split('+')[0] + ' UTC'))
-        # ForecastMatrix is created when the Metcheck data is loaded. It's a matrix of time slots vs weather measurements.
         
         # Skip some fields.
-        SkipFields = ['uvIndex','icon','iconName','dayOrNight','dayOfWeek']
+        SkipFields = ['uvIndex','icon','iconName','dayOrNight','dayOfWeek','observation']
         
         if self.MoonTarget == None: SkipFields.append('moonLight')
         if self.SunTarget == None: SkipFields.append('lightLevel')
+        
         if len(self.MatrixDatetimes) > 0: statusline = 'Data downloaded ' + str(self.MatrixDatetimes[0]).split('+')[0] + ' UTC'
         else: statusline = 'No data available'
         
-        for i,row in enumerate(self.ForecastMatrix): # Each row represents a single weather measurement across multiple timeslots.
-            valuename = self.MatrixKeys[i] # The weather 'measure' for this row in the forecast matrix.
+        obi = self.MatrixKeys.index('observation') # Which 'row' is the 'observation' value?
+        obi_list = [self.ForecastMatrix[obi][i] for i in ColumnList] # Get the 'good observation conditions' flag for each timeslot. ['False','True',...]
+
+        for j,row in enumerate(self.ForecastMatrix): # Each row represents a single weather measurement across multiple timeslots.
+            valuename = self.MatrixKeys[j] # The weather 'measure' for this row in the forecast matrix.
             if valuename in SkipFields: continue # Skip this measure.
             line = valuename.rjust(20)[-20:] + ' ' # Construct a line to display. Start each line with measure name.
-            trimmedrow = [row[selcol] for selcol in ColumnList] # Only select the times (columns) that we have selected earlier.
-            for e in trimmedrow: # Construct the display line with a column for each timeslot.
+            trimmedrow = [row[selcol] for selcol in ColumnList] # Only list the times (columns) that we have selected earlier.
+            for i,e in enumerate(trimmedrow): # Construct the display line with a column for each timeslot.
                 f = e # Default measurement value.
                 f = self.FormatValue(valuename,e) # Format the measure value.
                 # Some exceptional formatting to fit the column space available.
@@ -1122,8 +1183,10 @@ class metcheck_handler(): # 1 references.
                     f = str(e.hour).rjust(2,'0') + ':' + str(e.minute).rjust(2,'0')
                 column_e = str(f).rjust(11)[-11:] + ' ' # 11 characters per column.
                 color = self.SelectColor(valuename,e) # Is there any specific color associated with this measure?
-                if color != None: column_e = textcolor.fgbgcolor(color,self.TextBG,column_e) # color code the value.
-                else: column_e = textcolor.fgbgcolor(self.TextFG,self.TextBG,column_e) # Default colors.
+                if obi_list[i] == 'True': bgcolor = 236 # Good opportunity.
+                else: bgcolor = 234 # self.TextBG # Poor opportunity.
+                if color != None: column_e = textcolor.fgbgcolor(color,bgcolor,column_e) # color code the value.
+                else: column_e = textcolor.fgbgcolor(self.TextFG,bgcolor,column_e) # Default colors.
                 line += column_e # Add the measure column to the display line.
             print(line) # Print the line of measure columns.
         print(statusline) # Summarise the state of the data.
@@ -1165,8 +1228,16 @@ class metcheckdashboard(): # Example terminal UI for metcheck_handler
         self.Lat = 0.0
         self.Lon = 0.0
         self.ParameterFileName = cachedir + "pilomar_params.json" # Default parameter filename.
-        self.establish_location()
-        self.mch = metcheck_handler(logger=logger,cachedir=cachedir,enabled=enabled,lonval=self.Lon,latval=self.Lat,suntarget=suntarget,moontarget=moontarget) # Create metcheck data instance
+        # These are the limit conditions for an observation to be considered viable.
+        self.cloudlimit=10 # 10% max total cloud cover allowed.
+        # Cannot include moonlimit in standalone mode, no Skyfield targets for Sun,Moon etc.
+        self.gustlimit=25 # Max 25mph wind gust speed allowed.
+        self.Region = "UK"
+        self.establish_location() # And runtime arguments.
+        self.mch = metcheck_handler(logger=logger,cachedir=cachedir,enabled=enabled,lonval=self.Lon,latval=self.Lat,
+                                    suntarget=suntarget,moontarget=moontarget,
+                                    cloudlimit=self.cloudlimit,gustlimit=self.gustlimit,
+                                    unitregion=self.Region) # Create metcheck data instance
 
     def NowUTC(self,real=False) -> datetime: # Return current timestamp in UTC timezone.
         """ Get system clock as UTC (timezone aware) 
@@ -1210,6 +1281,16 @@ class metcheckdashboard(): # Example terminal UI for metcheck_handler
             elif now > self.RolloverDatetime: # First column has expired. Refresh anyway.
                 self.Display()
             time.sleep(0.25)
+
+    def argument_parser(self):
+        parser = argparse.ArgumentParser(description="Character image viewer/monitor")
+        parser.add_argument("--param_file", type=str, default=None, help="Pilomar parameter file to use as reference")
+        parser.add_argument("--lat", default=None, type=float, help="Observer's latitude in degrees")
+        parser.add_argument("--lon", default=None, type=float, help="Observer's longitude in degrees")
+        parser.add_argument("--cloudlimit", default=10, type=int, help="Maximum total cloud cover percentage (0-100) for a viable observation")
+        parser.add_argument("--gustlimit", default=25, type=int, help="Maximum wind gust speed (mph) for a viable observation")
+        parser.add_argument("--region", default="METRIC", help="Region (UK,US,METRIC)")
+        return parser.parse_args()
             
     def establish_location(self): # Where is the user?
         """
@@ -1219,24 +1300,11 @@ class metcheckdashboard(): # Example terminal UI for metcheck_handler
         """
         import sys
         import os
-        run_args = sys.argv[1:] # Ignore 1st argument which is this program name.
-        for i in run_args:
-            if i.startswith('?') or i.startswith('h'): # Help
-                print(textcolor.yellow("HELP"))
-                print(" paramfile={pilomar parameterfile name}")
-                print(" lat={latitude degrees}")
-                print(" lon={longitude degrees}")
-                exit()
-            if i.startswith('paramfile='): # Specify parameter filename to use.
-                # Alternative parameter files are useful for test/dev/debug and also for
-                # supporting alternative configurations.
-                self.ParameterFileName = i.split('=')[1]
-                print(textcolor.orange("Startup parameter file is:",self.ParameterFileName))
-            elif i.startswith('lat='):
-                self.Lat = float(i.split("=")[1])
-            elif i.startswith('lon='):
-                self.Lon = float(i.split("=")[1])
-            else: print (textcolor.red('Ignored startup parameter "' + str(i) + '"'))
+
+        runtime_args = self.argument_parser()
+        filename = runtime_args.param_file
+        if filename != None: 
+            self.ParameterFileName = filename
         if self.ParameterFileName != None: # If Pilomar parameter file exists, use that.
             if os.path.exists(self.ParameterFileName):
                 with open(self.ParameterFileName,'r') as f:
@@ -1249,7 +1317,12 @@ class metcheckdashboard(): # Example terminal UI for metcheck_handler
                 home_lon_str = param_dict.get('HomeLon','0.0 E')
                 self.Lon = float(home_lon_str.split(" ")[0]) # Convert to float value.
                 if home_lon_str.split(" ")[1] == "W": self.Lon = self.Lon * -1 # -ve for southern hemisphere in Skyfield.
-                print("From",self.ParameterFileName,"lat/lon",self.Lat,self.Lon)
+        if runtime_args.lat != None: self.Lat = runtime_args.lat
+        if runtime_args.lon != None: self.Lon = runtime_args.lon
+        if runtime_args.cloudlimit != None: self.cloudlimit = runtime_args.cloudlimit
+        # Cannot include moonlimit in standalone mode, no Skyfield targets for Sun,Moon etc.
+        if runtime_args.gustlimit != None: self.gustlimit = runtime_args.gustlimit
+        if runtime_args.region != None: self.Region = str(runtime_args.region).upper()
         
 if __name__ == "__main__": # Example display.
     from textcolor import textcolor

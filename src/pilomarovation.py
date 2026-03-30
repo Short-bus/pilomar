@@ -2,10 +2,12 @@
 # CLASS for handling and rendering aurora ovation data from NOAA.
 
 import numpy as np
+import math
 from pathlib import Path
 import requests # To handle json response for seeing conditions from online services.
 import json
 from datetime import datetime, timedelta
+import argparse
 
 class pilomarovation():
     
@@ -178,8 +180,8 @@ class pilomarovation():
         Parameters -----------------------------------------------
 
         Returns --------------------------------------------------
-        lat (array of float) : List of aurora shell latitudes for each observer altitude angle.
-        lon (array of float) : List of aurora shell longitudes for each observer azimuth angle.
+        lat (array of float) : List of aurora shell latitudes for each altitude angle the observer wants to look at.
+        lon (array of float) : List of aurora shell longitudes for each azimuth angle the observer wants to look at.
 
         """
 
@@ -350,30 +352,106 @@ class pilomarovation():
             intensity = int(intensity)
             self.IntensityDictionary[location] = intensity
         return True
+    
+    #def downscale_matrix_list(self, grid, new_rows, new_cols):
+    #    """
+    #    Produce new matrix_list which is a scaled down version of the full list.
+    #    
+    #    Parameters ------------------------------------------------
+    #    grid (list) : Original copy of matrix list that should be compressed.
+    #    new_rows (int) : Reduced number of rows to compress into.
+    #    new_cols (int) : Reduced number of columns to compress into.
+    #    """
+    #    old_rows = len(grid)
+    #    old_cols = len(grid[0])
+    #
+    #    row_scale = old_rows / new_rows
+    #    col_scale = old_cols / new_cols
+    #
+    #    result = []
+    #
+    #    for r in range(new_rows):
+    #        row_start = int(math.floor(r * row_scale))
+    #        row_end   = int(math.floor((r + 1) * row_scale))
+    #        row_end   = min(row_end, old_rows)
+    #
+    #        new_row = []
+    #        for c in range(new_cols):
+    #            col_start = int(math.floor(c * col_scale))
+    #            col_end   = int(math.floor((c + 1) * col_scale))
+    #            col_end   = min(col_end, old_cols)
+    #
+    #            # Compute max over the block
+    #            block_max = max(
+    #                grid[rr][cc]
+    #                for rr in range(row_start, row_end)
+    #                for cc in range(col_start, col_end)
+    #            )
+    #
+    #            new_row.append(block_max)
+    #
+    #        result.append(new_row)
+    #
+    #    return result
 
+    def get_char_list(self,pixellist,mode='max'):
+        """
+        Reduce list of pixel intensities to list of character block intensities.
+        (Use this when displaying using Braille character set in a terminal to decide on character block colors.)
+        The pixellist is higher resolution than the character blocks available on the terminal display.
+        This gathers all the pixel values WITHIN each character block and chooses the HIGHEST pixel value for the block.
+        Typically this is used to help assign the correct character colors to each character.
+        It is not possible to assign colors to individual pixels, only to entire characters (2*4 pixel blocks).
+        Parameters --------------------------------------------------------
+        pixellist (list) Matrix of pixel 'values' to analyse.
+        mode (str) : 'max' : Choose maximum value.
+                     'min' : Choose minimum value.
+        Returns -----------------------------------------------------------
+        charlist (list) : Matrix of character values extracted from the pixellist.
+        """
+        result = []
+        char_rows = math.ceil(len(pixellist) / 4) # 4 Braille pixel rows fit into a single character.
+        char_cols = math.ceil(len(pixellist[0]) / 2) # 2 Braille pixel columns fit into a single character.
+        # Create ZERO INTENSITY matrix of character positions.
+        for row_idx in range(char_rows):
+            row = [] # List of cell values per row.
+            for col_idx in range(char_cols):
+                row.append(0) # Value for this character position.
+            result.append(row)
+        if mode == 'max':
+            # Find HIGHEST INTENSITY per character position.
+            for pixel_row_idx in range(len(pixellist)):
+                char_row_idx = math.floor(pixel_row_idx / 4)
+                for pixel_col_idx in range(len(pixellist[0])):
+                    char_col_idx = math.floor(pixel_col_idx / 2)
+                    result[char_row_idx][char_col_idx] = max(result[char_row_idx][char_col_idx],pixellist[pixel_row_idx][pixel_col_idx])
+        elif mode == 'min':
+            # Find LOWEST INTENSITY per character position.
+            for pixel_row_idx in range(len(pixellist)):
+                char_row_idx = math.floor(pixel_row_idx / 4)
+                for pixel_col_idx in range(len(pixellist[0])):
+                    char_col_idx = math.floor(pixel_col_idx / 2)
+                    result[char_row_idx][char_col_idx] = min(result[char_row_idx][char_col_idx],pixellist[pixel_row_idx][pixel_col_idx])
+        return result
+        
     def get_matrix_list(self,flip=False,above=True,below=True,pan_angle=0):
         """
-        Generate a list of the output file.
-        Nested list.
-        entries are indexed as list[row][col]
+        Generate a nested list[row][col] of the observer's viewpoint.
         
         Parameters ---------------------------------------------
         flip (bool) : When TRUE the vertical axis is reversed, rows are listed in reverse order.
         above (bool) : When TRUE intensity above horizon is included, else zero.
         below (bool) : When TRUE intensity below horizon is included, else zero.
-        pan_angle (int) : Offset the output matrix by this angle.
+        pan_angle (int) : Offset the output matrix by this angle (panning around the horizon).
         """
         result = []
         for row,output_row in enumerate(range(self.OutputHeight)): # What direction (altitude) are we looking at?
             line = []
             horizon_angle = self.AltDivisions[row] # Is this row ABOVE (+ve) or BELOW (-ve) the observer's horizon?
-            #print("row:",row,"horizon_angle",horizon_angle,above,below)
             for output_col in range(self.OutputWidth): # What direction (azimuth) are we looking at?
                 if horizon_angle < 0 and below == False: 
-                    #print("blocking below horizon")
                     intensity = -99 # Don't show values below horizon.
                 elif horizon_angle >= 0 and above == False: 
-                    #print("blocking above horizon")
                     intensity = -99 # Don't show values above horizon.
                 else:
                     shell_lat = int(self.OutputCellLat[output_row,output_col]) # What latitude in the 'shell' are we looking at?
@@ -382,7 +460,6 @@ class pilomarovation():
                     location = (int(shell_lat),int(shell_lon)) # Construct key to dictionary to retrieve intensity at that point. (lat,lon)
                     intensity = self.IntensityDictionary.get(location,0)
                 line.append(int(intensity))
-            #print(line)
             result.append(line)
         if flip: result.reverse() # Invert rows
         if pan_angle != 0:
@@ -391,7 +468,6 @@ class pilomarovation():
                 element_angle = 360.0 / line_len # What angle does each column represent?
                 pan_element = int(round(pan_angle / element_angle,0)) # Which cell entry are we looking at?
                 result[i] = line[pan_element:] + line[:pan_element]
-                #print("Pan: angle=",pan_angle,"len=",line_len,"ele_angle=",element_angle,"pan_ele=",pan_element)
         return result
 
     def get_ovation_list(self,flip=False,above=True,below=True):
@@ -560,44 +636,22 @@ class ovationdashboard():
         self.obs_lat_deg = 0
         self.obs_lon_deg = 0
         self.shell_height_m=110e3
+        self.AboveHorizonColor = textcolor.NAVYBLUE
+        self.BelowHorizonColor = textcolor.GREY3
         self.RefreshSeconds = 15*60 # Refresh every 15 minutes.        
         self.pan_deg = 180 # Start out facing NORTH.
-        self.probability = 0 # 50% chance of seeing Aurora.
+        self.probability = 5 # Must be > 5% chance of seeing Aurora by default. User can adjust this.
+        # Select the color scale for the aurora. 
+        # 1) # XTERM colors from RED through YELLOW to GREEN. BLACK=0%, RED=10%, GREEN=100% (Opposite of ovation displays online)
+        self.StrengthColorsScale = [52, 196, 202, 208, 214, 226, 190, 154, 118, 82, 46]
+        # 2) # XTERM colors from GREEN through YELLOW to RED. BLACK=0%, GREEN=10%, RED=100% (Similar to ovation displays online)
+        # self.StrengthColorsScale = [52, 46, 82, 118, 154, 190, 226, 214, 208, 202, 196]
         self.icd = colordisplay(rows=self.char_height + 10,columns=self.char_width + 6,row=1,col=1,name='interactive_ovation',fg=15,bg=0)
         self.icd.DrawBorder = True # Draw border around window.
         self.icd.SetBorderColors(textcolor.GREEN,textcolor.BLACK) # Set border colors.
         self.icd.ClipWindow = True # Clip the display if the terminal area is insufficient. This means we see at least something.
         self.icd.PlaceString(' +90[X]',row=1,col=0)
-        self.icd.PlaceString(' ',      row=2,col=0)
-        self.icd.PlaceString(' ',      row=3,col=0)
-        self.icd.PlaceString(' ',      row=4,col=0)
-        self.icd.PlaceString(' ',      row=5,col=0)
-        self.icd.PlaceString(' ',      row=6,col=0)
-        self.icd.PlaceString(' ',      row=7,col=0)
-        self.icd.PlaceString(' ',      row=8,col=0)
-        self.icd.PlaceString(' ',      row=9,col=0)
-        self.icd.PlaceString(' ',      row=10,col=0)
-        self.icd.PlaceString(' ',      row=11,col=0)
-        self.icd.PlaceString(' ',      row=12,col=0)
-        self.icd.PlaceString(' ',      row=13,col=0)
-        self.icd.PlaceString(' ',      row=14,col=0)
-        self.icd.PlaceString(' ',      row=15,col=0)
         self.icd.PlaceString('  +0',   row=16,col=0)
-        self.icd.PlaceString(' ',      row=17,col=0)
-        self.icd.PlaceString(' ',      row=18,col=0)
-        self.icd.PlaceString(' ',      row=19,col=0)
-        self.icd.PlaceString(' ',      row=20,col=0)
-        self.icd.PlaceString(' ',      row=21,col=0)
-        self.icd.PlaceString(' ',      row=22,col=0)
-        self.icd.PlaceString(' ',      row=23,col=0)
-        self.icd.PlaceString(' ',      row=24,col=0)
-        self.icd.PlaceString(' ',      row=25,col=0)
-        self.icd.PlaceString(' ',      row=26,col=0)
-        self.icd.PlaceString(' ',      row=27,col=0)
-        self.icd.PlaceString(' ',      row=28,col=0)
-        self.icd.PlaceString(' ',      row=29,col=0)
-        self.icd.PlaceString(' ',      row=30,col=0)
-        self.icd.PlaceString(' ',      row=31,col=0)
         self.icd.PlaceString(' -90',   row=32,col=0)
         centre_col = int(self.char_width / 2) + 4
         
@@ -605,8 +659,7 @@ class ovationdashboard():
         self.icd.PlaceString('Observer:  Lat: [OBSLAT]deg',      row=35,col=4)
         self.icd.PlaceString('           Lon: [OBSLON]deg',      row=36,col=4)
         self.icd.PlaceString('  Aurora:  Alt: [AURALT]km',       row=37,col=4)
-        self.icd.PlaceString('           Probability: >[AURPRB]',row=38,col=4)
-        self.icd.PlaceString('Choose key',row=40,col=4)
+        self.icd.PlaceString('           Threshold: >[AURPRB]',row=38,col=4)
 
         self.icd.PlaceString('8,w = Move North    2,z = Move South',row=35,col=44)
         self.icd.PlaceString('a,4 = Move West     s,6 = Move East', row=36,col=44)
@@ -623,17 +676,32 @@ class ovationdashboard():
         self.icd.FieldFormat('AURALT',justify='r')
         self.icd.FieldFormat('AURPRB',justify='r')
         self.icd.FieldFormat('AZIMUTH',justify='c')
+        self.keyboard = keyboardscanner()
+        self.RefreshTimestamp = None
+        self.establish_location()
         horizon_row = int(self.char_height / 2)
         startrow, startcol = self.icd.FieldLocation("X") # Get location of the anchor field for the chart.
         line = " " * self.char_width
         for row in range(horizon_row + startrow):
-            self.icd.PlaceString(line,row=row,col=startcol,bg=textcolor.NAVY)
+            self.icd.PlaceString(line,row=row,col=startcol,bg=self.AboveHorizonColor)
         for row in range(horizon_row + startrow,self.char_height + startrow):
-            self.icd.PlaceString(line,row=row,col=startcol,bg=textcolor.DARKRED)
-        self.keyboard = keyboardscanner()
-        self.RefreshTimestamp = None
-        self.establish_location()
+            self.icd.PlaceString(line,row=row,col=startcol,bg=self.BelowHorizonColor)
+        self.icd.PlaceString("Intensity scale:",row=41,col=7)
+        for i,c in enumerate(self.StrengthColorsScale): # Draw scale of probability at the bottom of the screen.
+            text = " " + str((i) * 10).rjust(3) + "% "
+            if i == 0: fgc = textcolor.WHITE
+            else: fgc = textcolor.BLACK
+            self.icd.PlaceString(text,row=41,col=25 + (i * 6),fg=fgc,bg=c)
         
+    def argument_parser(self):
+        parser = argparse.ArgumentParser(description="Character image viewer/monitor")
+        parser.add_argument("--param_file", type=str, default=None, help="Pilomar parameter file to use as reference")
+        parser.add_argument("--lat", default=None, type=float, help="Observer's latitude in degrees")
+        parser.add_argument("--lon", default=None, type=float, help="Observer's longitude in degrees")
+        parser.add_argument("--sky_color", default=None, type=int, help="XTERM color to use for sky")
+        parser.add_argument("--land_color", default=None, type=int, help="XTERM color to use for land")
+        return parser.parse_args()
+
     def establish_location(self):
         """
         If startup parameters specify location (lat/lon) use that.
@@ -642,24 +710,11 @@ class ovationdashboard():
         """
         import sys
         import os
-        run_args = sys.argv[1:] # Ignore 1st argument which is this program name.
-        for i in run_args:
-            if i.startswith('?') or i.startswith('h'): # Help
-                print(textcolor.yellow("HELP"))
-                print(" paramfile={pilomar parameterfile name}")
-                print(" lat={latitude degrees}")
-                print(" lon={longitude degrees}")
-                exit()
-            if i.startswith('paramfile='): # Specify parameter filename to use.
-                # Alternative parameter files are useful for test/dev/debug and also for
-                # supporting alternative configurations.
-                self.ParameterFileName = i.split('=')[1]
-                print(textcolor.orange("Startup parameter file is:",self.ParameterFileName))
-            elif i.startswith('lat='):
-                self.obs_lat_deg = float(i.split("=")[1])
-            elif i.startswith('lon='):
-                self.obs_lon_deg = float(i.split("=")[1])
-            else: print (textcolor.red('Ignored startup parameter "' + str(i) + '"'))
+
+        runtime_args = self.argument_parser()
+        filename = runtime_args.param_file
+        if filename != None: 
+            self.ParameterFileName = filename
         if self.ParameterFileName != None: # If Pilomar parameter file exists, use that.
             if os.path.exists(self.ParameterFileName):
                 with open(self.ParameterFileName,'r') as f:
@@ -667,29 +722,51 @@ class ovationdashboard():
                 # Extract latitude degrees from parameter list.
                 home_lat_str = param_dict.get('HomeLat','0.0 N')
                 self.obs_lat_deg = float(home_lat_str.split(" ")[0]) # Convert to float value.
-                if home_lat_str.split(" ")[1] == "S": self.obs_lat_deg = self.obs_lat_deg * -1 # -ve for southern hemisphere in Skyfield.
+                if home_lat_str.split(" ")[1] == "S": self.obs_lat_deg *= -1 # -ve for southern hemisphere in Skyfield.
                 # Extract longitude degrees from parameter list.
                 home_lon_str = param_dict.get('HomeLon','0.0 E')
                 self.obs_lon_deg = float(home_lon_str.split(" ")[0]) # Convert to float value.
-                if home_lon_str.split(" ")[1] == "W": self.obs_lon_deg = self.obs_lon_deg * -1 # -ve for southern hemisphere in Skyfield.
-                print("From",self.ParameterFileName,"lat/lon",self.obs_lat_deg,self.obs_lon_deg)
+                if home_lon_str.split(" ")[1] == "W": self.obs_lon_deg *= -1 # -ve for southern hemisphere in Skyfield.
+        if runtime_args.lat != None: self.obs_lat_deg = runtime_args.lat
+        if runtime_args.lon != None: self.obs_lon_deg = runtime_args.lon
+        if runtime_args.sky_color != None: self.AboveHorizonColor = runtime_args.sky_color
+        if runtime_args.land_color != None: self.BelowHorizonColor = runtime_args.land_color
 
+    def IntensityToFg(self,charlist):
+        """
+        Charlist is a matrix of character locations for the display.
+        It contains the maximum aurora intensity that each character represents.
+        This method converts those intensities into a foreground color and returns a matrix of the result.
+        """
+        result = []
+        for row in charlist:
+            fg_row = []
+            for char in row:
+                # intensity is a value from 0 to 100, map this to the values available in self.StrengthColorsScale list.
+                i = math.floor(float(char / 100) * (len(self.StrengthColorsScale) - 1))
+                fg_row.append(self.StrengthColorsScale[int(i)])
+            result.append(fg_row)
+        return result
+        
     def Display(self):
         pa = pilomarovation(obs_lat_deg=self.obs_lat_deg,
                             obs_lon_deg=self.obs_lon_deg,
                             width=self.pixel_width,
                             height=self.pixel_height,
                             shell_height_m=self.shell_height_m) # Creat instance.
-        pixellist = pa.get_matrix_list(above=True,below=True,pan_angle=self.pan_deg) 
+        pixellist = pa.get_matrix_list(above=True,below=True,pan_angle=self.pan_deg) # Get intensity at each 'pixel' in the display.
+        charlist = pa.get_char_list(pixellist) # Get intensity at each 'character' in the display. Use this to set the foreground color.
+        fglist = self.IntensityToFg(charlist)
         self.RefreshTimestamp = datetime.now()
         self.icd.ListToBraillePlot(input_list=pixellist,threshold=self.probability,fg=textcolor.LIGHTGREEN,bg=None,fieldname="X")
+        self.icd.SetBrailleFG(input_list=fglist,fieldname='X') # Apply foreground color list to the BraillePlot.
         temp_lon = self.obs_lon_deg
         if temp_lon > 180: temp_lon = self.obs_lon_deg - 360
         if self.obs_lat_deg >= 0: view_direction = "NORTH"
         else: view_direction = "SOUTH"
         self.icd.FieldValue("AZIMUTH",view_direction)
-        self.icd.FieldValue("OBSLAT",int(self.obs_lat_deg))
-        self.icd.FieldValue("OBSLON",int(self.obs_lon_deg))
+        self.icd.FieldValue("OBSLAT",round(self.obs_lat_deg,1))
+        self.icd.FieldValue("OBSLON",round(temp_lon,1))
         self.icd.FieldValue("AURALT",int(self.shell_height_m / 1000))
         self.icd.FieldValue("AURPRB",str(self.probability) + "%")
         self.icd.FieldValue("UPDATEDT",str(self.RefreshTimestamp).split(".")[0])

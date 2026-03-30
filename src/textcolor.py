@@ -4682,6 +4682,59 @@ class colordisplay():
                     break
         return row,col
         
+    def SetBrailleFG(self,input_list,fieldname,invert=False): # Apply foreground color list to the BraillePlot.
+        """
+        Apply a foreground color list to a BraillePlot area.
+        
+        Parameters ------------------------------------------------
+        input_list is a matrix of character positions for a BraillePlot area.
+            Each character position is found in input_list[row][col]
+            Each position is an XTERM color code to use as the foreground color for that character.
+        fieldname is the name of the colordisplay field that locates the BraillePlot area on the screen.
+        invert switches from top-down indexing to bottom-up indexing.
+
+        Outputs ---------------------------------------------------
+        success (bool)
+        """
+        start_col = 0
+        start_row = 0
+        for f in self.Fields: # Search for the field.
+            if f.Name == fieldname: # Found a matching fieldname.
+                start_col = f.Column
+                if invert: start_row = f.Row
+                else: start_row = f.Row
+                break
+        for irow,row in enumerate(input_list):
+            for icol,fgcol in enumerate(row):
+                self.fgcolor[start_row + irow][start_col + icol] = fgcol
+        return True
+
+    def SetBrailleBG(self,input_list,fieldname,invert=False): # Apply background color list to the BraillePlot.
+        """
+        Apply a background color list to a BraillePlot area.
+        
+        Parameters ------------------------------------------------
+        input_list is a matrix of character positions for a BraillePlot area.
+            Each character position is found in input_list[row][col]
+            Each position is an XTERM color code to use as the background color for that character.
+        fieldname is the name of the colordisplay field that locates the BraillePlot area on the screen.
+        invert switches from top-down indexing to bottom-up indexing.
+
+        Outputs ---------------------------------------------------
+        success (bool)
+        """
+        start_col = 0
+        start_row = 0
+        for f in self.Fields: # Search for the field.
+            if f.Name == fieldname: # Found a matching fieldname.
+                start_col = f.Column
+                if invert: start_row = f.Row
+                else: start_row = f.Row
+                break
+        for irow,row in enumerate(input_list):
+            for icol,bgcol in enumerate(row):
+                self.bgcolor[start_row + irow][start_col + icol] = bgcol
+        return True
 
     def BraillePlot(self,row,col,value=True,invert=False,fg=None,bg=None,fieldname=None):
         """ Set sub-pixels in characters using the Braille extended character set. 
@@ -4970,6 +5023,16 @@ class colordisplay():
             print(textcolor.cursor(self.DisplayCol,self.DisplayRow + self.DisplayRows) + line)
         self.LastRefresh = datetime.now()
 
+    @staticmethod
+    def GlobalInlineDisplay(border=False):
+        """
+        Perform InlineDisplay for all defined windows.
+        """
+        for wnd in colordisplay.DefinedWindows:
+            print(wnd.DisplayName,":",wnd.WindowTitle)
+            wnd.InlineDisplay(border=border)
+            print("")
+        
     def InlineDisplay(self,border=False):
         """ Take the display buffer and output it to the terminal. 
             This just appends the image to the current terminal text, it does not PLACE the image anywhere specifically. 
