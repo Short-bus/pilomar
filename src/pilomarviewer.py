@@ -30,7 +30,7 @@ class imageviewer():
         Converts an image file into a 256 color character approximation. """
     __version__ = '0.0.1'
 
-    def __init__(self,name,row=None,col=None,rows=20,cols=40,cdlayout=None,fg=15,bg=0,logger=None,autorefresh=False):
+    def __init__(self,name,row=None,col=None,rows=20,cols=40,cdlayout=None,fg=15,bg=0,logger=None,autorefresh=False,aspect_ratio=1.8):
         """ Create new instance. 
             name = A name for the instance.
             row/col = Optionally positions the window on the screen. If missing, the display is just printed wherever the cursor is.
@@ -84,6 +84,7 @@ class imageviewer():
         self.Filename = None # Which file are we handling?
         self.FileModTime = None
         self.AutoRefresh = autorefresh
+        self.DebugMode = False # Debug mode off by default. Change with SetDebug() method.
         self.Logger = logger # Logger instance.
         self.Log = None
         self.ReportException = None # Report exception details to logfile.
@@ -103,7 +104,7 @@ class imageviewer():
         self.EndY = None
         self.DiffX = None # Size of cropped area.
         self.DiffY = None
-        self.AspectRatio = 1.4 # In case the characters are not entirely square. This can adjust the aspect ratio.
+        self.AspectRatio = aspect_ratio # In case the characters are not entirely square. This can adjust the aspect ratio.
 
     def SetLogger(self,logger):
         """ Set up link to logging class and shortcuts to common methods. """
@@ -117,6 +118,13 @@ class imageviewer():
         if self.Log != None: self.Log("imageviewer(",self.Name,").SetLogger(): Linked to this log file.",terminal=False)
         return True
 
+    def SetDebug(self,status=True):
+        """
+        Set/reset the debug mode flag.
+        """
+        self.DebugMode = status
+        if self.Log != None: self.Log("imageviewer(",self.Name,").SetDebug(): DebugMode set to",status,terminal=False)
+        
     def NewestFile(self,path_pattern):
         """
         Return the absolute path of the most recently modified file
@@ -320,20 +328,24 @@ class imageviewer():
         self.WorkImage.CloneImage(self.OrigImage) # Refresh work image buffer.
         if self.WorkImage.ImageMissing():
             return False
-        if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): WorkImage loaded (",self.WorkImage.GetHeight(),self.WorkImage.GetWidth(),")",terminal=False)
-        #self.AddGuidelines() # During development, add guidelines to the image to help with registration. *Q* Remove for release.
+        orig_height = self.WorkImage.GetHeight()
+        orig_width = self.WorkImage.GetWidth()
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): WorkImage loaded (",orig_height,orig_width,")",terminal=False)
+        if self.DebugMode: # Add some debug features to the image.
+            self.AddGuidelines() # During development, add guidelines to the image to help with registration. *Q* Remove for release.
         # Apply image filters here if needed.
-        if self.DiffX < self.WorkImage.GetWidth() or self.DiffY < self.WorkImage.GetHeight():
+        if self.DiffX < orig_width or self.DiffY < orig_height:
             # We're selecting a region of the whole image.
             # Clip the image buffer to match the selected area.
             self.WorkImage.ClipImage(self.StartX,self.StartY,self.EndX,self.EndY)
-        vscale = float(self.Window.DisplayRows) / self.WorkImage.GetHeight() # Scale for WIDTH to fit.
-        hscale = float(self.Window.DisplayColumns) / self.WorkImage.GetWidth() # Scale for HEIGHT to fit.
-        tscale = min(vscale,hscale) # Make sure smallest axis scale wins, otherwise the image is further clipped.
-        if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): vscale",vscale,"aspectratio",self.AspectRatio,"hscale",hscale,"=tscale",tscale,"on h",self.WorkImage.GetHeight(),"x w",self.WorkImage.GetWidth(),terminal=False)
-        #self.WorkImage.ScaleImage(vscale=vscale * self.AspectRatio,hscale=hscale) # Scale down the image.
-        self.WorkImage.ScaleImage(vscale=vscale,hscale=hscale / self.AspectRatio) # Scale down the image.
-        #self.WorkImage.ScaleImage(vscale=tscale * self.AspectRatio,hscale=tscale) # Scale down the image.
+            # Dimensions will have changed if clipped, read 'em again.
+            orig_height = self.WorkImage.GetHeight()
+            orig_width = self.WorkImage.GetWidth()
+        vscale = float(self.Window.DisplayRows) / orig_height # Scale for WIDTH to fit. vscale 0.02631578947368421, WindowDisplayRows 80, ImageHeight 80
+        hscale = (float(self.Window.DisplayColumns) / orig_width) * self.AspectRatio # Scale for HEIGHT to fit. hscale 0.03944773175542406, WindowDisplayColumns 160, ImageWidth 114
+        tscale = min(vscale,hscale)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): vscale",vscale,"aspectratio",self.AspectRatio,"hscale",hscale,"on h",self.WorkImage.GetHeight()," w",self.WorkImage.GetWidth(),terminal=False)
+        self.WorkImage.ScaleImage(vscale=tscale,hscale=tscale) # Scale down the image. vscale 0.02631578947368421, hscale 0.03944773175542406
         if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): After scaling h",self.WorkImage.GetHeight(),"x w",self.WorkImage.GetWidth(),terminal=False)
         # Now start transferring pixels into characters.
         self.Window.Clear()
@@ -354,11 +366,24 @@ class imageviewer():
                 b = float(b) / 255
                 color1,color2 = textcolor.rgbditherdecimal(r,g,b) # Convert to 2 color codes for dithering.
                 self.Window.PlaceString(row=row,col=col,text=LightShade,fg=color2,bg=color1)
-        if self.Log != None: self.Log("imageviewer(",self.Name,").ImageToWindow(): End",terminal=False)
+        if self.Log != None: 
+            self.Log("imageviewer(",self.Name,").ImageToWindow():",
+                     "WindowDisplayRows",self.Window.DisplayRows,
+                     "WindowDisplayColumns",self.Window.DisplayColumns,
+                     "OrigHeight",orig_height,
+                     "OrigWidth",orig_width,
+                     "ImageHeight",self.WorkImage.GetHeight(),
+                     "ImageWidth",self.WorkImage.GetWidth(),
+                     "vscale",vscale,
+                     "hscale",hscale,
+                     "AspectRatio",self.AspectRatio)
+            self.Log("imageviewer(",self.Name,").ImageToWindow(): End",terminal=False)
         return True
 
     def Display(self,immediate=False):
-        """ Refresh the display. """
+        """ Refresh the display. 
+        immediate = False : Display only updated to the screen when it needs to. 
+        immediate = True : Display instantly update to the screen. """
         if self.Log != None: self.Log("imageviewer(",self.Name,").Display(): Begin",terminal=False)
         self.ImageToWindow() # Transfer the currently selected image area into the window display.
         # Add descriptive labels.
@@ -376,6 +401,12 @@ class imageviewer():
                                     fg=textcolor.BLACK,bg=textcolor.CYAN) # instructions at bottom of image.
         c,r = textcolor.terminalsize() # How big is the terminal area?
         self.Window.Display(screenheight=r,screenwidth=c,immediate=False) # Display window.
+        if self.DebugMode: # Debug mode on, show additional data below the image.
+            print("")
+            print("imageviewer.Display(): DEBUG DATA:")
+            print("Name:",self.Name,"File:",self.Filename,"Mod:",self.FileModTime)
+            c,r = textcolor.terminalsize() # How big is the terminal area?
+            print("Terminal c,r:",c,r,"StartX,Y:",self.StartX,self.StartY,"EndX,Y:",self.EndX,self.EndY,"DiffX,Y:",self.DiffX,self.DiffY,"AspecRatio:",self.AspectRatio,textcolor.clearforward())
         print(textcolor.cursorhome())
         if self.Log != None: self.Log("imageviewer(",self.Name,").Display(): End",terminal=False)
         return True
@@ -395,15 +426,35 @@ class imageviewer():
         if self.Log != None: self.Log("imageviewer(",self.Name,").InlineDisplay(): End",terminal=False)
         return True
 
-    def QuickBufferView(self,imagebuffer,inline=False):
-        """ Call this to display any OpenCV image buffer via the terminal interface.
-            This allows zoom and pan. 
-            This is the quick-view format, it just clears the screen and doesn't care what else is out there. 
-            
-            imagebuffer : OpenCV image buffer.
-            inline : When TRUE image is shown inline and no keyboard input required.
-                     When FALSE image is shown in display location and 'x' must be pressed to resume. """
+    def ListFilterScripts(self):
+        """
+        Print list of filter script names.
+        """
+        self.OrigImage.ListFilterScripts()
+
+    def ValidScriptName(self,scriptname):
+        """
+        Return TRUE if script name is recognised, else False.
+        """
+        return self.OrigImage.ValidScriptName(scriptname)
+
+    def QuickBufferView(self,imagebuffer,inline=False,filter_script=None,script_source=None):
+        """ 
+        Call this to display any OpenCV image buffer via the terminal interface.
+        This allows zoom and pan. 
+        This is the quick-view format, it just clears the screen and doesn't care what else is out there. 
+        
+        imagebuffer : OpenCV image buffer.
+        inline : When TRUE image is shown inline and no keyboard input required.
+                 When FALSE image is shown in display location and 'x' must be pressed to resume.
+        filter_script : Name of filter script to run before showing the image.
+        script_source : Filename of JSON file containing filter scripts. If not given the build-in defaults from pilomarimage are used.
+        """
         self.LoadBuffer(imagebuffer)
+        if script_source != None: # Load filter scripts from file.
+            self.LoadScriptFile(script_source)
+        if filter_script != None:
+            self.RunFilterScript(filter_script)
         if inline: # Display inline with no user input required.
             self.InlineDisplay()
         else: # Display in screen location and wait for user to dismiss the display.
@@ -420,8 +471,36 @@ class imageviewer():
                     self.CommandHandler(keypress) # Process command and redisplay.
                     self.Display(immediate=True) # Display window.
         return
+
+    def RunFilterScript(self,filter_script):
+        """
+        Run a pilomarimage filter on the current image.
+        """
+        if not self.ValidScriptName(filter_script): # This script name is not recognised.
+            print("The filter script name",filter_script,"is not recognised.")
+            print("Must be one of:")
+            self.ListFilterScripts()
+            exit()
+        self.OrigImage.RunFilterScript(filter_script)
+        return True
+
+    def LoadScriptFile(self,script_source):
+        """
+        Overwrite default filter scripts with your own scripts.
+        """
+        with open(script_source,'r') as f:
+            pilomarimage.FILTERSCRIPTS = json.load(f) # Overwrite the pilomarimage class definition.
+            
+    def LoadAndFilter(self,filename,filter_script=None):
+        """
+        Call LoadFile and RunFilterScript() 
+        """
+        self.LoadFile(filename)
+        if filter_script != None:
+            self.RunFilterScript(filter_script)
+        return True
         
-    def QuickFileView(self,filepath,inline=False,autorefresh=None):
+    def QuickFileView(self,filepath,inline=False,autorefresh=None,filter_script=None,script_source=None):
         """ Call this to select and view .jpg files via the terminal interface.
             This allows zoom and pan. 
             This is the quick-view format, it just clears the screen and doesn't care what else is out there. 
@@ -429,7 +508,13 @@ class imageviewer():
             filename : Name of image file to display.
             inline : When TRUE image is shown inline and no keyboard input required.
                      When FALSE image is shown in display location and 'x' must be pressed to resume.
-            autorefresh : Override the self.AutoRefresh option. """
+            autorefresh : Override the self.AutoRefresh option. 
+            filter_script : Name of filter script to run before showing the image.
+                            Can be one of the default scripts included in the pilomarimage object 
+                            or
+                            Can be from a custom filter script found in script_source.
+            script_source : Filename of JSON file containing filter scripts. If not given the build-in defaults from pilomarimage are used.
+        """
         if autorefresh != None: AutoRefresh = autorefresh
         else: autorefresh = self.AutoRefresh
         filename = self.NewestFile(filepath)
@@ -438,7 +523,10 @@ class imageviewer():
             while filename == None:
                 filename = self.NewestFile(filepath)
                 time.sleep(2)
-        self.LoadFile(filename)
+        if script_source != None: # Load filter scripts from file.
+            print("Loading custom filters from",script_source)
+            self.LoadScriptFile(script_source)
+        self.LoadAndFilter(filename=filename,filter_script=filter_script)
         screen_cols, screen_rows = textcolor.terminalsize()
         prev_cols = screen_cols
         prev_rows = screen_rows
@@ -466,13 +554,13 @@ class imageviewer():
                 latestfile = self.NewestFile(filepath)
                 if latestfile != filename: # New file has appeared, switch to that.
                     filename = latestfile
-                    self.LoadFile(filename)
+                    self.LoadAndFilter(filename=filename,filter_script=filter_script)
                     self.Display(immediate=True)
                     continue
                 filemodtime = self.GetFileModTime() # Has the file changed?
                 if autorefresh and filemodtime > self.FileModTime and timedelta(filemodtime - self.FileModTime).total_seconds() > 5:
                     # File has changed on disc, we should automatically refresh the display.
-                    self.LoadFile(filename)
+                    self.LoadAndFilter(filename=filename,filter_script=filter_script)
                     self.Display(immediate=True)
                 if keypress == '': # Wait a moment then scan again.
                     time.sleep(0.5)
@@ -522,26 +610,36 @@ class imageviewer():
     def ZoomIn(self):   
         """ Increase the zoom level. """
         x,y = self.GetViewCenter() # Where's the current center of the view?
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomIn(): Original view centre:",x,y,terminal=False)
         # Resize the selection area.
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomIn(): Original selection area:",self.DiffX,self.DiffY,terminal=False)
         self.DiffX = max(int(self.DiffX * 0.5),10)
         self.DiffY = max(int(self.DiffY * 0.5),10)
-        sx,sy = self.GetStartFromCenter(x,y) # Where's the new start location if we keep the view center?
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomIn(): New selection area:",self.DiffX,self.DiffY,terminal=False)
+        sx,sy = self.GetStartFromCenter(x,y) # Where's the new start location if we keep the view centered?
         self.StartX = sx
         self.StartY = sy
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomIn(): New start corner:",self.StartX,self.StartY,terminal=False)
         
     def ZoomOut(self):      
         """ Reduce the zoom level. """
         x,y = self.GetViewCenter() # Where's the current center of the view?
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomOut(): Original view centre:",x,y,terminal=False)
         # Resize the selection area.
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomOut(): Original selection area:",self.DiffX,self.DiffY,terminal=False)
         self.DiffX = int(self.DiffX * 1.5)
         self.DiffY = int(self.DiffY * 1.5)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomOut(): New selection area:",self.DiffX,self.DiffY,terminal=False)
         sx,sy = self.GetStartFromCenter(x,y) # Where's the new start location if we keep the view center?
         self.StartX = sx
         self.StartY = sy
+        if self.Log != None: self.Log("imageviewer(",self.Name,").ZoomOut(): New start corner:",self.StartX,self.StartY,terminal=False)
 
     def Pan0(self):
         """ Move UP. """
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan0(): original y:",self.StartY,",Diffy:",self.DiffY,terminal=False)
         self.StartY = max(self.StartY - int(self.DiffY * 0.25),0)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan0(): final y:",self.StartY,terminal=False)
         
     def Pan315(self):
         """ Move UP and LEFT. """
@@ -550,7 +648,9 @@ class imageviewer():
 
     def Pan270(self):
         """ Move LEFT. """
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan270(): original x:",self.StartX,",Diffx:",self.DiffX,terminal=False)
         self.StartX = max(self.StartX - int(self.DiffX * 0.25),0)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan270(): final x:",self.StartX,terminal=False)
 
     def Pan225(self):
         """ Move LEFT and DOWN. """
@@ -559,7 +659,9 @@ class imageviewer():
 
     def Pan180(self):
         """ Move DOWN. """
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan180(): original y:",self.StartY,",Diffy:",self.DiffY,terminal=False)
         self.StartY = min(self.StartY + int(self.DiffY * 0.25),self.OrigImage.GetHeight() - self.DiffY)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan180(): final y:",self.StartY,terminal=False)
 
     def Pan135(self):
         """ Move RIGHT and DOWN. """ 
@@ -568,7 +670,9 @@ class imageviewer():
 
     def Pan90(self):
         """ Move RIGHT. """
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan90(): original x:",self.StartX,",Diffx:",self.DiffX,terminal=False)
         self.StartX = min(self.StartX + int(self.DiffX * 0.25),self.OrigImage.GetWidth() - self.DiffX)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").Pan90(): final x:",self.StartX,terminal=False)
 
     def Pan45(self):
         """ Move UP and RIGHT. """
@@ -577,8 +681,10 @@ class imageviewer():
 
     def PanCentre(self):
         """ Move to CENTRE of image. """
+        if self.Log != None: self.Log("imageviewer(",self.Name,").PanCentre(): original x,y:",self.StartX,self.StartY,",Diff x,y:",self.DiffX,self.DiffY,",size:",self.OriginalImage.GetWidth(),self.OriginalImage.GetHeight(),terminal=False)
         self.StartX = int(self.OrigImage.GetWidth() / 2) - int(self.DiffX / 2)
         self.StartY = int(self.OrigImage.GetHeight() / 2) - int(self.DiffY / 2)
+        if self.Log != None: self.Log("imageviewer(",self.Name,").PanCentre(): final x,y:",self.StartX,self.StartY,",Diff x,y:",self.DiffX,self.DiffY,",size:",self.OriginalImage.GetWidth(),self.OriginalImage.GetHeight(),terminal=False)
         
     def IncRatio(self):
         """ Increase the character aspect ratio. 
@@ -611,27 +717,42 @@ class imageviewer():
         elif cmd == '>': self.IncRatio() # Increase the character aspect ratio.
         elif cmd == '.': self.WorkImage.NextInterpolation() # Move on to next sampling method for resizing (zooming)
         elif cmd == ',': self.WorkImage.PrevInterpolation() # Move on to next sampling method for resizing (zooming)
-        self.PostCommand() # Check everything is balanced once the command it complete.
+        self.PostCommand() # Check everything is balanced once the command it complete. start/end/diff coordinates etc.
         return True
 
 if __name__ == '__main__': # Demonstrate on a given file.
     import sys
-    RunArgs = sys.argv[1:] # Ignore 1st argument which is this program name.
-    if len(RunArgs) < 1:
-        raise Exception("Give filepath as command line parameter.")
-    else: 
-        filename = RunArgs[0]
-        for c in ['"',"'"]: # Strip leading/trailing quotes.
-            if filename[0] == c == filename[-1]: filename = filename[1:-1]
-    if len(RunArgs) > 1: # Rows available.
-        rows = int(RunArgs[1])
-    else:
-        rows = 40
-    if len(RunArgs) > 2: # Columns available.
-        cols = int(RunArgs[2])
-    else:
-        cols = 160
-    Viewer = imageviewer(name="demo",row=1,col=1,rows=rows,cols=cols,fg=15,bg=0,autorefresh=True)
+    import argparse
+
+    def argument_parser():
+        parser = argparse.ArgumentParser(description="Character image viewer/monitor")
+        parser.add_argument("input_file", nargs="+", help="Filename to display/monitor (wildcard must be in quotes)")
+        parser.add_argument("--rows", default=40, type=int, help="Terminal rows to display")
+        parser.add_argument("--cols", default=120, type=int, help="Terminal columns to display")
+        parser.add_argument("--aspect_ratio", default=1.8, type=float, help="Terminal character aspect ratio to use")
+        parser.add_argument("--debug", action="store_true", help="Trigger extra debug behaviours")
+        parser.add_argument("--auto_scale", action="store_true", help="Scale display to match terminal size")
+        parser.add_argument("--script_source", default=None, help="JSON file containing filter scripts")
+        parser.add_argument("--filter_script", default=None, help="Run image filter script (name)")
+        return parser.parse_args()
+    runtime_args = argument_parser()
+    filename = runtime_args.input_file
+    if type(filename) is list: filename = filename[0]
+    if filename[0] in ["'",'"'] and filename[0] == filename[-1]: filename = filename[1:-1] # Strip quotes.
+    rows = runtime_args.rows
+    cols = runtime_args.cols
+    aspect_ratio = runtime_args.aspect_ratio
+    debug_mode = runtime_args.debug
+    auto_scale = runtime_args.auto_scale
+    filter_script = runtime_args.filter_script
+    script_source = runtime_args.script_source 
+    if runtime_args.auto_scale: # Scale the screen to fit available space.
+        temp = textcolor.terminalsize() # Note the size of the window. If it changes, we'll clear the screen.
+        cols = temp[0] - 2
+        rows = temp[1] - 2
+    
+    Viewer = imageviewer(name="demo",row=1,col=1,rows=rows,cols=cols,fg=15,bg=0,autorefresh=True,aspect_ratio=aspect_ratio)
+    if debug_mode: Viewer.SetDebug(True) # Turn on extra debug messages.
     print(textcolor.clearall())
-    Viewer.QuickFileView(filename)
+    Viewer.QuickFileView(filename,filter_script=filter_script,script_source=script_source)
     print(textcolor.clearforward())

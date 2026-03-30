@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from textcolor import textcolor
 import os # OS Command execution
 import traceback # Used to record the stacktrace if recording an error.
+import sys # For access to stderr output.
 
 class logfile(): # 2 references.
     """ An object to maintain a log file recording the activities and events in the program.
@@ -161,17 +162,17 @@ class logfile(): # 2 references.
         if level[0] == 'e': # Error
             if terminal: # We're allowed to display on the terminal.
                 self.ErrorList.append(printline) # Record the error for later summary or reporting.
-                print(textcolor.red('** ERROR ** reported in LogFile: ') + printline)
+                print(textcolor.red('** ERROR ** reported in LogFile: ') + printline, file=sys.stderr) # Write to error stream.
                 if errorprompt: # User has to acknowledge the error. 
                     #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
-                    input(textcolor.cyan("Press [ENTER] to continue: "))
+                    _= input(textcolor.cyan("Press [ENTER] to continue: "))
             if self.ErrorWindow != None: self.ErrorWindow.Print(printline,fg=textcolor.RED,bg=textcolor.BLACK) # Error color.
         elif level[0] == 'w':
             if terminal: # We're allowed to display on the terminal.
                 print(textcolor.yellow('WARNING: reported in LogFile: ') + printline)
                 if errorprompt: # User has to acknowledge the warning. 
                     #temp = input(textcolor.cyan("Press [ENTER] to continue: "))
-                    input(textcolor.cyan("Press [ENTER] to continue: "))
+                    _ = input(textcolor.cyan("Press [ENTER] to continue: "))
             if self.ErrorWindow != None and copytowindow: self.ErrorWindow.Print(printline,fg=textcolor.YELLOW,bg=textcolor.BLACK) # Warning color.
         elif terminal: # Display to the terminal. 
             print(printline)

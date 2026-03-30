@@ -823,7 +823,7 @@ class pilomarimage():
     # If parameters are not given, defaults will be used.
     FILTERSCRIPTS = {
         # Examples of available methods.
-        'ExampleThreshold':{ # Example script to perform thresholding on an image. Call this with self.RunFilterScript('ExampleThreshold')
+        'Threshold':{ # Script to perform thresholding on an image. Call this with self.RunFilterScript('Threshold')
             'ThresholdStep':{
                 'method':'threshold',
                 'threshold':100,
@@ -831,63 +831,63 @@ class pilomarimage():
                 'type': cv2.THRESH_BINARY,
                 'comment': 'Use simple binary threshold to detect any pixels > 100 and consider them to be stars.',
                 } # /ThresholdStep
-            }, # /ExampleThreshold
-        'ExampleDehaze':{ # Example script to remove haze from the background of an image. Call this with self.RunFilterScript('ExampleDehaze')
+            }, # /Threshold
+        'Dehaze':{ # Script to remove haze from the background of an image. Call this with self.RunFilterScript('Dehaze')
             'DeHaze': {
                 'method': 'dehaze',
                 'samples': 1,
                 'strength': 100,
                 'comment': 'Remove urban haze from the image background.'
-                } # /ExampleDehaze
+                } # /Dehaze
             },
-        'ExampleBlur':{ # Example script to perform gaussian blurring on the image. Call this with self.RunFilterScript('ExampleBlur')
+        'Blur':{ # Script to perform gaussian blurring on the image. Call this with self.RunFilterScript('Blur')
             'BlurStep':{
                 'method':'gaussianblur',
                 'radius':100,
                 'comment':'Apply Gaussian blur to widen remaining items',
                 } # /BlurStep
-            }, # /ExampleBlur
-        'ExampleGrayscale':{ # Example script to convert an image to grayscale. Call this with self.RunFilterScript('ExampleGrayscale')
+            }, # /Blur
+        'Grayscale':{ # Script to convert an image to grayscale. Call this with self.RunFilterScript('Grayscale')
             'GrayStep':{
                 'method':'grayscale',
                 'comment':'Reduce an image to grayscale.',
                 } # /GrayStep
-            }, # /ExampleGrayscale
-        'ExampleRemoveGradient':{ # Example script to remove gradient from an image. Call this with self.RunFilterScript('ExampleGradient')
+            }, # /Grayscale
+        'RemoveGradient':{ # Script to remove gradient from an image. Call this with self.RunFilterScript('Gradient')
             'GradientStep':{
                 'method':'removegradient',
                 'blur_size':101,
                 'comment':'Remove gradient from image.',
                 } # /GradientStep
-            }, # /ExampleRemoveGradient
-        'ExampleRemoveGradientMorph':{
+            }, # /RemoveGradient
+        'RemoveGradientMorph':{
             'GradientMorphStep':{
                 'method':'removegradient_morph',
                 'kernel_size':75,
                 'comment':'Remove gradient from image.',
                 } # /GradientMorph
-            }, # /ExampleRemoveGradientMorph
-        'ExampleRemoveGradientPolyGray':{
+            }, # /RemoveGradientMorph
+        'RemoveGradientPolyGray':{
             'GradientPolyGrayStep':{
                 'method':'removegradient_polygray',
                 'order':3,
                 'comment':'Remove gradient from grayscale image using polynomials',
                 } # /GradientPolyGrayStep
-            }, # /ExampleRemoveGradientPolyGray
-        'ExampleRemoveGradientPolyColor':{
+            }, # /RemoveGradientPolyGray
+        'RemoveGradientPolyColor':{
             'GradientPolyColorStep':{
                 'method':'removegradient_polycolor',
                 'order':3,
                 'comment':'Remove gradient from color image using polynomials',
                 } # /GradientPolyColorStep
-            }, # /ExampleRemoveGradientPolyColor
-        'ExampleRemoveGradientPolyColorMasked':{
+            }, # /RemoveGradientPolyColor
+        'RemoveGradientPolyColorMasked':{
             'GradientPolyGrayColorMaskedStep':{
                 'method':'removegradient_polycolormasked',
                 'order':3,
                 'comment':'Remove gradient from color image using polynomials and star masking',
                 } # /GradientPolyColorMaskedStep
-            }, # /ExampleRemoveGradientPolyColor
+            }, # /RemoveGradientPolyColor
         # Suggested filters    
         'EnhanceClouds':{ # Enhance clouds in the image.  Call this with self.RunFilterScript('EnhanceClouds')
             'CloudThreshold':{
@@ -898,6 +898,17 @@ class pilomarimage():
                 'comment': 'Use simple binary threshold to detect any pixels > 100 and consider them to be potential clouds.',
                 } # /CloudThreshold
             }, # /CloudDetection
+        'PrepForPlateSolving':{ # Enhance and convert to grayscale.
+            'ClipStep':{
+                'method':'levelshalfclip',
+                'percentile':80, # /LevelsClip
+                'comment': 'Use levels function to eliminate darkest half entirely, stretch rest.',
+                }, #/ ClipStep
+            'GrayStep':{
+                'method':'grayscale',
+                'comment':'Reduce an image to grayscale.',
+                } # /GrayStep
+            }, # /PrepForPlateSolving
         'EnhanceStars':{ # Enhance stars in the image.  Call this with self.RunFilterScript('EnhanceStars')
             'ToGrayscale':{ # Convert to grayscale image.
                 'method':'grayscale',
@@ -922,6 +933,11 @@ class pilomarimage():
                 'comment':'Apply adaptive threshold to boost remaining stars.',
                 } # /BoostStars
             }, # /EnhanceStars
+        'Brightest20':{ # LevelsClip script. Use only the brightest 20% of the pixels to form the image, all others are BLACK.
+            'LevelsClip':{
+                'method':'levelshalfclip',
+                'percentile':80} # /LevelsClip
+            },
         'UrbanFilter':{ # UrbanFilter script. Reduce haze and enhance stars. Call this with self.RunFilterScript('UrbanFilter')
             'ToGrayscale':{ # Convert to grayscale image.
                 'method':'grayscale',
@@ -3067,7 +3083,7 @@ class pilomarimage():
                 self.Save(filename)
         return True
         
-    def FS_Grayscale(self,filterdata):
+    def FS_Grayscale(self,filterdata={'method':'grayscale'}):
         """ Convert buffer to grayscale.
             {'method':'grayscale',
              'comment':''}            """
@@ -3079,7 +3095,7 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
              
-    def FS_Threshold(self,filterdata):
+    def FS_Threshold(self,filterdata={'method':'threshold','threshold':127,'maxval':255,'threshold_type':cv2.THRESH_BINARY}):
         """ Run OpenCV threshold filter on current image buffer using input parameters. 
             filterdata = dictionary of parameters. 
             
@@ -3102,7 +3118,7 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
         
-    def FS_GaussianBlur(self,filterdata):
+    def FS_GaussianBlur(self,filterdata={'method':'gaussianblur','radius':5}):
         """ Run OpenCV gaussianblur filter on current image buffer using input parameters. 
             filterdata = dictionary of parameters. 
             
@@ -3122,7 +3138,7 @@ class pilomarimage():
         self.ModifiedTimestamp = self.NowUTC()
         return True
 
-    def FS_Dehaze(self,filterdata):
+    def FS_Dehaze(self,filterdata={'method':'dehaze','samples':1,'strength':100}):
         """ Remove general haze gradient from an image buffer. 
             filterdata = dictionary of parameters.
             
@@ -3148,14 +3164,13 @@ class pilomarimage():
         return True
 
     # Normalize each channel
-    def NormalizeChannel(self,channel):
+    def NormalizeChannel(self,channel): # channel should be float type for best results.
         channel -= channel.min()
         channel /= channel.max()
         channel *= 255
         return channel.astype(np.uint8)
 
-    #def FS_RemoveGradient(self,image_path, output_path, blur_size=101):
-    def FS_RemoveGradient(self,filterdata):
+    def FS_RemoveGradient(self,filterdata={'method':'removegradient','blur_size':101}):
         """ Based upon AI generated code. 
         
         Large Kernel Gaussian Blur Background Model
@@ -3194,8 +3209,51 @@ class pilomarimage():
 
         return True
 
+    def FS_LevelsHalfClip(self,filterdata={'method':'levelshalfclip','percentile':80}):
+        """
+        Apply the 'darkest half to zero, stretch the rest' transform
+        to each channel of a BGR or RGB uint8 image.
+        img: H x W x 3 uint8 array
+        returns: transformed uint8 image
+        Parameters ----------------------------------------
+        percentile (int) : The clip percentile. Pixels below this percentile brightness are set to ZERO.
+                           Pixels above this percentile are stretched across the 0-255 range.
+        """
+
+        percentile = filterdata.get('percentile',80) # Everything below this percentile is '0'.
+        comment = filterdata.get('comment','') # Get any associated comment, default ''.
+        if comment != '': self.Log("pilomarimage",self.Name,".FS_LevelsHalfClip: Comment:",comment,terminal=False)
+        self.Log("pilomarimage",self.Name,".FS_LevelsHalfClip(",percentile,")",terminal=False)
+
+        # Work in float for safe math
+        imgf = self.ImageBuffer.astype(np.float32)
+
+        # Compute the Nth percentile per channel (shape: (3,))
+        thresh = np.percentile(imgf, percentile, axis=(0, 1))
+
+        # Clip everything below threshold
+        clipped = np.maximum(imgf, thresh)
+
+        # Subtract threshold per channel
+        clipped -= thresh
+
+        # Compute max per channel (shape: (3,))
+        maxv = clipped.max(axis=(0, 1))
+
+        # Avoid divide-by-zero
+        scale = np.where(maxv > 0, 255.0 / maxv, 0)
+
+        # Apply scaling per channel
+        clipped *= scale
+
+        self.ImageBuffer = clipped.astype(np.uint8)
+        self.ActionList.append(['FS_LevelsHalfClip'])
+        self.ModifiedTimestamp = self.NowUTC()
+
+        return True
+
     #def FS_RemoveGradientMorph(self,image_path, output_path, kernel_size=75):
-    def FS_RemoveGradientMorph(self,filterdata):
+    def FS_RemoveGradientMorph(self,filterdata={'method':'removegradient_morph','kernel_size':75}):
         """ Based upon AI generated code. 
         
         Morphological Opening (Improved Star Masking)
@@ -3249,7 +3307,7 @@ class pilomarimage():
         background = np.dot(X, coeffs).reshape(h, w)
         return background
 
-    def FS_RemoveGradientPolyGray(self,filterdata):
+    def FS_RemoveGradientPolyGray(self,filterdata={'method':'removegradient_polygray','order':3}):
         """ Based upon AI generated code. 
         
         Polynomial Surface Fitting
@@ -3302,7 +3360,7 @@ class pilomarimage():
         return background
 
     #def FS_RemoveGradientPolyColor(self,image_path, output_path, order=3):
-    def FS_RemoveGradientPolyColor(self,filterdata):
+    def FS_RemoveGradientPolyColor(self,filterdata={'method':'removegradient_polycolor','order':3}):
         """
         Remove background gradient from a color image using polynomial fitting.
         
@@ -3404,7 +3462,7 @@ class pilomarimage():
         return background
 
     #def FS_RemoveGradientPolyColorMasked(self,image_path, output_path, order=3):
-    def FS_RemoveGradientPolyColorMasked(self,filterdata):
+    def FS_RemoveGradientPolyColorMasked(self,filterdata={'method':'removegradient_polycolormasked','order':3}):
         """ Based upon AI generated code. 
         
         Remove background gradient from a color image using star-masked polynomial fitting.
@@ -3465,101 +3523,100 @@ class pilomarimage():
 
         return True
 
-    def StepThruFilterScript(self,scriptname,outputdir,window=None):
-        """ Given a script name, apply the filters and parameters defined in the script.
-            This applies each filter in turn and saves intermediate images after each one.
-            This is for development purposes.
-            filterrules is a dictionary
-            scriptname = name of filter script to run.
-            outputdir = Location of intermediate output files. Usually a temp directory.
-            window = Optional textcolor colordisplay window to report to. 
-            
-            A filter script looks like this...
-            
-        'UrbanFilter':{ # Name of the script
-            'ToGrayscale':{ # Name of the 'step'.
-                'method':'grayscale', # Method to apply
-                }, # /ToGrayscale
-            'DeHaze':{ # Name of the next 'step'
-                'method':'dehaze', # Method to apply.
-                'samples':1, # Specific parameters.
-                'strength':100,
-                'comment': # Documentation comment.
-                }, # /DeHaze
-            'BlurStars':{ # Use blur to enlarge remaining stars.
-                'method':'gaussianblur',
-                'radius':2,
-                'comment':'Apply Gaussian blur to widen remaining items',
-                }, # /BlurStars
-            'BoostStars':{ # Enhance remaining stars.
-                'method':'threshold',
-                'threshold':16,
-                'maxval':255,
-                'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-                'comment':'Apply adaptive threshold to boost remaining stars.',
-                } # /BoostStars
-            } # /UrbanFilter
-            
-            """
-        self.Log("pilomarimage",self.Name,".StepThruFilterScript()",terminal=False)
-        if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
-        if not type(scriptname) == str: # Nothing useful set.
-            self.Log("StepThruFilterScript(): No valid script name.",terminal=False)
-            print("StepThruFilterScript(): No valid script name.")
-            return False 
-        if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
-            self.Log("StepThruFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
-            print("StepThruFilterScript(",scriptname,"). Script does not exist.")
-            return False
-        filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
-            
-        filtercount = 0
+    def RunFilterMethod(self,filterdata,window=None):
+        """
+        Run an individual filter method on the current image buffer.
+        """
+        filtermethod = filterdata.get('method',None)
+        if hasattr(window,'Print'): window.Print("Running filter",filtermethod) # Can report progress to a display window.
         result = True
-        
-        for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
-            filtercount += 1 # Increment count.
-            self.Log("pilomarimage.StepThruFilterScript(",scriptname,"): Running",filtercount,entryname,"...",terminal=True) # Report the name of the filter
-            temp = json.dumps(filterdata,default=str,indent=2).split('\n') # Show all the parameters for this step in the filter script.
-            for line in temp:
-                print(line)
-            # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
-            filtermethod = filterdata.get('method',None)
-            if hasattr(window,'Print'): window.Print("Running",entryname,"filter (",filtermethod,").") # Can report progress to a display window.
-            result = True
-            if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
-            elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
-            elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
-            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
-            elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
-            elif filtermethod == 'removegradient': result = self.FS_RemoveGradient(filterdata) # Apply a FS_RemoveGradient filter.
-            elif filtermethod == 'removegradient_morph': result = self.FS_RemoveGradientMorph(filterdata) # Apply a FS_RemoveGradientMorph filter.
-            elif filtermethod == 'removegradient_polygray': result = self.FS_RemoveGradientPolyGray(filterdata) # Apply a FS_RemoveGradientPoly filter.
-            elif filtermethod == 'removegradient_polycolor': result = self.FS_RemoveGradientPolyColor(filterdata) # Apply a FS_RemoveGradientPolyColor filter.
-            elif filtermethod == 'removegradient_polycolormasked': result = self.FS_RemoveGradientPolyColorMasked(filterdata) # Apply a FS_RemoveGradientPolyColorMasked filter.
-            else: # Filter method is not recognised.
-                self.Log("pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
-                print("**ERROR** pilomarimage.StepThruFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
-                result = False
-            if not result: break # Failure.
-            # Save image after each step.
-            intermediate_name = outputdir + "/StepThruFilterScript_" + str(filtercount).rjust(3,"0") + ".jpg"
-            self.SaveFile(intermediate_name)
-            if hasattr(window,'Print'): window.Print("Saving intermediate",intermediate_name.split("/")[-1])
-            self.Log("pilomarimage.StepThruFilterScript: Step",filtercount,"result saved as",intermediate_name,terminal=True)
-        if result:
-            self.Log("The script '" + scriptname + "' completed.",terminal=True)
-        else:
-            self.Log("pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.",level='warning')
-            print("WARNING: pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.")
-            if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
+        if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
+        elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
+        elif filtermethod in ['grayscale','greyscale']: result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
+        elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
+        elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
+        elif filtermethod == 'removegradient': result = self.FS_RemoveGradient(filterdata) # Apply a FS_RemoveGradient filter.
+        elif filtermethod == 'removegradient_morph': result = self.FS_RemoveGradientMorph(filterdata) # Apply a FS_RemoveGradientMorph filter.
+        elif filtermethod == 'removegradient_polygray': result = self.FS_RemoveGradientPolyGray(filterdata) # Apply a FS_RemoveGradientPoly filter.
+        elif filtermethod == 'removegradient_polycolor': result = self.FS_RemoveGradientPolyColor(filterdata) # Apply a FS_RemoveGradientPolyColor filter.
+        elif filtermethod == 'removegradient_polycolormasked': result = self.FS_RemoveGradientPolyColorMasked(filterdata) # Apply a FS_RemoveGradientPolyColorMasked filter.
+        elif filtermethod == 'levelshalfclip': result = self.FS_LevelsHalfClip(filterdata) # Apply a FS_LevelsHalfClip filter.
+        else: # Filter method is not recognised.
+            self.Log("pilomarimage.RunFilterMethod(",filtercount,") filtermethod",filtermethod,"does not exist.",level='error')
+            print("**ERROR** pilomarimage.RunFilterMethod(",filtercount,") filtermethod",filtermethod,"does not exist.")
+            result = False
         return result
 
+    def ValidScriptName(self,scriptname):
+        """
+        Return TRUE if a script name is recognised, else False.
+        """
+        if scriptname in pilomarimage.FILTERSCRIPTS: return True
+        else: return False
+            
+    def ListFilterScripts(self):
+        """
+        Print recognised filter script names.
+        """
+        print("Recognised filter scripts are:")
+        for key in pilomarimage.FILTERSCRIPTS.keys():
+            print("-",key)
 
-    def RunFilterScript(self,scriptname,window=None):
-        """ Given a script name, apply the filters and parameters defined in the script.
-            filterrules is a dictionary
-            scriptname = name of filter script to run.
-            window = Optional textcolor colordisplay window to report to. """
+    def SaveScriptSource(self,filename):
+        """
+        Write filter scripts to disc as separate JSON file.
+        These can be used as a basis for custom script files that some pilomar utilities accept.
+        """
+        with open(filename,"w") as f:
+            json.dump(pilomarimage.FILTERSCRIPTS,f,indent=4)
+        return True
+    
+    def SetScriptSource(self,script_source):
+        """
+        Set the script source for filter scripts.
+        Sets at pilomarimage level, because all instances refer to that.
+        """
+        with open(script_source,'r') as f:
+            pilomarimage.FILTERSCRIPTS = json.load(f)
+        return True
+
+    def RunFilterScript(self,scriptname,outputdir=None,window=None,debug=False):
+        """ 
+        Given a script name, apply the filters and parameters defined in the script.
+        This applies each filter in turn and saves intermediate images after each one.
+        filterrules is a dictionary
+        scriptname = name of filter script to run.
+        outputdir = Location of intermediate output files. Usually a temp directory.
+        window = Optional textcolor colordisplay window to report to. 
+        debug (bool) = True for intermediate file save and messages to screen.
+        
+        A filter script looks like this...
+        
+            'UrbanFilter':{ # Name of the script
+                'ToGrayscale':{ # Name of the 'step'.
+                    'method':'grayscale', # Method to apply
+                    }, # /ToGrayscale
+                'DeHaze':{ # Name of the next 'step'
+                    'method':'dehaze', # Method to apply.
+                    'samples':1, # Specific parameters.
+                    'strength':100,
+                    'comment': # Documentation comment.
+                    }, # /DeHaze
+                'BlurStars':{ # Use blur to enlarge remaining stars.
+                    'method':'gaussianblur',
+                    'radius':2,
+                    'comment':'Apply Gaussian blur to widen remaining items',
+                    }, # /BlurStars
+                'BoostStars':{ # Enhance remaining stars.
+                    'method':'threshold',
+                    'threshold':16,
+                    'maxval':255,
+                    'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                    'comment':'Apply adaptive threshold to boost remaining stars.',
+                    } # /BoostStars
+                } # /UrbanFilter
+            
+        """
         self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
         if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
         if not type(scriptname) == str: # Nothing useful set.
@@ -3576,49 +3633,160 @@ class pilomarimage():
         result = True
         
         for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
-            self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running filter...",terminal=False) # Report the name of the filter
-            # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
-            filtermethod = filterdata['method']
-            if hasattr(window,'Print'): window.Print("Running",entryname,"filter (",filtermethod,").") # Can report progress to a display window.
-            result = True
-            if filtermethod == 'dehaze': result = self.FS_Dehaze(filterdata) # Remove haze from the image.
-            elif filtermethod == 'gaussianblur': result = self.FS_GaussianBlur(filterdata) # Apply a Gaussian blur filter.
-            elif filtermethod == 'grayscale': result = self.FS_Grayscale(filterdata) # Convert image to grayscale.
-            elif filtermethod == 'save': result = self.FS_Save(filterdata) # Save a copy of the file in its current state.
-            elif filtermethod == 'threshold': result = self.FS_Threshold(filterdata) # Apply a threshold filter.
-            else: # Filter method is not recognised.
-                self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.",level='error')
-                print("**ERROR** pilomarimage.RunFilterScript(",filtercount,entryname,") filtermethod",filtermethod,"does not exist.")
-                result = False
-            if not result: break # Failure.
             filtercount += 1 # Increment count.
-        if not result:
-            self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
+            self.Log("pilomarimage.RunFilterScript(",scriptname,"): Running",filtercount,entryname,"...",terminal=debug) # Report the name of the filter
+            if debug:
+                temp = json.dumps(filterdata,default=str,indent=2).split('\n') # Show all the parameters for this step in the filter script.
+                for line in temp:
+                    print(line)
+            # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
+            result = self.RunFilterMethod(filterdata,window=window)
+            if not result: break # Failure.
+            # Save image after each step.
+            if debug:
+                intermediate_name = outputdir + "/StepThruFilterScript_" + str(filtercount).rjust(3,"0") + ".jpg"
+                self.SaveFile(intermediate_name)
+                if hasattr(window,'Print'): window.Print("Saving intermediate",intermediate_name.split("/")[-1])
+                self.Log("pilomarimage.RunFilterScript(): Step",filtercount,"result saved as",intermediate_name,terminal=debug)
+        if result:
+            self.Log("pilomarimage.RunFilterScript(",scriptname,"): completed.",terminal=debug)
+        else:
+            self.Log("pilomarimage.RunFilterScript(",scriptname,") failed.",level='warning')
             print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
             if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
         return result
 
-    def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255,strength=100):
-        """ Primitive 'urban skies' filter. 
-            This is used for star drift tracking. 
-            A live image is cleaned to remove common urban haze before enhancing the remaining stars. 
-            band = Blurring factor. '1' is the highest blurring. 
-            blurradius, cloudthresh, starthresh, maxval are all values for the EnhanceStars() method. 
-            strength is the percentage strength of the haze filter. 
-            0 = No haze reduction.
-            50 = 50% haze reduction.
-            100 = Full haze reduction. """
-        self.Log("pilomarimage",self.Name,".UrbanFilter(): band",band,
-                 "blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,
-                 "maxval",maxval,"strength",strength,terminal=False)
-        buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
-        buffer = self.HorizontalBlurBuffer(buffer,band=band) # Horizontally blur the buffer.
-        if strength > 0: # There needs to be some effect.
-            if strength != 100: # Multiply all the channels appropriately.
-                buffer = self.PercentageBuffer(buffer,strength) # Reduce the strength of the buffer.
-            self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
-        self.EnhanceStars(blurradius=blurradius,cloudthresh=cloudthresh,starthresh=starthresh,maxval=maxval) # Enhance the stars that remain.
-        return True
+    #def StepThruFilterScript_xxx(self,scriptname,outputdir,window=None,debug=False):
+    #    """ Given a script name, apply the filters and parameters defined in the script.
+    #        This applies each filter in turn and saves intermediate images after each one.
+    #        This is for development purposes.
+    #        filterrules is a dictionary
+    #        scriptname = name of filter script to run.
+    #        outputdir = Location of intermediate output files. Usually a temp directory.
+    #        window = Optional textcolor colordisplay window to report to. 
+    #        debug (bool) = True for intermediate file save and messages to screen.
+    #        
+    #        A filter script looks like this...
+    #        
+    #    'UrbanFilter':{ # Name of the script
+    #        'ToGrayscale':{ # Name of the 'step'.
+    #            'method':'grayscale', # Method to apply
+    #            }, # /ToGrayscale
+    #        'DeHaze':{ # Name of the next 'step'
+    #            'method':'dehaze', # Method to apply.
+    #            'samples':1, # Specific parameters.
+    #            'strength':100,
+    #            'comment': # Documentation comment.
+    #            }, # /DeHaze
+    #        'BlurStars':{ # Use blur to enlarge remaining stars.
+    #            'method':'gaussianblur',
+    #            'radius':2,
+    #            'comment':'Apply Gaussian blur to widen remaining items',
+    #            }, # /BlurStars
+    #        'BoostStars':{ # Enhance remaining stars.
+    #            'method':'threshold',
+    #            'threshold':16,
+    #            'maxval':255,
+    #            'type': cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    #            'comment':'Apply adaptive threshold to boost remaining stars.',
+    #            } # /BoostStars
+    #        } # /UrbanFilter
+    #        
+    #        """
+    #    self.Log("pilomarimage",self.Name,".StepThruFilterScript()",terminal=False)
+    #    if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
+    #    if not type(scriptname) == str: # Nothing useful set.
+    #        self.Log("StepThruFilterScript(): No valid script name.",terminal=False)
+    #        print("StepThruFilterScript(): No valid script name.")
+    #        return False 
+    #    if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
+    #        self.Log("StepThruFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
+    #        print("StepThruFilterScript(",scriptname,"). Script does not exist.")
+    #        return False
+    #    filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
+    #        
+    #    filtercount = 0
+    #    result = True
+    #    
+    #    for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
+    #        filtercount += 1 # Increment count.
+    #        self.Log("pilomarimage.StepThruFilterScript(",scriptname,"): Running",filtercount,entryname,"...",terminal=debug) # Report the name of the filter
+    #        temp = json.dumps(filterdata,default=str,indent=2).split('\n') # Show all the parameters for this step in the filter script.
+    #        for line in temp:
+    #            print(line)
+    #        # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
+    #        result = self.RunFilterMethod(filterdata)
+    #        if not result: break # Failure.
+    #        # Save image after each step.
+    #        if debug:
+    #            intermediate_name = outputdir + "/StepThruFilterScript_" + str(filtercount).rjust(3,"0") + ".jpg"
+    #            self.SaveFile(intermediate_name)
+    #            if hasattr(window,'Print'): window.Print("Saving intermediate",intermediate_name.split("/")[-1])
+    #            self.Log("pilomarimage.StepThruFilterScript: Step",filtercount,"result saved as",intermediate_name,terminal=debug)
+    #    if result:
+    #        self.Log("The script '" + scriptname + "' completed.",terminal=debug)
+    #    else:
+    #        self.Log("pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.",level='warning')
+    #        print("WARNING: pilomarimage.StepThruFilterScript(",scriptname,") did not complete successfully.")
+    #        if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
+    #    return result
+    #
+    #def RunFilterScript_xxx(self,scriptname,outputdir=None,window=None,debug=False):
+    #    """ Given a script name, apply the filters and parameters defined in the script.
+    #        filterrules is a dictionary
+    #        scriptname = name of filter script to run.
+    #        outputdir (str) = Optional directory for intermediate output files if in debug mode.
+    #        window = Optional textcolor colordisplay window to report to. 
+    #        debug (bool) = True - intermediate files saved and messages to terminal. """
+    #    self.Log("pilomarimage",self.Name,".RunFilterScript()",terminal=False)
+    #    if hasattr(window,'Print'): window.Print("Applying",scriptname,"script.") # Can report progress to a display window.
+    #    if not type(scriptname) == str: # Nothing useful set.
+    #        self.Log("RunFilterScript(): No valid script name.",terminal=False)
+    #        print("RunFilterScript(): No valid script name.")
+    #        return False 
+    #    if not scriptname in pilomarimage.FILTERSCRIPTS: # Script doesn't exist.
+    #        self.Log("RunFilterScript(",scriptname,"). Script does not exist.",terminal=False)        
+    #        print("RunFilterScript(",scriptname,"). Script does not exist.")
+    #        return False
+    #    filterscript = pilomarimage.FILTERSCRIPTS[scriptname]
+    #        
+    #    filtercount = 0
+    #    result = True
+    #    
+    #    for entryname,filterdata in filterscript.items(): # Go through each set of filters in turn.
+    #        self.Log("pilomarimage.RunFilterScript(",filtercount,entryname,") Running filter...",terminal=False) # Report the name of the filter
+    #        # Each 'item' should be a sub-dictionary of a filter and its parameters to apply to the current image.
+    #        result = self.RunFilterMethod(filterdata)
+    #        if not result: break # Failure.
+    #        filtercount += 1 # Increment count.
+    #    if not result:
+    #        self.Log("pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.",level='warning')
+    #        print("WARNING: pilomarimage.RunFilterScript(",scriptname,") did not complete successfully.")
+    #        if hasattr(window,'Print'): window.Print("Filter script failed.") # Can report progress to a display window.
+    #    return result
+
+    # Replaced with conventional script solution now.
+    #def UrbanFilter(self,band=1,blurradius=2,cloudthresh=50,starthresh=16,maxval=255,strength=100):
+    #    """ Primitive 'urban skies' filter. 
+    #        This is used for star drift tracking. 
+    #        A live image is cleaned to remove common urban haze before enhancing the remaining stars. 
+    #        band = Blurring factor. '1' is the highest blurring. 
+    #        blurradius, cloudthresh, starthresh, maxval are all values for the EnhanceStars() method. 
+    #        strength is the percentage strength of the haze filter. 
+    #        0 = No haze reduction.
+    #        50 = 50% haze reduction.
+    #        100 = Full haze reduction. """
+    #    self.Log("pilomarimage",self.Name,".UrbanFilter(): band",band,
+    #             "blurradius",blurradius,"cloudthresh",cloudthresh,"starthresh",starthresh,
+    #             "maxval",maxval,"strength",strength,terminal=False)
+    #    buffer = self.ImageBuffer.copy() # Copy the image buffer, we will blur this copy.
+    #    buffer = self.HorizontalBlurBuffer(buffer,band=band) # Horizontally blur the buffer.
+    #    if strength > 0: # There needs to be some effect.
+    #        if strength != 100: # Multiply all the channels appropriately.
+    #            buffer = self.PercentageBuffer(buffer,strength) # Reduce the strength of the buffer.
+    #        self.SubtractBuffer(buffer) # Subtract the blurred buffer from the master image buffer.
+    #    self.EnhanceStars(blurradius=blurradius,cloudthresh=cloudthresh,starthresh=starthresh,maxval=maxval) # Enhance the stars that remain.
+    #    return True
         
     def HSV2BGR(self,hue,sat,val):
         """ Convert 3 separate Hue,Saturation,Value values into Blue,Green,Red. """
@@ -3903,6 +4071,62 @@ class pilomarimage():
         else: # Multiple channel colors return a tuple.
             newcolor = tuple(newcol)
         return newcolor
+        
+    def DrawVector(self,startcoord,length,angle=0,zero=(0,1),anticlockwise=False,color=None,thickness=None,arrowpixels=None):
+        """
+        Use opencv linedrawing.
+            startcoord (tuple) = (x,y)
+            length (float)
+            angle (float) 
+            zero (tuple) = zero degree position (0,1) = +ve y axis. (straight up from start point)
+                                                (1,0) = +ve x axis. (right from start point)
+                                                (0,-1) = -ve y axis. (straight down from start point)
+                                                (-1,0) = -ve x axis. (left from start point)
+            anticlockwise (bool) : True : rotate anticlockwise.
+                                   False: rotate clockwise
+            color 
+            thickness 
+            arrowpixels
+            Respects 'InvertHeight' attribude.
+        """
+        startx, starty = startcoord
+        zeroradians = math.atan2(zero[1],zero[0]) # Which direction is the 'zero angle'?
+        if anticlockwise: direction = -1 # Which way round are we rotating?
+        else: direction = 1
+        radians = zeroradians + (math.radians(angle) * direction)
+        endx = length * math.cos(radians) + startx
+        endy = length * math.sin(radians) + starty
+        self.DrawLine(startcoord=startcoord,endcoord=(endx,endy),color=color,thickness=thickness,arrowpixels=arrowpixels)
+        return True
+        
+    def DrawEdgeVector(self,startcoord,length,angle=0,zero=(0,1),anticlockwise=False,color=None,edgecolor=None,thickness=None,edgethickness=1,arrowpixels=None):
+        """
+        Use opencv linedrawing.
+            startcoord (tuple) = (x,y)
+            length (float)
+            angle (float) 
+            zero (tuple) = zero degree position (0,1) = +ve y axis. (straight up from start point)
+                                                (1,0) = +ve x axis. (right from start point)
+                                                (0,-1) = -ve y axis. (straight down from start point)
+                                                (-1,0) = -ve x axis. (left from start point)
+            anticlockwise (bool) : True : rotate anticlockwise.
+                                   False: rotate clockwise
+            color 
+            edgecolor
+            thickness
+            edgethickness            
+            arrowpixels
+            Respects 'InvertHeight' attribude.
+        """
+        startx, starty = startcoord
+        zeroradians = math.atan2(zero[1],zero[0]) # Which direction is the 'zero angle'?
+        if anticlockwise: direction = -1 # Which way round are we rotating?
+        else: direction = 1
+        radians = zeroradians + (math.radians(angle) * direction)
+        endx = int(length * math.cos(radians) + startx)
+        endy = int(length * math.sin(radians) + starty)
+        self.DrawEdgeLine(startcoord=startcoord,endcoord=(endx,endy),color=color,thickness=thickness,arrowpixels=arrowpixels)
+        return True
         
     def DrawLine(self,startcoord,endcoord,color=None,thickness=None,arrowpixels=None):
         """ Use opencv linedrawing. 
@@ -4728,8 +4952,8 @@ class pilomarimage():
 
             You can add crosshair styles to combine them. """
         if self.ImageMissing(): print('pilomarimage',self.Name,'.DrawEdgeCrosshairs: No image in the buffer.')
-        self.DrawCrosshairs(self,x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=edgecolor,thickness=edgethickness,arrowpixels=arroxpixels) # Draw edge first.
-        self.DrawCrosshairs(self,x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=color,thickness=thickness,arrowpixels=arroxpixels) # Draw inner second.
+        self.DrawCrosshairs(x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=edgecolor,thickness=edgethickness,arrowpixels=arrowpixels) # Draw edge first.
+        self.DrawCrosshairs(x,y,radius,style,outerradius,spoke_count=spoke_count,spoke_angle=spoke_angle,color=color,thickness=thickness,arrowpixels=arrowpixels) # Draw inner second.
         return False
         
     def DrawDumbbell(self,drawfrom,drawto,rad,fromcolor,tocolor,linecolor,arrow,thickness=None):
@@ -4897,16 +5121,6 @@ class pilomarkeogram():
 
     def BuildImageBuffer(self):
         """ """
-        #print("pilomarkeogram.BuildImageBuffer(): KeogramPixels type:",type(self.KeogramPixels))
-        #try:
-        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels len:",len(self.KeogramPixels))
-        #except:
-        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels len: NOT AVAILABLE")
-        #try:
-        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels dtype:",self.KeogramPixels.dtype)
-        #except:
-        #    print("pilomarkeogram.BuildImageBuffer(): KeogramPixels dtype: NOT AVAILABLE")
-        #print("pilomarkeogram.BuildImageBuffer():",self.Width,self.Height,cv2.INTER_AREA)
         writebuffer = cv2.resize(self.KeogramPixels.astype(np.uint8),(self.Width,self.Height),interpolation=cv2.INTER_AREA)
         self.Keogram.LoadBuffer(writebuffer)
 
