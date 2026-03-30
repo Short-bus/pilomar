@@ -15,6 +15,13 @@ PCB designs --------------------------------------------------------------------
 
 PCB-2023-12-14 
   This is the initial PCB design for the motorcontrol board.
+  Microcontroller: Pimoroni Tiny2040 and Tiny2350
+  Stepper driver: DRV8815
+
+PCB-2025-12-15
+  This is the V3.1.1 version of the motorcontrol board.
+  Microcontroller: Raspberry Pi Pico 2 (NOT PICO 1)
+  Stepper driver: TMC2209 (Recommend Big Tree Tech V1.3)
 
 Manufacturing settings -----------------------------------------------------------------------------------------------------
 
