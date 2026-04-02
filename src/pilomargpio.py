@@ -5,6 +5,10 @@
 # - Different classes can be built to handle different GPIO handlers, 
 #   but all should present the same interface to the calling programs.
 
+# Mar.2026: GPIOD library has changed between BOOKWORM and TRIXIE.
+#           A temporary 'shim' has been added to maintain compatibility between the two versions.
+#           This is pending a rewrite of the GPIO handlers for both BOOKWORM and TRIXIE.
+
 # This software is published under the GNU General Public License v3.0.
 # Also respect any pre-existing terms of any components that this incorporates.
 
@@ -18,8 +22,8 @@
 
 class gpio_opt():
     """ Constants. """
-    GPIO_DRIVER = 'GPIO'
-    GPIOD_DRIVER = 'GPIOD'
+    GPIO_DRIVER = 'GPIO' # Buster
+    GPIOD_DRIVER = 'GPIOD' # Bookworm
 
 GPIO_DRIVER = None
 try:
@@ -27,23 +31,32 @@ try:
     GPIO.setmode(GPIO.BCM)
     GPIO_DRIVER = gpio_opt.GPIO_DRIVER # "GPIO"
 except: # No support for RPi.GPIO detected.
-    pass
-
-try:
-    import gpiod # Handling IO signals. If available.
-    GPIO_DRIVER = gpio_opt.GPIOD_DRIVER # "GPIOD"
-except: # No support for GPIOD detected.
-    pass
-
+    try:
+        import gpiod # Handling IO signals. If available.
+        #import compat_gpiod as gpiod # This is a compatibility wrapper for GPIOD while this code transitions from V1 to V2 GPIOD
+        _ = hasattr(chip, "get_line") # If on Trixie the bindings are broken for GPIOD so we need a different solution.
+        GPIO_DRIVER = gpio_opt.GPIOD_DRIVER # "GPIOD"
+    except: # No support for GPIOD detected.
+        try:
+            import gpiod_trixie as gpiod # Shim to simulate GPIOD via LIBGPIOD. Original GPIOD bindings are broken in Trixie. 
+            GPIO_DRIVER = gpio_opt.GPIOD_DRIVER # "GPIOD"
+        except: # No support for GPIOD detected.
+            pass
+    
 if GPIO_DRIVER == gpio_opt.GPIOD_DRIVER: # 'GPIOD': # Select the GPIO handling chip.
     success = False
-    chip_list = ['gpiochip4','gpiochip0','/dev/gpiochip4','/dev/gpiochip0']
+    chip_list = ['gpiochip4','gpiochip0','/dev/gpiochip0']
+                 # gpiochip4 early BOOKWORM
+                 # gpiochip0 late BOOKWORM
+                 # /dev/gpiochip0 TRIXIE
     for chip in chip_list:
         try:
-            GPIOchip = gpiod.Chip('/dev/gpiochip4') # In very early RPi5 Bookworm builds the GPIO chip is 'gpiochip4'.
+            GPIOchip = gpiod.Chip(chip)
             success = True
+            print("Selected GPIOD chip:",chip)
             break
-        except:
+        except Exception as e:
+            print(str(e))
             print("Rejected GPIOD chip:",chip,"Trying another")
     if not success:
         print("GPIOD: Unable to select a valid chip from",chip_list)
@@ -277,7 +290,7 @@ class inputpin_gpiod():
         """
     InputPins = [] # List of all defined input pins.
     __library__ = 'GPIOD' # Which GPIO library does this support?
-    __version__ = '0.1.1' # What version of the library is this?
+    __version__ = '0.2.0' # What version of the library is this?
     
     def __init__(self,pinbcm,name=None,pull='up',enabled=True,invert=False):
         """ Define a GPIO input pin.
@@ -300,6 +313,7 @@ class inputpin_gpiod():
             it behaves as a GPIO input, but doesn't actually link to a GPIO port and always returns the PULL UP/DOWN value. """
         self.Pin = pinbcm # The BCM number of the pin.
         self.Name = name # A reference name of the pin.
+        #print("GPIOCHIP:",dir(GPIOchip))
         self.Line = GPIOchip.get_line(pinbcm) # Grab the IO line for this input.
         self.Pull = pull # Is this a PULL_UP or PULL_DOWN input.
         self.Invert = invert # IsOn/IsOff methods invert their value. IsHigh/IsLow remain unchanged.
@@ -403,7 +417,7 @@ class outputpin_gpiod():
 
     OutputPins = [] # List of defined pins. 
     __library__ = 'GPIOD' # Which GPIO library does this support?
-    __version__ = '0.1.1' # What version of the library is this?
+    __version__ = '0.2.0' # What version of the library is this?
     
     @staticmethod
     def ReleaseAll():
