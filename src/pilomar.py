@@ -106,7 +106,7 @@
 # - MAJOR = Breaking change. Not fully compatible with previous versions. Usually requires RPI and MICROCONTROLLER updates together.
 # - MINOR = New features but backwards compatible. Usually allows RPI or MICROCONTROLLER to be updated independently.
 # - MICRO = Development/bugfix releases.
-VERSION = '1.3.0' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
+VERSION = '1.3.1' # Shared with microcontroller. # Make sure the microcontroller accepts any new version number.
 
 import sys # For version verification.
 
@@ -1325,7 +1325,7 @@ class hardware(attributemaster):
         """
         self.Session.Log("hardware.LogHardware(): Hardware detected:",terminal=False)
         self.Session.Log("hardware.LogHardware(): USB PROTECT:",self.usb_protect_flag_pin,self.pcb_protect_usb,terminal=False)
-        self.Session.Log("hardware.LogHardware(): MCTL FAMILT:",self.tiny_flag_pin,self.pcb_mctl_family,terminal=False)
+        self.Session.Log("hardware.LogHardware(): MCTL FAMILY:",self.tiny_flag_pin,self.pcb_mctl_family,terminal=False)
         self.Session.Log("hardware.LogHardware(): MOTOR DRIVER:",self.tmc2209_flag_pin,self.pcb_driver,terminal=False)
         self.Session.Log("hardware.LogHardware(): PCB revision:",self.pcb_revision,terminal=False)     
         self.Session.Log("hardware.LogHardware(): rpi_model",self.rpi_model,terminal=False)
@@ -5189,7 +5189,50 @@ class microcontroller(attributemaster):
         if not self.OpenPort(newport): # Open the newly chosen port. 
             self.Session.Log("microcontroller.NextPort(): OpenPort(",newport,") failed.",level='error',terminal=True)
         self.Session.Log("microcontroller.NextPort() End.",terminal=False)
-        
+
+    def FindPort(self,default=None):
+        """
+        Search the available ports looking for an active one.
+        """
+        self.Session.Log("microcontroller.FindPort(",default,"): Begin",terminal=False)
+        port_list = self.GetSerialPorts() # Get list of available serial ports.
+        timeout_seconds = 30
+        lines = ["The following ports are recognised",
+                 str(port_list),
+                 " ",
+                 "I will try each port in turn for " + str(timeout_seconds) + "seconds listening for messages.",
+                 "The first port to receive a valid message from the microcontroller",
+                 "will be selected as the default port for the RPi."]
+        textcolor.TextBox(lines,fg=textcolor.YELLOW,bg=textcolor.BLACK)
+        if default != None or default in port_list: pass
+        else: port_list.insert(0,default) # Start with the default if provided.
+        chosen_port = default
+        success = False
+        for active_port in port_list:
+            self.ClosePort() # Shut previous port.
+            self.OpenPort(active_port) # Open this port.
+            activity_timer = timer(timeout_seconds,skip=True) # Wait up to 30 seconds for activity.
+            self.Session.Log("Trying",active_port,"...",terminal=True)
+            print("")
+            prev_lines_received = int(self.LinesReceived) # total number of lines received from the microcontroller.
+            prev_bytes_received = int(self.BytesReceived) # Byte count from microcontroller.
+            prev_rxerrors = int(self.RxErrors) # How many receive errors?
+            while not activity_timer.Due(): # Wait until time limit or activity.
+                delta_lines = self.LinesReceived - prev_lines_received
+                delta_bytes = self.BytesReceived - prev_bytes_received
+                delta_rxerrors = self.RxErrors - prev_rxerrors
+                print(textcolor.cursorup(),active_port,str(int(activity_timer.Remaining())),"s. Received",delta_bytes,"bytes,",delta_lines,"lines,",delta_rxerrors,"errors.",textcolor.clearlineforward())
+                if delta_lines > 0: # More than just noise.
+                    self.Session.Log("Received",delta_bytes,"bytes,",delta_lines,"lines. Choosing",active_port,terminal=True)
+                    success = True
+                    chosen_port = active_port
+                    break
+                time.sleep(0.5)
+            print("")
+            if success: break
+        self.Session.Log("microcontroller.FindPort(",default,"): Result",success,chosen_port,terminal=False)
+        return success,chosen_port
+
     def NewSession(self):
         """ Reset counters and flags for new session on microcontroller. 
             
@@ -20054,10 +20097,19 @@ CameraMenuOptions = {
 
 CameraMenu = proceduremenu(CameraMenuOptions,'Camera tools menu',titlefg=MENU_TITLE_FG,titlebg=MENU_TITLE_BG)
 
+def FindSerialPort():
+    success, chosen_port = Mctl.FindPort(Mctl.Port)
+    if success:
+        MainLog.Log("UARTOverride set to",chosen_port,terminal=True)
+        Parameters.UARTOverride = chosen_port
+    else:
+        MainLog.Log("No port selected. UARTOverride left unchanged at",Parameters.UARTOverride,terminal=True)
+    
 MctlMenuOptions = {
     'MicrocontrollerStatus':   {'label':'About motorcontroller',           'call':MicrocontrollerStatus},
     'RestartMicrocontroller':  {'label':'Restart microcontroller',         'call':RestartMicrocontroller},
     'ListSerialPorts':         {'label':'List serial ports',               'call':Mctl.MenuListSerialPorts},
+    'FindSerialPort':          {'label':'Find serial port',                'call':FindSerialPort},
     'MenuNextPort':            {'label':'Try next serial port',            'call':Mctl.MenuNextPort},
     'SaveCurrentPort':         {'label':'Save current serial port',        'call':Mctl.SaveCurrentPort},
     'StartMessage':            {'label':'Start message handler',           'call':MenuStartMessage},
